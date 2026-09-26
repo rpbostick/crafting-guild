@@ -1,7 +1,7 @@
 # Colorwright: the rest of plan 19 (3a-2, 3b, 3c-2) and the Option C spike
 
-**In flight right now** (2026-09-26 12:58 MDT; rewrite at every dispatch):
-Three builders: `cw-3c2` (task-3c2.md, $10, ports 8796-8799, since 12:49); `cw-optc-build` (task-optc-build.md, $14, ports 8790-8795); `cw-hijab-spike` (task-hijab-spike.md, $7, report only). Option C spike merged `e300a5a`. When each ends: review, preview (3c-2 and optc-build are visible; copy the db before optc-build merges), merge. Then hats round 2 (task to write; after 3c-2 and optc-build), and the Hijab spike's questions to Patrick.
+**In flight right now** (2026-09-26 15:04 MDT; rewrite at every dispatch):
+`cw-optc-build` fix round 1 (task-optc-build-fix-1.md, $6; Patrick saw black under Twists' front hair on :8801); then re-review, preview for Patrick, db copy, merge. `cw-heads-spike` (task-heads-spike.md, $12, report only) running. Hijab spike merged `98ae0df`. Next: dispatch `cw-hats2` (task-hats-round2.md) after optc-build merges (both touch the manifest and logic.js).
 
 ## Requirements (from v1 `plans/backlog-plan-19.md` and `backlog-plan-18.md`; Patrick's choices there are settled)
 - 3a-2: the old `scripts/*-e2e-check.js` that guard features that still matter work with the carousel rows (a shared find-a-tile helper); one-off investigation scripts are retired with a note naming their last valid commit. Nothing still defaults to :8792.
