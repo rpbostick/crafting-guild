@@ -19,3 +19,6 @@ Guesses to check with Patrick at the spike: how many head styles (the spike prop
 
 ## Done when
 Every hair on every head style, every hat on every head + hair, checked by Patrick on a preview.
+
+## Decisions
+- 2026-09-26: **9 head styles** (the 2-preview-px threshold), Patrick: "go with 9 head styles". Given before the part-2 README was finished; the build uses the spike's 9-style grouping.
