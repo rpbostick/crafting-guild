@@ -1,7 +1,7 @@
 # Colorwright: the rest of plan 19 (3a-2, 3b, 3c-2) and the Option C spike
 
-**In flight right now** (2026-09-26 11:35 MDT; rewrite at every dispatch):
-`cw-3b` (budget $14, ports 8796-8799) running since 11:09. `cw-3a2` fix round 1 (`task-3a2-fix-1.md`, budget $5, ports 8794-8795) dispatched 11:35 after two fix-first reviews (stale requirements.md passages; e2e checks write to the real db). `cw-optc` spike (budget $6) running since 11:32. Next: re-review and merge 3a-2; 3b to :8801 for Patrick, then db copy and merge; then task-3c2.md; the spike report to Patrick.
+**In flight right now** (2026-09-26 12:49 MDT; rewrite at every dispatch):
+`cw-3c2` (task-3c2.md, budget $10, ports 8796-8799) dispatched 12:49. `cw-optc` spike in review; after merge, dispatch `cw-optc-build` (task-optc-build.md, ports 8790-8795) in parallel with 3c-2 (pipeline vs frontend). Then hats round 2 (after both), then the Hijab/Hat Hip spike.
 
 ## Requirements (from v1 `plans/backlog-plan-19.md` and `backlog-plan-18.md`; Patrick's choices there are settled)
 - 3a-2: the old `scripts/*-e2e-check.js` that guard features that still matter work with the carousel rows (a shared find-a-tile helper); one-off investigation scripts are retired with a note naming their last valid commit. Nothing still defaults to :8792.
@@ -19,3 +19,15 @@ Guesses: faces' neutral head is a grey silhouette behind the face, not a real he
 
 ## Done when
 All four merged (the spike's evidence with its build, or on its own if Patrick defers the build), each visible one confirmed by Patrick on a preview.
+
+
+## Log
+- 2026-09-26: 3a-2 merged `c93514f` (reviewed `136e1c6`; build $8.66 + fix $2.57; reviews $1.07, $1.13, $1.1; two fix-first rounds for stale requirements.md passages, and the e2e checks now run on a temp db via `COLORWRIGHT_DB`). 3b merged `84511dd` (reviewed `b0c21a8`; build $9.23, review $1.20); Patrick checked it on :8801: keep mid-thigh (close-up floor 20 px, set by the orchestrator on the branch), "looks good, merge". db copied to `backend/colorwright.db.2026-09-26-3b.bak`. The live :8800 was not running.
+- Option C spike `1d01865` ($4.87). Patrick's choices (2026-09-26):
+  - Bear: hair colour, cap + beard.
+  - Tips: hand boxes per style.
+  - Hair above the Beanie: tuck hair above the crown line (sides and below stay).
+  - Sliver scan fix: yes. Beanie-head ear: moot, see next.
+  - **No Beanie head at all**: "we use the beanie as a clothing article that can go onto other heads. if there is a hair style that the beanie would fit, it can replace those in the hat section." So the Hat Beanie head leaves the Hair row. The live db has 0 saved looks; a stale session or look pointing at it falls back to the closest head (Short 2, per the spike) + the Beanie hat.
+  - **Hijab and Turban become hats**: "can we separate the hijab and turban from the head so they can become hats?" Turban is already cut as a hat (matches No Hair 1 + Turban): its head leaves the Hair row. The Hijab needs a spike (it hides all hair, its drape is fitted per pose). Hat Hip is the same kind of head: the spike covers it and Patrick decides.
+- Steps added: 5. `task-optc-build.md` (Bear, tips, scan). 6. Hats round 2: Beanie and Turban heads out, hair tucked under the Beanie crown. 7. Hijab (and Hat Hip) as hats: spike, then build.
