@@ -28,3 +28,8 @@ Use one command per Bash call. Commands you may run: `node ...`, `bash scripts/r
 - The tests pass and were shown failing against master; the scan reads 0.
 - Renders committed and described.
 - `bash scripts/run-all-tests.sh` exits 0 and its log is committed.
+
+## Carried from the spike's review (fix in `scripts/evidence/option-c/README.md`)
+- Line 16 says "up to about 25 polygons" for tips, Q5 says "up to 31 boxes": use the number you actually drew, or say 25 = 31 minus the ear pieces.
+- Line 29 says the beanie measures agree "within 8 units²"; `beanie.log` shows 0.1. Match the log.
+- Save the before-fix `scan_slivers.py` run (exit 1, 10 found) as a log beside `slivers.log`.
