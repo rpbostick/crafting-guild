@@ -50,7 +50,7 @@ case "$cmd" in
       echo "PROJECT_BRANCH=\"$branch\"          # the branch builders branch from and merges land on"
       echo "TEST_CMD=\"$tests\"   # run from the repo root; empty = no test gate"
       echo "# Extra Bash grants for builders (Claude Code permission rules). Builders already get git add/commit/rm/mv,"
-      echo "# ls/cat/grep/head/tail/wc/diff/mkdir/chmod/expr/date and the test command. Add what your tests and tools need."
+      echo "# ls/cat/grep/head/tail/wc/diff/mkdir/chmod/expr/date, bash -n, git grep and the test command. Add what your tests and tools need."
       echo "EXTRA_TOOLS=(${extras[*]})"
       echo "# Command that serves the app for a preview; {port} is replaced. Used by: ws serve <worktree|main> <port>"
       echo "PREVIEW_CMD=\"$preview\""
