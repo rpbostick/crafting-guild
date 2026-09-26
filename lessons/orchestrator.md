@@ -19,3 +19,4 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - Never `cd` in a Bash call. It moves this session's working directory.
 - Review once per branch, before merge. A fix round is for a real defect or something he would see; suggestions carry forward in the next task on that code.
 - A merge is pinned to the reviewed SHA. If the branch moved after the review, review again.
+- `ws merge` needs the project's main checkout free of modified tracked files; untracked files are fine. v1's hooks used to append to `reviews/checklist-proposals.md` behind your back; check `git status -uno` first.

@@ -18,7 +18,7 @@ if $need_review; then
 fi
 [ -d "$wt" ] && [ "$(git -C "$wt" status --short -uno | wc -l)" -gt 0 ] && die "worktree $wt has modified tracked files"
 [ "$(git -C "$PROJECT_PATH" rev-parse --abbrev-ref HEAD)" = "$PROJECT_BRANCH" ] || die "$PROJECT_PATH is not on $PROJECT_BRANCH"
-[ "$(git -C "$PROJECT_PATH" status --short | wc -l)" -eq 0 ] || die "$PROJECT_PATH has uncommitted changes"
+[ "$(git -C "$PROJECT_PATH" status --short -uno | wc -l)" -eq 0 ] || die "$PROJECT_PATH has modified tracked files; commit or discard first"
 has_remote=false
 if git -C "$PROJECT_PATH" remote get-url origin >/dev/null 2>&1; then
   has_remote=true; timeout 20 git -C "$PROJECT_PATH" fetch origin -q || die "fetch failed"
