@@ -107,7 +107,7 @@ start_sha=$(git -C "$wt" rev-parse HEAD)
   "$WS/scripts/check-result.sh" --project "$SLUG" --since "$start_sha" "$name" > "$RUNS/$name.result.txt" 2>&1 || true
   [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] && sed -i "1i TIMEOUT after $tmo (exit $rc); partial work may be in $wt" "$RUNS/$name.result.txt"
   rm -f "$RUNS/$name.pid"
-) &
+) < /dev/null > /dev/null 2>&1 &
 echo $! > "$RUNS/$name.pid"
 echo "dispatched $name (pid $!) in $wt"
 echo "  log:    runs/$SLUG/$name.jsonl"
