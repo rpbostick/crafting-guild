@@ -16,6 +16,8 @@ ws runs [slug]                  runs and their results
 ws review [flags] <name>        review the branch; prints the verdict and the SHA to merge
 ws merge <name> <sha>           merge a reviewed branch, test, push, clean up
 ws stop <name>                  stop a running builder
+ws serve <name|main> [port]     start the project's preview server from a worktree (or the main checkout)
+ws serve stop [name|main]       stop it;  ws serve list
 USAGE
 }
 slugify() { basename "$1" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//'; }
@@ -34,19 +36,38 @@ case "$cmd" in
       [ -z "$tests" ] && [ -f "$path/pytest.ini" ] && tests="pytest"
       [ -z "$tests" ] && [ -f "$path/package.json" ] && grep -q '"test"' "$path/package.json" && tests="npm test"
     fi
-    printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="%s"\nTEST_CMD="%s"\n' "$path" "$branch" "$tests" > "$WS/projects/$slug.conf"
+    # Tool grants the builders will need beyond git and the test command, guessed from the repo layout.
+    extras=()
+    for v in "$path"/.venv "$path"/*/.venv; do
+      [ -d "$v" ] || continue; rel="${v#"$path"/}"
+      extras+=("\"Bash($rel/bin/python *)\"" "\"Bash($rel/bin/python3 *)\"" "\"Bash($rel/bin/pytest *)\"")
+    done
+    [ -d "$path/node_modules" ] || [ -d "$path"/*/node_modules ] 2>/dev/null && extras+=("\"Bash(node *)\"" "\"Bash(npm test*)\"" "\"Bash(npx *)\"")
+    preview=""; [ -f "$path/backend/app/main.py" ] && preview="cd backend && .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port {port}"
+    {
+      echo "# Registered by ws init on $(date +%Y-%m-%d). Edit by hand; every key is read by scripts/lib.sh."
+      echo "PROJECT_PATH=\"$path\""
+      echo "PROJECT_BRANCH=\"$branch\"          # the branch builders branch from and merges land on"
+      echo "TEST_CMD=\"$tests\"   # run from the repo root; empty = no test gate"
+      echo "# Extra Bash grants for builders (Claude Code permission rules). Builders already get git add/commit/rm/mv,"
+      echo "# ls/cat/grep/head/tail/wc/diff/mkdir/chmod/expr/date and the test command. Add what your tests and tools need."
+      echo "EXTRA_TOOLS=(${extras[*]})"
+      echo "# Command that serves the app for a preview; {port} is replaced. Used by: ws serve <worktree|main> <port>"
+      echo "PREVIEW_CMD=\"$preview\""
+    } > "$WS/projects/$slug.conf"
     mkdir -p "$WS/plans/$slug" "$WS/runs/$slug"
-    excl="$(git -C "$path" rev-parse --git-common-dir)/info/exclude"; grep -qx '.worktrees' "$excl" 2>/dev/null || echo ".worktrees" >> "$excl"
+    excl="$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/info/exclude"; grep -qx '.worktrees' "$excl" 2>/dev/null || echo ".worktrees" >> "$excl"
     echo "registered $slug: $path (branch $branch; tests: ${tests:-none})"
     # v1 left per-commit review and post-merge hooks wired into .git/hooks; v2 reviews per branch and tests on merge.
-    hooks="$(git -C "$path" rev-parse --git-common-dir)/hooks"; found=()
+    hooks="$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/hooks"; found=()
     for h in post-commit post-merge; do [ -f "$hooks/$h" ] && grep -q 'claude/hooks' "$hooks/$h" && found+=("$h"); done
-    [ -f "$(git -C "$path" rev-parse --git-common-dir)/agentic-workspace-root" ] && found+=("agentic-workspace-root")
+    [ -f "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/agentic-workspace-root" ] && found+=("agentic-workspace-root")
     if [ ${#found[@]} -gt 0 ]; then
       echo "v1 hooks found in $hooks: ${found[*]}"
-      if $yes || { read -r -p "disable them (renamed *.v1-disabled)? [y/N] " a; [ "$a" = y ]; }; then
+      if ! $yes && [ ! -t 0 ]; then echo "not a terminal; leaving them. Disable later with: ws init $path --yes"; found=(); fi
+      if [ ${#found[@]} -gt 0 ] && { $yes || { read -r -p "disable them (renamed *.v1-disabled)? [y/N] " a; [ "$a" = y ]; }; }; then
         for h in "${found[@]}"; do
-          if [ "$h" = agentic-workspace-root ]; then mv "$(git -C "$path" rev-parse --git-common-dir)/$h" "$(git -C "$path" rev-parse --git-common-dir)/$h.v1-disabled"; else mv "$hooks/$h" "$hooks/$h.v1-disabled"; fi
+          if [ "$h" = agentic-workspace-root ]; then mv "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/$h" "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/$h.v1-disabled"; else mv "$hooks/$h" "$hooks/$h.v1-disabled"; fi
         done; echo "disabled; pre-commit (syntax check) left in place"
       fi
     fi ;;
@@ -75,6 +96,22 @@ case "$cmd" in
       n=$(basename "$f"); n="${n%.result.txt}"; n="${n%.pid}"
       case "$f" in *.pid) kill -0 "$(cat "$f")" 2>/dev/null && echo "  $n: RUNNING (pid $(cat "$f"))" ;; *) echo "  $n: $(head -n1 "$f" | cut -c1-100)  [$(tail -n1 "$f" | cut -c1-60)]" ;; esac
     done ;;
+  serve)
+    load_project ""; [ -n "$PREVIEW_CMD" ] || die "no PREVIEW_CMD in projects/$SLUG.conf"
+    sub="${1:-}"
+    case "$sub" in
+      list) for sf in "$RUNS"/serve-*.pid; do [ -f "$sf" ] || continue; sp=$(cut -d' ' -f1 "$sf"); kill -0 "$sp" 2>/dev/null && echo "$(basename "$sf" .pid | sed s/^serve-//) on :$(cut -d' ' -f2 "$sf") (pid $sp)"; done ;;
+      stop) what="${2:-main}"; sf="$RUNS/serve-$what.pid"; [ -f "$sf" ] || die "nothing serving for $what"; sp=$(cut -d' ' -f1 "$sf")
+            pkill -TERM -P "$sp" 2>/dev/null; kill -TERM "$sp" 2>/dev/null; sleep 1; pkill -KILL -P "$sp" 2>/dev/null; rm -f "$sf"; echo "stopped $what" ;;
+      "") die "usage: ws serve <worktree-name|main> [port] | ws serve stop [name] | ws serve list" ;;
+      *) what="$sub"; port="${2:-}"
+         if [ "$what" = main ]; then dir="$PROJECT_PATH"; [ -z "$port" ] && port=8800; else dir="$(worktree_dir "$what")"; [ -d "$dir" ] || die "no worktree $what"; [ -z "$port" ] && port=8801; fi
+         sf="$RUNS/serve-$what.pid"; [ -f "$sf" ] && kill -0 "$(cut -d' ' -f1 "$sf")" 2>/dev/null && die "$what is already serving (ws serve stop $what)"
+         cmd="${PREVIEW_CMD//\{port\}/$port}"
+         ( cd "$dir" && exec bash -c "$cmd" ) > "$RUNS/serve-$what.log" 2>&1 &
+         echo "$! $port" > "$sf"; sleep 2
+         if kill -0 "$!" 2>/dev/null; then echo "serving $what at http://127.0.0.1:$port/ (log: runs/$SLUG/serve-$what.log; stop: ws serve stop $what)"; else rm -f "$sf"; tail -n 20 "$RUNS/serve-$what.log"; die "server exited"; fi ;;
+    esac ;;
   stop)
     name="${1:?ws stop <name>}"; load_project ""; pf="$RUNS/$name.pid"; [ -f "$pf" ] || die "no running $name"
     pkill -TERM -P "$(cat "$pf")" 2>/dev/null; sleep 2; pkill -KILL -P "$(cat "$pf")" 2>/dev/null; echo "stopped $name; its worktree is untouched" ;;

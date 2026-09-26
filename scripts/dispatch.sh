@@ -2,6 +2,9 @@
 # Run one builder on one task, headless, in its own worktree on branch agent/<name>.
 # Usage: dispatch.sh [--project slug] [--budget USD] [--model M] [--effort E] [--timeout 90m]
 #                    [--allow "Bash(cmd *)"]... [--dry-run] <name> <task-file>
+# The builder gets: the builder sheet, lessons/builder.md, the task file, a grant to edit inside its
+# worktree and commit on its branch plus the project's test command and EXTRA_TOOLS, a budget, a timeout,
+# and a JSON result schema. Logs to runs/<slug>/<name>.jsonl; the result check lands in <name>.result.txt.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 slug="" budget="$WS_DEFAULT_BUDGET" model="$WS_MODEL" effort="$WS_EFFORT" tmo="$WS_DEFAULT_TIMEOUT" dry=false; extra=()
@@ -29,7 +32,7 @@ if [ -f "$RUNS/$name.pid" ] && kill -0 "$(cat "$RUNS/$name.pid")" 2>/dev/null; t
 # Worktree: create on a fresh branch from the main branch, or reuse an existing one (a resume).
 if [ ! -d "$wt" ]; then
   mkdir -p "$WT_ROOT"
-  grep -qx '.worktrees' "$PROJECT_PATH/.git/info/exclude" 2>/dev/null || echo ".worktrees" >> "$(git -C "$PROJECT_PATH" rev-parse --git-common-dir)/info/exclude"
+  grep -qx '.worktrees' "$PROJECT_PATH/.git/info/exclude" 2>/dev/null || echo ".worktrees" >> "$(git -C "$PROJECT_PATH" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
   if git -C "$PROJECT_PATH" show-ref --verify --quiet "refs/heads/$br"; then
     git -C "$PROJECT_PATH" worktree add -q "$wt" "$br"
   else
@@ -56,9 +59,12 @@ fi
 TOOLS=(Read Grep Glob "Edit(./**)"
   "Bash(git status*)" "Bash(git diff*)" "Bash(git log*)" "Bash(git show*)" "Bash(git rev-parse*)" "Bash(git ls-files*)"
   "Bash(git add *)" "Bash(git commit *)" "Bash(git branch --show-current)" "Bash(git checkout -- *)" "Bash(git merge $PROJECT_BRANCH)"
-  "Bash(ls *)" "Bash(wc *)" "Bash(head *)" "Bash(tail *)" "Bash(mkdir *)" "Bash(expr *)" "Bash(date *)" "Bash(diff *)")
+  "Bash(git rm *)" "Bash(git mv *)" "Bash(ls *)" "Bash(cat *)" "Bash(grep *)" "Bash(wc *)" "Bash(head *)" "Bash(tail *)"
+  "Bash(mkdir *)" "Bash(chmod *)" "Bash(expr *)" "Bash(date *)" "Bash(diff *)")
 [ -n "$TEST_CMD" ] && TOOLS+=("Bash($TEST_CMD)" "Bash($TEST_CMD *)")
-TOOLS+=("${extra[@]}")
+# Per-project extras from projects/<slug>.conf (EXTRA_TOOLS), then this dispatch's --allow flags.
+[ ${#EXTRA_TOOLS[@]} -gt 0 ] && TOOLS+=("${EXTRA_TOOLS[@]}")
+[ ${#extra[@]} -gt 0 ] && TOOLS+=("${extra[@]}")
 DENY=("Bash(git push *)" "Bash(git -c *)" "Bash(git config *)" "Bash(git * --output*)" "Bash(git reset --hard *)" "Bash(git rebase *)" "Bash(git worktree *)")
 
 prompt="You are a headless builder launched by agentic-workspace v2. Working directory: $wt (a git worktree of $PROJECT_PATH on branch $br). Do only the task below, then answer with the JSON result.

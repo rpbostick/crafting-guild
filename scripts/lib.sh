@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Shared helpers. Source, don't run.
+# Shared helpers. Source, don't run. Every script starts with: . "$(dirname "$0")/lib.sh"
 WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=../config.sh
 . "$WS/config.sh"
 die() { echo "ws: $*" >&2; exit 1; }
 note() { echo "ws: $*" >&2; }
-now_local() { TZ="$WS_TZ" date "+%Y-%m-%d %H:%M %Z"; }
+now_local() { if [ -n "${WS_TZ:-}" ]; then TZ="$WS_TZ" date "+%Y-%m-%d %H:%M %Z"; else date "+%Y-%m-%d %H:%M %Z"; fi; }
 
-# The active project: an explicit slug, else state/current.
+# The active project: an explicit slug, else state/current (written by `ws <slug>`).
 resolve_slug() {
   local slug="${1:-}"
   if [ -z "$slug" ] && [ -f "$WS/state/current" ]; then slug="$(head -n1 "$WS/state/current")"; fi
@@ -15,9 +15,11 @@ resolve_slug() {
   [ -f "$WS/projects/$slug.conf" ] || die "unknown project '$slug' (see projects/; register with: ws init <path>)"
   echo "$slug"
 }
+# Loads projects/<slug>.conf into PROJECT_PATH, PROJECT_BRANCH, TEST_CMD, EXTRA_TOOLS (array), PREVIEW_CMD,
+# and sets SLUG, RUNS (this project's log dir) and WT_ROOT (where its worktrees go).
 load_project() {
   SLUG="$(resolve_slug "${1:-}")"
-  PROJECT_PATH="" PROJECT_BRANCH="master" TEST_CMD=""
+  PROJECT_PATH="" PROJECT_BRANCH="master" TEST_CMD="" PREVIEW_CMD=""; EXTRA_TOOLS=()
   # shellcheck disable=SC1090
   . "$WS/projects/$SLUG.conf"
   [ -d "$PROJECT_PATH/.git" ] || [ -f "$PROJECT_PATH/.git" ] || die "project path $PROJECT_PATH is not a git repo"
@@ -27,6 +29,5 @@ load_project() {
 worktree_dir() { echo "$WT_ROOT/$1"; }
 branch_of() { echo "agent/$1"; }
 short() { git -C "$PROJECT_PATH" rev-parse --short "$1" 2>/dev/null || echo "$1"; }
-
-# Read the structured result out of a stream-json log. Prints JSON or nothing.
+# The final `result` event of a stream-json log, or nothing if the run has not ended.
 result_json() { grep '"type":"result"' "$1" 2>/dev/null | tail -1; }

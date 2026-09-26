@@ -55,6 +55,10 @@ for pidf in "$RUNS"/*.pid; do
   fi
 done
 [ "$running" -eq 0 ] && echo "  no builder running"
+for sf in "$RUNS"/serve-*.pid; do
+  [ -f "$sf" ] || continue; sp=$(cut -d' ' -f1 "$sf"); port=$(cut -d' ' -f2 "$sf"); what=$(basename "$sf" .pid); what="${what#serve-}"
+  if kill -0 "$sp" 2>/dev/null; then echo "  SERVING $what on :$port (pid $sp; stop: ws serve stop $what)"; else rm -f "$sf"; fi
+done
 for r in $(ls -t "$RUNS"/*.result.txt 2>/dev/null | head -5); do
   n=$(basename "$r" .result.txt); echo "  last: $n: $(head -n1 "$r" | cut -c1-110)"
 done
@@ -70,6 +74,7 @@ done
 echo
 echo "--- lessons ---"
 echo "  read lessons/orchestrator.md before dispatching ($(grep -c '^- ' "$WS/lessons/orchestrator.md") lines)"
+for lf in "$WS"/lessons/*.md; do n=$(wc -l < "$lf"); [ "$n" -gt "${WS_LESSONS_CAP:-40}" ] && echo "  ${lf#"$WS"/} is $n lines, over the cap of $WS_LESSONS_CAP: prune it before adding to it"; done
 $brief && exit 0
 echo
 echo "--- workspace ---"
