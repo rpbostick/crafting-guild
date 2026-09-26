@@ -1,7 +1,7 @@
 # Colorwright: the rest of plan 19 (3a-2, 3b, 3c-2) and the Option C spike
 
-**In flight right now** (2026-09-26 11:37 MDT; rewrite at every dispatch):
-`cw-3b` (budget $14, ports 8796-8799) running since 11:09. `cw-3a2` fix round 1 (`task-3a2-fix-1.md`, budget $5, ports 8794-8795) dispatched 11:37 after two fix-first reviews (stale requirements.md passages; e2e checks write to the real db). `cw-optc` spike (budget $6) running since 11:32. Next: re-review and merge 3a-2; 3b to :8801 for Patrick, then db copy and merge; then task-3c2.md; the spike report to Patrick.
+**In flight right now** (2026-09-26 11:35 MDT; rewrite at every dispatch):
+`cw-3b` (budget $14, ports 8796-8799) running since 11:09. `cw-3a2` fix round 1 (`task-3a2-fix-1.md`, budget $5, ports 8794-8795) dispatched 11:35 after two fix-first reviews (stale requirements.md passages; e2e checks write to the real db). `cw-optc` spike (budget $6) running since 11:32. Next: re-review and merge 3a-2; 3b to :8801 for Patrick, then db copy and merge; then task-3c2.md; the spike report to Patrick.
 
 ## Requirements (from v1 `plans/backlog-plan-19.md` and `backlog-plan-18.md`; Patrick's choices there are settled)
 - 3a-2: the old `scripts/*-e2e-check.js` that guard features that still matter work with the carousel rows (a shared find-a-tile helper); one-off investigation scripts are retired with a note naming their last valid commit. Nothing still defaults to :8792.
