@@ -1,7 +1,7 @@
 # Colorwright: the rest of plan 19 (3a-2, 3b, 3c-2) and the Option C spike
 
-**In flight right now** (2026-09-26 15:04 MDT; rewrite at every dispatch):
-`cw-optc-build` fix round 1 (task-optc-build-fix-1.md, $6; Patrick saw black under Twists' front hair on :8801); then re-review, preview for Patrick, db copy, merge. `cw-heads-spike` (task-heads-spike.md, $12, report only) running. Hijab spike merged `98ae0df`. Next: dispatch `cw-hats2` (task-hats-round2.md) after optc-build merges (both touch the manifest and logic.js).
+**In flight right now** (2026-09-26 15:57 MDT; rewrite at every dispatch):
+Two builders. `cw-optc-build` fix round 2 (task-optc-build-fix-2.md, $7: six ear-top wedges; Twists brow knobs in hair colour with a thin outline, Patrick); then review, preview for Patrick, db copy, merge. `cw-heads-spike` part 2 (task-heads-spike-2.md, $16, report only; plan 20, `plan-20-heads-hair-hats.md`): head styles, hair on each, a big-hair edge; stop for Patrick. Next: `cw-hats2` (task-hats-round2.md) after optc-build merges.
 
 ## Requirements (from v1 `plans/backlog-plan-19.md` and `backlog-plan-18.md`; Patrick's choices there are settled)
 - 3a-2: the old `scripts/*-e2e-check.js` that guard features that still matter work with the carousel rows (a shared find-a-tile helper); one-off investigation scripts are retired with a note naming their last valid commit. Nothing still defaults to :8792.
@@ -40,3 +40,4 @@ All four merged (the spike's evidence with its build, or on its own if Patrick d
   - **Tuck under the Beanie:** hand-drawn tuck regions (a straight line slices big hair, `q4-brim-mask-walking.png`). Drafted on a grid for Patrick before any build; folded into the heads analysis, since tucking depends on how hair and head shapes separate.
   - **Beanie black band:** its own "Hat Accent" colour role, default black.
 - Steps now: 6. hats round 2 (Beanie, Turban, Hat Hip, Hijab heads out; Hat Hip and Hijab as hats; `hides_hair: all` for the Hijab; Beanie accent role; carried items), after optc-build merges. 8. heads analysis spike (report only), in parallel.
+- 2026-09-26: heads analysis part 1 (`773c083`, $6.62; review fix-first on stale Q2 numbers, fixed in part 2). Patrick: keep every head variation as head styles, separate hair from head, all hats on all heads + hairs; Bear a head style that takes hair and hats; redraw big-hair edges under hats. New plan: `plan-20-heads-hair-hats.md`.
