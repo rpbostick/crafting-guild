@@ -20,3 +20,4 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - Review once per branch, before merge. A fix round is for a real defect or something he would see; suggestions carry forward in the next task on that code.
 - A merge is pinned to the reviewed SHA. If the branch moved after the review, review again.
 - `ws merge` needs the project's main checkout free of modified tracked files; untracked files are fine. v1's hooks used to append to `reviews/checklist-proposals.md` behind your back; check `git status -uno` first.
+- `ws merge` refuses any verdict but `merge`. When Patrick overrides a fix-first review, pass `--no-review` (the SHA pin and the test gate still apply) and record his decision in the plan.
