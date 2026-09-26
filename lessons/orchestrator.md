@@ -21,3 +21,5 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - A merge is pinned to the reviewed SHA. If the branch moved after the review, review again.
 - `ws merge` needs the project's main checkout free of modified tracked files; untracked files are fine. v1's hooks used to append to `reviews/checklist-proposals.md` behind your back; check `git status -uno` first.
 - `ws merge` refuses any verdict but `merge`. When Patrick overrides a fix-first review, pass `--no-review` (the SHA pin and the test gate still apply) and record his decision in the plan.
+- A builder that backgrounds a long script loses it when the run ends (cw-heads-spike part 2, 2026-09-26). Tell spikes with long render jobs to run them in the foreground, split if needed.
+- `ws merge` can take over 10 minutes when builders run alongside; run it with `run_in_background`.
