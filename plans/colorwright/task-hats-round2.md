@@ -33,3 +33,7 @@ Not in this build: tucking big hair under the Beanie (hand-drawn regions come fr
 - All tests above pass and were shown failing against master.
 - Renders committed and described.
 - `bash scripts/run-all-tests.sh` exits 0 and its log is committed.
+
+## Carried from the Option C review (small)
+- `pipeline/split_hair_from_head.py:375`: `hand_hair_ink_zone_atom` reads `HAND_HAIR[style].get("outline_exclude", [])`; index the key so a misspelling fails loud (as `tips_atom` does). Line 297: `core =_polygonal(` needs a space.
+- `scripts/evidence/option-c-build/{ear-top,knob-rim,twists-front}-test-before.log`: append the exit code line each run had (it's in that README).
