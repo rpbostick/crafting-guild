@@ -4,9 +4,17 @@
       {
         "matcher": "startup|resume|compact|clear",
         "hooks": [
-          {"type": "command", "command": "\"$CLAUDE_PROJECT_DIR/scripts/cold-start.sh\" --brief 2>&1"}
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/scripts/cold-start.sh\" --brief 2>&1"
+          }
         ]
       }
     ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "\"$CLAUDE_PROJECT_DIR/scripts/statusline.sh\"",
+    "refreshInterval": 5
   }
 }
