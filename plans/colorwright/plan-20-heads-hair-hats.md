@@ -22,3 +22,4 @@ Every hair on every head style, every hat on every head + hair, checked by Patri
 
 ## Decisions
 - 2026-09-26: **9 head styles** (the 2-preview-px threshold), Patrick: "go with 9 head styles". Given before the part-2 README was finished; the build uses the spike's 9-style grouping.
+- 2026-09-26, on the spike's part 2 (`bfeb4df`): **Bear**: hats on Bear now, hair later (Bear stays a head style with its fur; the Hair row greys out on Bear; face-on hair redrawings are a later project). **No earless variants**: the head style's ear is drawn over the hair (some combinations will show an ear where the hair would cover it). **Hair defects fixed once per hair** (Gray Bun's back, Bun 2's wisp, Flat Top Long's sideburn). Earlier today: redraw big-hair edges under hats (all three hats), 9 head styles.
