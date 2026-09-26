@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# agentic-workspace v2 launcher. Run from anywhere; works on any registered project.
+set -uo pipefail
+WS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+. "$WS/scripts/lib.sh"
+usage() {
+  cat <<USAGE
+ws <slug>                       open an orchestrator session for a registered project
+ws init <path> [--tests CMD] [--branch B] [--yes]   register a project (and retire v1 hooks if found)
+ws list                         registered projects
+ws status [slug]                cold-start: ground truth in twenty seconds
+ws dispatch [flags] <name> <task-file>   run a builder (see scripts/dispatch.sh for flags)
+ws wait <name> [minutes]        block until the run finishes; exit 0 if its result checks out
+ws tail <name>                  follow a run's log as readable lines
+ws runs [slug]                  runs and their results
+ws review [flags] <name>        review the branch; prints the verdict and the SHA to merge
+ws merge <name> <sha>           merge a reviewed branch, test, push, clean up
+ws stop <name>                  stop a running builder
+USAGE
+}
+slugify() { basename "$1" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//'; }
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  ""|-h|--help|help) usage ;;
+  list) for f in "$WS"/projects/*.conf; do [ -f "$f" ] || continue; ( . "$f"; printf '%-18s %s (%s)%s\n' "$(basename "$f" .conf)" "$PROJECT_PATH" "$PROJECT_BRANCH" "$( [ "$(head -n1 "$WS/state/current" 2>/dev/null)" = "$(basename "$f" .conf)" ] && echo '  <- current')" ); done ;;
+  init)
+    path="${1:?ws init <path>}"; shift; tests="" branch="" yes=false
+    while [ $# -gt 0 ]; do case "$1" in --tests) tests="$2"; shift 2 ;; --branch) branch="$2"; shift 2 ;; --yes) yes=true; shift ;; *) die "unknown flag $1" ;; esac; done
+    path="$(cd "$path" && pwd -P)"; git -C "$path" rev-parse --git-dir >/dev/null 2>&1 || die "$path is not a git repo"
+    slug="$(slugify "$path")"
+    [ -z "$branch" ] && branch="$(git -C "$path" symbolic-ref --short HEAD 2>/dev/null || echo master)"
+    if [ -z "$tests" ]; then
+      [ -x "$path/scripts/run-all-tests.sh" ] && tests="bash scripts/run-all-tests.sh"
+      [ -z "$tests" ] && [ -f "$path/pytest.ini" ] && tests="pytest"
+      [ -z "$tests" ] && [ -f "$path/package.json" ] && grep -q '"test"' "$path/package.json" && tests="npm test"
+    fi
+    printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="%s"\nTEST_CMD="%s"\n' "$path" "$branch" "$tests" > "$WS/projects/$slug.conf"
+    mkdir -p "$WS/plans/$slug" "$WS/runs/$slug"
+    excl="$(git -C "$path" rev-parse --git-common-dir)/info/exclude"; grep -qx '.worktrees' "$excl" 2>/dev/null || echo ".worktrees" >> "$excl"
+    echo "registered $slug: $path (branch $branch; tests: ${tests:-none})"
+    # v1 left per-commit review and post-merge hooks wired into .git/hooks; v2 reviews per branch and tests on merge.
+    hooks="$(git -C "$path" rev-parse --git-common-dir)/hooks"; found=()
+    for h in post-commit post-merge; do [ -f "$hooks/$h" ] && grep -q 'claude/hooks' "$hooks/$h" && found+=("$h"); done
+    [ -f "$(git -C "$path" rev-parse --git-common-dir)/agentic-workspace-root" ] && found+=("agentic-workspace-root")
+    if [ ${#found[@]} -gt 0 ]; then
+      echo "v1 hooks found in $hooks: ${found[*]}"
+      if $yes || { read -r -p "disable them (renamed *.v1-disabled)? [y/N] " a; [ "$a" = y ]; }; then
+        for h in "${found[@]}"; do
+          if [ "$h" = agentic-workspace-root ]; then mv "$(git -C "$path" rev-parse --git-common-dir)/$h" "$(git -C "$path" rev-parse --git-common-dir)/$h.v1-disabled"; else mv "$hooks/$h" "$hooks/$h.v1-disabled"; fi
+        done; echo "disabled; pre-commit (syntax check) left in place"
+      fi
+    fi ;;
+  status) "$WS/scripts/cold-start.sh" "$@" ;;
+  dispatch) "$WS/scripts/dispatch.sh" "$@" ;;
+  review) "$WS/scripts/review.sh" "$@" ;;
+  merge) "$WS/scripts/merge.sh" "$@" ;;
+  check) "$WS/scripts/check-result.sh" "$@" ;;
+  wait)
+    name="${1:?ws wait <name> [minutes]}"; mins="${2:-120}"; load_project ""
+    for _ in $(seq 1 $((mins*6))); do
+      if [ -f "$RUNS/$name.result.txt" ] && [ ! -f "$RUNS/$name.pid" ]; then cat "$RUNS/$name.result.txt"; grep -q '^FAIL\|^NO RESULT\|^TIMEOUT' "$RUNS/$name.result.txt" && exit 1 || exit 0; fi
+      [ -f "$RUNS/$name.pid" ] || [ -f "$RUNS/$name.jsonl" ] || die "no run named $name"
+      sleep 10
+    done; echo "still running after $mins minutes"; exit 3 ;;
+  tail)
+    name="${1:?ws tail <name>}"; load_project ""
+    tail -n +1 -f "$RUNS/$name.jsonl" | jq -r --unbuffered '
+      if .type=="assistant" then (.message.content[]? | if .type=="text" then "SAY  " + (.text|.[0:160]) elif .type=="tool_use" then "TOOL " + .name + " " + ((.input.command // .input.file_path // .input.pattern // "")|tostring|.[0:120]) else empty end)
+      elif .type=="result" then "DONE cost=$" + ((.total_cost_usd // 0)|tostring) + " " + ((.structured_output.status // .subtype // "")|tostring)
+      elif .type=="system" and .subtype=="permission_denied" then "DENIED " + ((.tool_input.command // .tool_name // "")|tostring|.[0:120])
+      else empty end' 2>/dev/null ;;
+  runs)
+    load_project "${1:-}"; echo "runs for $SLUG:"
+    for f in $(ls -t "$RUNS"/*.result.txt "$RUNS"/*.pid 2>/dev/null); do
+      n=$(basename "$f"); n="${n%.result.txt}"; n="${n%.pid}"
+      case "$f" in *.pid) kill -0 "$(cat "$f")" 2>/dev/null && echo "  $n: RUNNING (pid $(cat "$f"))" ;; *) echo "  $n: $(head -n1 "$f" | cut -c1-100)  [$(tail -n1 "$f" | cut -c1-60)]" ;; esac
+    done ;;
+  stop)
+    name="${1:?ws stop <name>}"; load_project ""; pf="$RUNS/$name.pid"; [ -f "$pf" ] || die "no running $name"
+    pkill -TERM -P "$(cat "$pf")" 2>/dev/null; sleep 2; pkill -KILL -P "$(cat "$pf")" 2>/dev/null; echo "stopped $name; its worktree is untouched" ;;
+  *)
+    slug="$(resolve_slug "$cmd")"; load_project "$slug"
+    echo "$slug" > "$WS/state/current"
+    cd "$WS" && exec claude --add-dir "$PROJECT_PATH" --name "ws $slug" "$@" ;;
+esac
