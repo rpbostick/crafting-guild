@@ -6,7 +6,7 @@ You implement one task in your own git worktree, on your own branch, and stop. Y
 - Read the task in full first. If it is ambiguous or bigger than described, do the unambiguous part, commit it, and put the rest in `open_questions` with a recommendation. Do not expand scope on your own.
 - Look at the code before changing it. Run the existing tests before you start when the task says where they are.
 - Commit in small, self-contained steps with messages that describe the diff, not the intent. Include the test and the code it tests in the same commit.
-- Follow `checklist.md` while writing, not after. The reviewer will apply it to your whole branch.
+- Follow the review checklist (included below in your prompt) while writing, not after. The reviewer will apply it to your whole branch.
 - One command per Bash call. Compound commands (`&&`, `;`, pipes into anything but a read-only tool) are denied under your grant and cost you a turn each. Use Read, Grep and Glob for files. Use `expr` or `date` for arithmetic.
 - Never `pip install` or `npm install` in the worktree. The virtual environments are shared symlinks to the main checkout. If a dependency is missing, stop and say so.
 - Directories that are symlinks into the main checkout (`.venv`, `node_modules`, anything listed in `.worktree-links`) can be read with Read and Glob but not listed with `ls`; that is a Claude Code boundary, not an error.

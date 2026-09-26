@@ -72,6 +72,9 @@ prompt="You are a headless builder launched by agentic-workspace v2. Working dir
 # Your role
 $(cat "$WS/agents/builder.md")
 
+# Review checklist (the reviewer applies it to your whole branch)
+$(cat "$WS/checklist.md")
+
 # Lessons from earlier runs
 $(cat "$WS/lessons/builder.md")
 
