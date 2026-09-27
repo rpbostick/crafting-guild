@@ -1,7 +1,7 @@
 # Colorwright: the rest of plan 19 (3a-2, 3b, 3c-2) and the Option C spike
 
-**In flight right now** (2026-09-27 08:38 MDT; rewrite at every dispatch):
-Three builders. `cw-testspeed` merge-master (light, $4): then merge. `cw-hats3` (task-hats-round3.md, $15, 150m, ports 8790-8795): Beanie like the source art, no hair behind the Hat Hip, its big-hair edges. `cw-mirror` (task-mirror.md, $15, 150m, ports 8796-8799). Both visible: previews for Patrick (:8801, :8802), db copy, merge. Then the wrap-up pass and v1.0.
+**In flight right now** (2026-09-27 10:57 MDT; rewrite at every dispatch):
+`cw-wrapup` (task-wrapup.md, $15, 150m, ports 8790-8795): docs current, clutter out, carried fixes, every e2e check run. Then review, Patrick signs off, merge, tag colorwright `v1.0`. Hats round 3 merged `7969273`.
 
 ## Requirements (from v1 `plans/backlog-plan-19.md` and `backlog-plan-18.md`; Patrick's choices there are settled)
 - 3a-2: the old `scripts/*-e2e-check.js` that guard features that still matter work with the carousel rows (a shared find-a-tile helper); one-off investigation scripts are retired with a note naming their last valid commit. Nothing still defaults to :8792.
