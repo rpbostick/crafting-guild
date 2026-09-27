@@ -24,3 +24,4 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - A builder that backgrounds a long script loses it when the run ends (cw-heads-spike part 2, 2026-09-26). Tell spikes with long render jobs to run them in the foreground, split if needed.
 - `ws merge` can take over 10 minutes when builders run alongside; run it with `run_in_background`.
 - Mark small, low-risk tasks `Track: light` (code + unit tests, no evidence ceremony; the merge gate runs the suite). Evidence formatting doesn't block reviews; `ws merge` refuses a branch that adds home paths or the username, so scrub them on the branch first. (Patrick, 2026-09-26: a two-outfit colour split took an hour of process.)
+- Before scoping a change to "the items that have X", render all candidates and look: the catalog's roles can miss art (prosthesis, 2026-09-26: two outfits had unmarked prostheses; two fix rounds went to the wrong item).
