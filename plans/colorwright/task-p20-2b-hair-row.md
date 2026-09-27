@@ -31,3 +31,7 @@ Commands you may run: `node ...`, `npm test ...`, `bash scripts/run-all-tests.sh
 ## Done when
 - All tests pass and were shown failing against master; the e2e checks pass.
 - `bash scripts/run-all-tests.sh` (or its split runs) exit 0, logs committed; `git status` clean.
+
+## Carried from step 2a
+- Cornrows 2's gaps between braids were skin-coloured and are now holes in the hair item. Show it on the preview; if it reads wrong, add a role for them (e.g. `hair-highlight`, default the old skin tone) rather than filling with the hair colour.
+- Hair drawn in the old heads' face ink is in no hair item: Cornrows' braid ends (~755 atom units²), Medium-Bangs-2 (~263), Mohawk-2 (~209). Put that ink into the hair items (as `hair-outline`) so it isn't lost, with a test point each.
