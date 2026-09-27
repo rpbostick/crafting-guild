@@ -6,6 +6,8 @@ You open one Claude Code session here and point it at a project. That session pl
 
 It is the successor to [agentic-workspace](https://github.com/rpbostick/agentic-workspace), cut down to the parts that measurably produced product. No servers, no Docker, no cron, no MCP, about 700 lines of shell and a few pages of prose. The reasoning is in the [research repo](https://github.com/rpbostick/agentic-framework-research).
 
+**Status, 2026-09-27.** It has built one app end to end: [colorwright](https://github.com/rpbostick/colorwright) went from a paused fix to a tagged `v1.0` in 42 hours through 37 builder runs, 22 reviews and 22 gated merges, with zero context compactions in a 25-hour orchestrator session and zero usage-limit stops. Nine of the 87 commits in that stretch changed the tool; the rest were plans and tasks for the product. The measured cost was in the project, not the tool: builders spent 48% of their wall time running tests, and the merge gate grew from 6 to 28 minutes for a day before a single builder run fixed the suite. Report 11 in the research repo has the numbers and five small changes to make here before the first outside install (builders run only the tests for what they touched; the merge prints and warns on suite time; evidence stays out of the product repo; the timeout follows the track; the parallel-builder note names CPU, not the limit).
+
 ## Install
 
 Requirements: [Claude Code](https://code.claude.com) 2.1.257 or later, `git`, `jq`, GNU `timeout`. Linux or macOS.
