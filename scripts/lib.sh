@@ -7,9 +7,11 @@ die() { echo "ws: $*" >&2; exit 1; }
 note() { echo "ws: $*" >&2; }
 now_local() { if [ -n "${WS_TZ:-}" ]; then TZ="$WS_TZ" date "+%Y-%m-%d %H:%M %Z"; else date "+%Y-%m-%d %H:%M %Z"; fi; }
 
-# The active project: an explicit slug, else state/current (written by `ws <slug>`).
+# The active project: an explicit slug, else WS_PROJECT (set by `ws <slug>` for that session, so a second session
+# on another project cannot redirect this one), else state/current (the last `ws <slug>`, for terminals).
 resolve_slug() {
   local slug="${1:-}"
+  [ -z "$slug" ] && slug="${WS_PROJECT:-}"
   if [ -z "$slug" ] && [ -f "$WS/state/current" ]; then slug="$(head -n1 "$WS/state/current")"; fi
   [ -n "$slug" ] || die "no project given and none selected (run: ws <slug>, or ws list)"
   [ -f "$WS/projects/$slug.conf" ] || die "unknown project '$slug' (see projects/; register with: ws init <path>)"

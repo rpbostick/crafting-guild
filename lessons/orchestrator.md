@@ -17,6 +17,7 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - When a run stops on the usage limit, its uncommitted work is still in the worktree. Resume with a task that says so and dispatch at the stated reset time.
 - Do not edit files an open branch also touches. Put the edit in that branch's task.
 - Never `cd` in a Bash call. It moves this session's working directory.
+- Two sessions, two projects: `state/current` is one file, so the second `ws <slug>` moves it under the first. Sessions are pinned by `WS_PROJECT` since 2.1.2, but a session started any other way is not; when cold-start prints `CONFLICT` or `not pinned`, use `--project` on every command (found 2026-09-27 testing 2.1.0 from a terminal).
 - Review once per branch, before merge. A fix round is for a real defect or something he would see; suggestions carry forward in the next task on that code.
 - A merge is pinned to the reviewed SHA. If the branch moved after the review, review again.
 - `ws merge` needs the project's main checkout free of modified tracked files; untracked files are fine. v1's hooks used to append to `reviews/checklist-proposals.md` behind your back; check `git status -uno` first.

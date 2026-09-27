@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.1.2 (2026-09-27)
+
+- **A session is pinned to its project.** `ws <slug>` sets `WS_PROJECT` for the Claude Code session it opens, and every script prefers it over `state/current`, so a second session opened on another project no longer redirects the first. `state/current` still serves terminals. Cold-start prints a `selected:` line saying which one is in force, `CONFLICT` when `state/current` has moved to another project, and the other registered projects. `CLAUDE.md` tells the orchestrator to check that line before the first dispatch, review, merge, wait or stop, and to use `--project` when the plan's project is not the selected one.
+
 ## 2.1.1 (2026-09-27)
 
 - **`ws --project <slug> <command>`.** `wait`, `tail`, `runs`, `stop` and `serve` used the selected project (`state/current`) and had no way to name another; `dispatch`, `review`, `merge` and `check` already took `--project` but only after the subcommand. A leading `--project` now applies to every subcommand, and `status` too. Found while testing 2.1.0 on a scratch repo from a terminal whose selected project was colorwright: `ws wait` looked in the wrong `runs/` folder and said the run did not exist.

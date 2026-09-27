@@ -27,7 +27,8 @@ projects/<slug>.conf    one registered project: path, branch, TEST_CMD, EXTRA_TO
 plans/<slug>/           plans and task files, tracked here so the product repo stays clean.
 runs/<slug>/            logs, results, reviews, server pids, and evidence/<name>/ from each merged builder. Not tracked.
 VERSION, CHANGELOG.md   the version `ws version` prints, and the notes for each one.
-state/current           the selected project. Not tracked.
+state/current           the last project opened with `ws <slug>`; what a terminal acts on. Not tracked. A session is
+                        pinned to its own project by WS_PROJECT (set by `ws <slug>`), which wins over this file.
 ```
 
 ## Where to change what

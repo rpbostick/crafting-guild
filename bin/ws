@@ -123,5 +123,5 @@ case "$cmd" in
   *)
     slug="$(resolve_slug "$cmd")"; load_project "$slug"
     echo "$slug" > "$WS/state/current"
-    cd "$WS" && exec claude --add-dir "$PROJECT_PATH" --name "ws $slug" "$@" ;;
+    cd "$WS" && WS_PROJECT="$slug" exec claude --add-dir "$PROJECT_PATH" --name "ws $slug" "$@" ;;
 esac

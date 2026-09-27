@@ -22,6 +22,9 @@ out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/light.md" 2
 [ "$("$WS/bin/ws" version)" = "agentic-workspace v$(cat "$WS/VERSION")" ] && echo "version ok"
 "$WS/bin/ws" --project "$slug" runs | grep -q "runs for $slug:" && echo "--project ok"
 { "$WS/bin/ws" --project "$slug" wait nosuchrun 1 || true; } 2>&1 | grep -q 'no run named' && echo "--project wait ok"
+out=$(WS_PROJECT="$slug" "$WS/bin/ws" runs 2>&1 || true); grep -q "runs for $slug:" <<< "$out" && echo "WS_PROJECT ok"
+out=$(WS_PROJECT="$slug" "$WS/scripts/cold-start.sh" --brief 2>&1 || true); grep -q "selected: $slug, pinned" <<< "$out" && echo "pinned ok"
+grep -q 'CONFLICT: state/current' <<< "$out" && echo "conflict warning ok (state/current is on another project during this test)" || true
 cs=$("$WS/scripts/cold-start.sh" --brief "$slug"); grep -q "project: $slug" <<< "$cs" && echo "cold-start ok"
 git -C "$T" worktree remove --force "$T/.worktrees/demo"; rm -f "$WS/projects/$slug.conf"; rm -rf "$WS/plans/$slug" "$WS/runs/$slug"
 echo "selftest passed"

@@ -5,6 +5,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 brief=false; [ "${1:-}" = "--brief" ] && brief=true && shift
 slug="${1:-}"
+[ -z "$slug" ] && slug="${WS_PROJECT:-}"
 [ -z "$slug" ] && [ -f "$WS/state/current" ] && slug="$(head -n1 "$WS/state/current")"
 echo "=== ws cold-start $(now_local) (v$(cat "$WS/VERSION" 2>/dev/null || echo ?)) ==="
 if [ -z "$slug" ] || [ ! -f "$WS/projects/$slug.conf" ]; then
@@ -14,6 +15,12 @@ if [ -z "$slug" ] || [ ! -f "$WS/projects/$slug.conf" ]; then
 fi
 load_project "$slug"
 echo "project: $SLUG at $PROJECT_PATH (branch $PROJECT_BRANCH; tests: ${TEST_CMD:-none})"
+# Which project every ws command in this session will act on, and whether another session has moved the selection.
+if [ -n "${WS_PROJECT:-}" ]; then echo "selected: $WS_PROJECT, pinned to this session (WS_PROJECT)"; else echo "selected: $SLUG via state/current (not pinned: a terminal, or a session not started with ws <slug>)"; fi
+cur=$(head -n1 "$WS/state/current" 2>/dev/null || true)
+[ -n "${WS_PROJECT:-}" ] && [ -n "$cur" ] && [ "$cur" != "$WS_PROJECT" ] && echo "CONFLICT: state/current names '$cur' (another ws <slug> session is open). This session stays on $WS_PROJECT; terminal commands without --project will act on $cur."
+others=$(ls "$WS/projects"/*.conf 2>/dev/null | xargs -rn1 basename | sed 's/\.conf$//' | grep -vx "$SLUG" | paste -sd' ')
+[ -n "$others" ] && echo "other registered projects: $others (use ws --project <slug> to act on one)"
 echo "workspace: $WS (plans in plans/$SLUG, runs in runs/$SLUG, lessons in lessons/)"
 echo
 echo "--- $SLUG git ---"

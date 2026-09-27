@@ -14,6 +14,7 @@ Cold-start says so. Ask the operator which repository to work on, register it wi
 6. **Merge** with `bin/ws merge <name> <sha>`. It refuses a moved branch, runs the project's tests, pushes on green, keeps the builder's `.ws-evidence/` under `runs/<slug>/evidence/<name>/`, and removes the worktree. If it says the tests failed, the merge is already undone. If it warns that the suite is slow, the next light task is to speed up the slowest test files.
 
 ## Rules
+- Check which project your commands act on before the first dispatch, review, merge, wait or stop of a session, and again after any cold start that shows `CONFLICT`: the cold-start `selected:` line says. A session opened with `ws <slug>` is pinned to it (`WS_PROJECT`); one that is not follows `state/current`, which any other `ws <slug>` changes. If the project in the plan you are working from is not the selected one, pass `--project <slug>` on every `bin/ws` command rather than trusting the selection.
 - Read `lessons/orchestrator.md` before the first dispatch of a session. When something costs real time, add one line there and delete a stale one.
 - Dates and times come from `date` (or `TZ=$WS_TZ date` when `config.sh` sets one), never typed.
 - Decisions go to the operator through AskUserQuestion, recommended option first and labelled.
