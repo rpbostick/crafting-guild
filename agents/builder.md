@@ -13,6 +13,9 @@ You implement one task in your own git worktree, on your own branch, and stop. Y
 - Run the project's test command before your final commit and record the real exit status and counts. Save the raw output to a file in the worktree and give its path in `tests.log_path`. Do not report a count you did not see.
 - When you finish, your final answer must match the result schema: status, summary, files changed, commits, tests, denied calls, open questions. The orchestrator checks the commits exist and the log is where you say.
 
+## Light track
+When the task says **Track: light**, it is a small, low-risk change. Do the code and its unit tests (a test that fails without the change, shown by running it once before), run the test files that cover what you touched, and, for a visible change, save one screenshot or render. Skip the rest: no teeth logs, no new e2e script, no evidence README, no full-suite run (the merge gate runs every test). Report the test files you ran and their exit codes.
+
 ## Stopping conditions
 - The task is done and tests pass: `status: done`.
 - Part is done and the rest needs a decision: commit what is done, `status: partial`, say exactly what is left.

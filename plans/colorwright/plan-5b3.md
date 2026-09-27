@@ -1,6 +1,6 @@
 # Colorwright 5b-3: saved looks keep carried hair and bandana picks
 
-**In flight right now** (2026-09-25 20:12 MDT): step 1 dispatched as builder `cw-5b3`, budget $10. The live in-flight state is in `handoff-2026-09-25.md`.
+**Done.** Current colorwright work: `plan-19-rest.md` (in-flight block) and `plan-20-heads-hair-hats.md`.
 
 ## Requirements (Patrick, 2026-09-25)
 - A saved look stores the session's carried head-colour picks (`state.chosenHeadColors`: `hair`, `hair-outline`, and the bandana roles), including picks that the head it's wearing doesn't show. Loading the look restores them, so a later switch to a head with hair uses them.

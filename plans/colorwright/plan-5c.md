@@ -1,6 +1,6 @@
 # Colorwright 5c: facial-hair colour
 
-**In flight right now**: see `handoff-2026-09-25.md`.
+**Done.** Current colorwright work: `plan-19-rest.md` (in-flight block) and `plan-20-heads-hair-hats.md`.
 
 ## Requirements (Patrick, 2026-09-24 and 2026-09-25)
 - Facial hair gets its own colour, separate from the hair, plus an outline colour like hair.
