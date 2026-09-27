@@ -26,3 +26,4 @@ Every hair on every head style, every hat on every head + hair, checked by Patri
 
 ## Backlog (not scheduled)
 - **Mirror the avatar** (Patrick, 2026-09-26): "i eventually want to be able to have the avatar mirror along the vertical axis (look left, look right), which will allow the prosthesis to be on either side." Likely a look-level flip (one SVG transform on the whole figure), a stored `mirrored` flag on saved looks and session state, and the preview and thumbnails following it; check that nothing asymmetric breaks (text, masks, hat cover regions are drawn in item units so they flip with the figure). After plan 20 and the prosthesis colours.
+- 2026-09-26: Head row names **Head 1–8 + Bear** (descriptive names in the tooltip); an old session/look with one of the 31 heads becomes its head style + its hair. Step 2b task: `task-p20-2b-hair-row.md`.
