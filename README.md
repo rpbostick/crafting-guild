@@ -6,7 +6,7 @@ You open one Claude Code session here and point it at a project. That session pl
 
 It is the successor to [agentic-workspace](https://github.com/rpbostick/agentic-workspace), cut down to the parts that measurably produced product. No servers, no Docker, no cron, no MCP, about 700 lines of shell and a few pages of prose. The reasoning is in the [research repo](https://github.com/rpbostick/agentic-framework-research).
 
-**Status, 2026-09-27.** It has built one app end to end: [colorwright](https://github.com/rpbostick/colorwright) went from a paused fix to a tagged `v1.0` in 42 hours through 37 builder runs, 22 reviews and 22 gated merges, with zero context compactions in a 25-hour orchestrator session and zero usage-limit stops. Nine of the 87 commits in that stretch changed the tool; the rest were plans and tasks for the product. The measured cost was in the project, not the tool: builders spent 48% of their wall time running tests, and the merge gate grew from 6 to 28 minutes for a day before a single builder run fixed the suite. Report 11 in the research repo has the numbers and five small changes to make here before the first outside install (builders run only the tests for what they touched; the merge prints and warns on suite time; evidence stays out of the product repo; the timeout follows the track; the parallel-builder note names CPU, not the limit).
+**Status, 2026-09-27.** It has built one app end to end: [colorwright](https://github.com/rpbostick/colorwright) went from a paused fix to a tagged `v1.0` in 42 hours through 37 builder runs, 22 reviews and 22 gated merges, with zero context compactions in a 25-hour orchestrator session and zero usage-limit stops. Nine of the 87 commits in that stretch changed the tool; the rest were plans and tasks for the product. The measured cost was in the project, not the tool: builders spent 48% of their wall time running tests, and the merge gate grew from 6 to 28 minutes for a day before a single builder run fixed the suite. Report 11 in the research repo has the numbers. The five changes it proposed are in **v2.1.0** (see [CHANGELOG.md](CHANGELOG.md)): builders run only the tests for what they touched, the merge prints and warns on suite time, evidence stays out of the product repo, the timeout follows the track, and the parallel-builder note names the CPU, not the limit.
 
 ## Install
 
@@ -48,7 +48,7 @@ Builders never push and never touch the main checkout. Every run has a dollar bu
 | `ws <slug>` | open an orchestrator session for a registered project |
 | `ws init <path> [--tests CMD] [--branch B]` | register a project |
 | `ws list`, `ws status [slug]` | projects; cold-start by hand |
-| `ws dispatch [--budget N] [--model M] [--effort E] [--allow RULE]... <name> <task-file>` | run a builder |
+| `ws dispatch [--budget N] [--timeout T] [--model M] [--effort E] [--allow RULE]... <name> <task-file>` | run a builder (timeout defaults to 45m for `Track: light`, 120m otherwise) |
 | `ws wait <name>`, `ws tail <name>`, `ws runs`, `ws stop <name>` | wait for, watch, list, stop runs |
 | `ws serve <name\|main> [port]`, `ws serve stop [name]` | preview server from a worktree or the main checkout |
 | `ws review <name>` | review the branch; prints the verdict and the SHA to merge |
@@ -68,11 +68,14 @@ Read [MODIFYING.md](MODIFYING.md) for every file and where to change what. The s
 | `schema/` | what a builder and a reviewer must return |
 | `projects/<slug>.conf` | a registered project |
 | `plans/<slug>/` | plans and task files, kept here so the product repo stays clean |
-| `runs/`, `state/` | logs, results, selected project; not tracked |
+| `runs/`, `state/` | logs, results, merged builders' evidence, selected project; not tracked |
+| `VERSION`, `CHANGELOG.md` | the workspace version (`ws version`) and what changed in each |
 
 ## Operating notes
 
-- One builder at a time on a subscription plan. Parallel runs reach the usage limit sooner, not later.
+- Parallel builders share the machine, not only the plan. Spikes and light builds run side by side; a builder rendering or testing alongside a merge slows the merge's suite two to three times. The usage limit did not stop a single run in colorwright's 42 hours; the CPU did the slowing.
+- Builders run only the tests for the code they touched. The merge runs the whole suite, prints its time and warns when it passes `WS_SUITE_WARN_S`. When it warns, dispatch a light task to speed up the slowest test files before anything else.
+- Evidence (logs, renders, screenshots) stays out of the product repo: builders write it to `.ws-evidence/` in the worktree, the reviewer reads it there, and the merge keeps it under `runs/<slug>/evidence/<name>/`.
 - A builder that stops on the usage limit or its budget leaves its work in the worktree. Dispatch the same name again with a task that says to continue.
 - Suggestions from a review never block. They go into the next task that touches that code.
 - If the tool gets in your way, change it and commit. There is no process for changing the process. `scripts/selftest.sh` checks your change.

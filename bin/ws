@@ -18,12 +18,14 @@ ws merge <name> <sha>           merge a reviewed branch, test, push, clean up
 ws stop <name>                  stop a running builder
 ws serve <name|main> [port]     start the project's preview server from a worktree (or the main checkout)
 ws serve stop [name|main]       stop it;  ws serve list
+ws version                      print the workspace version (see CHANGELOG.md)
 USAGE
 }
 slugify() { basename "$1" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//'; }
 cmd="${1:-}"; shift || true
 case "$cmd" in
   ""|-h|--help|help) usage ;;
+  version|--version|-v) echo "agentic-workspace v$(cat "$WS/VERSION")" ;;
   list) for f in "$WS"/projects/*.conf; do [ -f "$f" ] || continue; ( . "$f"; printf '%-18s %s (%s)%s\n' "$(basename "$f" .conf)" "$PROJECT_PATH" "$PROJECT_BRANCH" "$( [ "$(head -n1 "$WS/state/current" 2>/dev/null)" = "$(basename "$f" .conf)" ] && echo '  <- current')" ); done ;;
   init)
     path="${1:?ws init <path>}"; shift; tests="" branch="" yes=false
@@ -56,7 +58,7 @@ case "$cmd" in
       echo "PREVIEW_CMD=\"$preview\""
     } > "$WS/projects/$slug.conf"
     mkdir -p "$WS/plans/$slug" "$WS/runs/$slug"
-    excl="$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/info/exclude"; grep -qx '.worktrees' "$excl" 2>/dev/null || echo ".worktrees" >> "$excl"
+    excl="$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/info/exclude"; for e in .worktrees .ws-evidence; do grep -qx "$e" "$excl" 2>/dev/null || echo "$e" >> "$excl"; done
     echo "registered $slug: $path (branch $branch; tests: ${tests:-none})"
     # v1 left per-commit review and post-merge hooks wired into .git/hooks; v2 reviews per branch and tests on merge.
     hooks="$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/hooks"; found=()
@@ -77,7 +79,7 @@ case "$cmd" in
   merge) "$WS/scripts/merge.sh" "$@" ;;
   check) "$WS/scripts/check-result.sh" "$@" ;;
   wait)
-    name="${1:?ws wait <name> [minutes]}"; mins="${2:-120}"; load_project ""
+    name="${1:?ws wait <name> [minutes]}"; mins="${2:-150}"; load_project ""
     for _ in $(seq 1 $((mins*6))); do
       if [ -f "$RUNS/$name.result.txt" ] && [ ! -f "$RUNS/$name.pid" ]; then cat "$RUNS/$name.result.txt"; grep -q '^FAIL\|^NO RESULT\|^TIMEOUT' "$RUNS/$name.result.txt" && exit 1 || exit 0; fi
       [ -f "$RUNS/$name.pid" ] || [ -f "$RUNS/$name.jsonl" ] || die "no run named $name"

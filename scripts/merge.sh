@@ -35,14 +35,20 @@ merged=$(git -C "$PROJECT_PATH" rev-parse --short HEAD)
 if [ -n "$TEST_CMD" ]; then
   log="$RUNS/$name.merge-tests.log"
   echo "running tests on $merged: $TEST_CMD"
+  t0=$(date +%s)
   if ( cd "$PROJECT_PATH" && bash -c "$TEST_CMD" ) > "$log" 2>&1; then
-    echo "tests passed (log: ${log#"$WS/"})"
+    secs=$(( $(date +%s) - t0 )); echo "--- ws merge: suite ${secs}s ---" >> "$log"
+    echo "tests passed in ${secs}s (log: ${log#"$WS/"})"
+    [ "$secs" -gt "${WS_SUITE_WARN_S:-300}" ] && echo "ws: the suite took ${secs}s, over WS_SUITE_WARN_S=${WS_SUITE_WARN_S:-300}. Every merge pays this; a builder task to speed up the slowest test files pays for itself in a few merges (colorwright: 28 min to 2 min for \$3.75)."
   else
     git -C "$PROJECT_PATH" reset --hard ORIG_HEAD -q
     tail -n 30 "$log"; die "tests failed on the merged tree; merge undone. Log: ${log#"$WS/"}"
   fi
 else echo "no TEST_CMD for $SLUG; merging without a test gate"; fi
 if $has_remote; then git -C "$PROJECT_PATH" push -q origin "$PROJECT_BRANCH" && echo "pushed $merged to origin/$PROJECT_BRANCH"; fi
+if [ -d "$wt/.ws-evidence" ] && [ -n "$(ls -A "$wt/.ws-evidence" 2>/dev/null)" ]; then
+  rm -rf "$RUNS/evidence/$name"; mkdir -p "$RUNS/evidence"; mv "$wt/.ws-evidence" "$RUNS/evidence/$name" && echo "evidence kept at runs/$SLUG/evidence/$name/"
+fi
 [ -d "$wt" ] && git -C "$PROJECT_PATH" worktree remove --force "$wt" 2>/dev/null && echo "worktree removed (untracked files discarded)"
 git -C "$PROJECT_PATH" branch -d "$br" -q 2>/dev/null && echo "branch $br deleted"
 echo "merged $br as $merged"

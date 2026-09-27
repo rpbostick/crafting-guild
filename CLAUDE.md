@@ -7,11 +7,11 @@ Cold-start says so. Ask the operator which repository to work on, register it wi
 
 ## The loop
 1. **Plan** in `plans/<slug>/<plan>.md` using `agents/planner.md`. Small independent steps, each with a done-when, each as a task file a builder can run cold. Keep an `**In flight right now**` block at the top; rewrite it at every dispatch.
-2. **Dispatch** one builder per step: `bin/ws dispatch <name> plans/<slug>/<task>.md` (flags: `--budget`, `--model`, `--effort`, `--allow "Bash(cmd *)"`). One at a time unless the operator says otherwise. Every dispatch has a budget. Name in the task every command the builder must run; grants it lacks are denied silently.
+2. **Dispatch** one builder per step: `bin/ws dispatch <name> plans/<slug>/<task>.md` (flags: `--budget`, `--model`, `--effort`, `--allow "Bash(cmd *)"`). Every dispatch has a budget and a timeout (45m for a task marked `Track: light`, 120m otherwise). Parallel builders share the CPU: fine for spikes and light builds, slow for a merge's test run. Name in the task every command the builder must run; grants it lacks are denied silently.
 3. **Wait** with `bin/ws wait <name>` run under `run_in_background`, never a foreground loop. Then read `runs/<slug>/<name>.result.txt`. Claims are checked against the branch there; trust the check, not the summary.
 4. **Preview** when the change is visible: `bin/ws serve <name> 8801` serves the worktree; the operator looks; `bin/ws serve stop <name>`.
 5. **Review** once per branch: `bin/ws review <name>`. It prints the verdict and the SHA. Blocking findings go back to the same builder in one fix task. Suggestions carry forward to the next task on that code.
-6. **Merge** with `bin/ws merge <name> <sha>`. It refuses a moved branch, runs the project's tests, pushes on green, and removes the worktree. If it says the tests failed, the merge is already undone.
+6. **Merge** with `bin/ws merge <name> <sha>`. It refuses a moved branch, runs the project's tests, pushes on green, keeps the builder's `.ws-evidence/` under `runs/<slug>/evidence/<name>/`, and removes the worktree. If it says the tests failed, the merge is already undone. If it warns that the suite is slow, the next light task is to speed up the slowest test files.
 
 ## Rules
 - Read `lessons/orchestrator.md` before the first dispatch of a session. When something costs real time, add one line there and delete a stale one.
@@ -23,6 +23,6 @@ Cold-start says so. Ask the operator which repository to work on, register it wi
 - This workspace is a tool. Fix it in place when it gets in the way; do not plan work about it. If a change to the tool would displace product work, say so and let the operator choose.
 
 ## Where things are
-- `projects/<slug>.conf`: path, branch, test command, extra tool grants, preview command. `plans/<slug>/`: plans and task files (tracked). `runs/<slug>/`: logs and results (not tracked).
+- `projects/<slug>.conf`: path, branch, test command, extra tool grants, preview command. `plans/<slug>/`: plans and task files (tracked). `runs/<slug>/`: logs, results and each merged builder's evidence (not tracked).
 - `checklist.md`: 18 review rules. `agents/`: builder, reviewer, planner. `lessons/`: one file per role, always loaded.
 - `MODIFYING.md` explains every file for whoever changes the tool. `bin/ws help` lists the commands.

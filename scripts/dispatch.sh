@@ -7,7 +7,7 @@
 # and a JSON result schema. Logs to runs/<slug>/<name>.jsonl; the result check lands in <name>.result.txt.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
-slug="" budget="$WS_DEFAULT_BUDGET" model="$WS_MODEL" effort="$WS_EFFORT" tmo="$WS_DEFAULT_TIMEOUT" dry=false; extra=()
+slug="" budget="$WS_DEFAULT_BUDGET" model="$WS_MODEL" effort="$WS_EFFORT" tmo="" dry=false; extra=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --project) slug="$2"; shift 2 ;;
@@ -24,6 +24,8 @@ done
 name="${1:?usage: dispatch.sh [flags] <name> <task-file>}"; task="${2:?missing task file}"
 case "$name" in *[!A-Za-z0-9._-]*) die "bad name '$name'" ;; esac
 [ -f "$task" ] || die "no task file $task"
+# Timeout follows the track unless --timeout was given: a light task gets the short cap.
+if [ -z "$tmo" ]; then if grep -qi 'track: *light' "$task"; then tmo="$WS_LIGHT_TIMEOUT"; else tmo="$WS_DEFAULT_TIMEOUT"; fi; fi
 load_project "$slug"
 [ -z "$(git -C "$PROJECT_PATH" rev-parse --verify "$PROJECT_BRANCH" 2>/dev/null)" ] && die "no branch $PROJECT_BRANCH in $PROJECT_PATH"
 wt="$(worktree_dir "$name")"; br="$(branch_of "$name")"
@@ -32,7 +34,8 @@ if [ -f "$RUNS/$name.pid" ] && kill -0 "$(cat "$RUNS/$name.pid")" 2>/dev/null; t
 # Worktree: create on a fresh branch from the main branch, or reuse an existing one (a resume).
 if [ ! -d "$wt" ]; then
   mkdir -p "$WT_ROOT"
-  grep -qx '.worktrees' "$PROJECT_PATH/.git/info/exclude" 2>/dev/null || echo ".worktrees" >> "$(git -C "$PROJECT_PATH" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+  excl="$(git -C "$PROJECT_PATH" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+  for e in .worktrees .ws-evidence; do grep -qx "$e" "$excl" 2>/dev/null || echo "$e" >> "$excl"; done
   if git -C "$PROJECT_PATH" show-ref --verify --quiet "refs/heads/$br"; then
     git -C "$PROJECT_PATH" worktree add -q "$wt" "$br"
   else
@@ -54,6 +57,7 @@ if [ ! -d "$wt" ]; then
 else
   note "reusing worktree $wt ($(git -C "$wt" status --short | wc -l) uncommitted files)"
 fi
+mkdir -p "$wt/.ws-evidence"   # untracked; logs and renders go here, never into the branch (ws merge keeps it under runs/)
 
 # Grant: edit inside the worktree, read anything, commit on this branch, run the project's tests. No push, no config.
 TOOLS=(Read Grep Glob "Edit(./**)"
@@ -79,7 +83,8 @@ $(cat "$WS/checklist.md")
 $(cat "$WS/lessons/builder.md")
 
 # Project
-Main branch: $PROJECT_BRANCH. Test command (run it from the worktree root, in the foreground): ${TEST_CMD:-none configured}.
+Main branch: $PROJECT_BRANCH. Project test command: ${TEST_CMD:-none configured}. The merge gate runs it on the merged tree; you do not. Run only the test files that cover what you changed, with the same runners, from the worktree root, in the foreground.
+Evidence: save every log and render under .ws-evidence/ in the worktree root (it is untracked and the reviewer reads it there). Commit code, tests and docs; commit a render only when the task asks for one the operator will judge.
 
 # Task
 $(cat "$task")
@@ -95,13 +100,13 @@ cmd=(claude -p "$prompt" --allowedTools "${TOOLS[@]}" --disallowedTools "${DENY[
 
 if $dry; then
   echo "cwd: $wt"; echo "tools: ${TOOLS[*]}"; echo "deny: ${DENY[*]}"; echo "budget: \$$budget timeout: $tmo model: ${model:-default}"
-  echo "prompt bytes: ${#prompt}"; exit 0
+  echo "prompt bytes: ${#prompt}"; echo "evidence: $wt/.ws-evidence"; exit 0
 fi
 
 # Previous run's files move aside; this run's log, pid and task record are written fresh.
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 for ext in jsonl result.txt task.txt; do [ -e "$RUNS/$name.$ext" ] && mv "$RUNS/$name.$ext" "$RUNS/$name.$stamp.$ext"; done
-{ echo "task=$(cd "$(dirname "$task")" && pwd)/$(basename "$task")"; echo "started=$(now_local)"; echo "budget=$budget"; echo "worktree=$wt"; } > "$RUNS/$name.task.txt"
+{ echo "task=$(cd "$(dirname "$task")" && pwd)/$(basename "$task")"; echo "started=$(now_local)"; echo "budget=$budget"; echo "timeout=$tmo"; echo "worktree=$wt"; } > "$RUNS/$name.task.txt"
 start_sha=$(git -C "$wt" rev-parse HEAD)
 (
   cd "$wt"
@@ -112,7 +117,7 @@ start_sha=$(git -C "$wt" rev-parse HEAD)
   rm -f "$RUNS/$name.pid"
 ) < /dev/null > /dev/null 2>&1 &
 echo $! > "$RUNS/$name.pid"
-echo "dispatched $name (pid $!) in $wt"
+echo "dispatched $name (pid $!) in $wt (budget \$$budget, timeout $tmo)"
 echo "  log:    runs/$SLUG/$name.jsonl"
 echo "  result: runs/$SLUG/$name.result.txt (written when it finishes)"
 echo "  wait:   bin/ws wait $name      watch: bin/ws tail $name"

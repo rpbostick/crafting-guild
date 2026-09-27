@@ -11,7 +11,7 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - A test-count claim cites the log it came from.
 
 ## Running builders
-- One builder at a time unless he says otherwise. Parallel builders do not raise the Max plan's limit; they reach it sooner. Every dispatch gets a budget.
+- Parallel builders share the CPU, not only the plan. Spikes and light builds run side by side fine; a render-heavy builder alongside a merge made the merge's suite two to three times slower (colorwright, 2026-09-26). The usage limit stopped no run in 42 hours. Merge when nothing heavy is running, and every dispatch gets a budget.
 - Wait for a run with `bin/ws wait <name>` under `run_in_background`, never with a foreground loop that can time out.
 - A missing grant stalls a builder silently. Name every command the task needs and pass extras with `--allow`. Tell the task to use one command per Bash call.
 - When a run stops on the usage limit, its uncommitted work is still in the worktree. Resume with a task that says so and dispatch at the stated reset time.
@@ -25,4 +25,5 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - `ws merge` can take over 10 minutes when builders run alongside; run it with `run_in_background`.
 - Mark small, low-risk tasks `Track: light` (code + unit tests, no evidence ceremony; the merge gate runs the suite). Evidence formatting doesn't block reviews; `ws merge` refuses a branch that adds home paths or the username, so scrub them on the branch first. (Patrick, 2026-09-26: a two-outfit colour split took an hour of process.)
 - Before scoping a change to "the items that have X", render all candidates and look: the catalog's roles can miss art (prosthesis, 2026-09-26: two outfits had unmarked prostheses; two fix rounds went to the wrong item).
-- Big builds need `--timeout` above the 90m default (and `ws wait <name> <minutes>` to match). A timed-out run can die without writing its result (cw-p20-2b, 2026-09-27): check `git log` and `git status` in the worktree, then resume.
+- The timeout follows the track: 45m for `Track: light`, 120m otherwise (`config.sh`); pass `--timeout` for a bigger build and `ws wait <name> <minutes>` to match. A timed-out run can die without writing its result (cw-p20-2b, 2026-09-27): check `git log` and `git status` in the worktree, then resume.
+- Builders run only the tests for what they touched (v2.1.0); the merge gate runs the suite. `ws merge` prints the suite's time and warns over `WS_SUITE_WARN_S`; when it warns, a light task to speed up the slowest test files is the next thing to dispatch.

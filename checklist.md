@@ -4,7 +4,7 @@ Eighteen rules. Adding one means removing one. A rule earns its place by having 
 
 1. No silent fallbacks where missing or invalid data should fail loud (`.get(x, 0)`, bare `except: pass`, default branches that hide a bad state).
 2. A test proves it can fail and tests the real thing: the branch shows a failing run before the fix, or the task log does, and the test exercises the production code path, not a copy or a fixture alone.
-3. Every claim of scope or verification in a commit message, docstring or doc ("all", "every", "verified", "confirmed", a count) matches the diff and the evidence committed with it.
+3. Every claim of scope or verification in a commit message, docstring or doc ("all", "every", "verified", "confirmed", a count) matches the diff and the evidence saved with it (under `.ws-evidence/` in the worktree, or committed).
 4. Every file, path, script or command referenced in prose exists at that commit.
 5. A change to the shape of persisted data (a table column, a JSON field, a manifest key) migrates old data or fails loud on it, with a test for the old shape.
 6. Deleting or renaming a file, function or route is followed by a grep for every reference, and they are updated in the same change.
@@ -12,7 +12,7 @@ Eighteen rules. Adding one means removing one. A rule earns its place by having 
 8. A docstring states a non-obvious why (a constraint, a workaround, an invariant), never restates what the name and signature already say. No docstrings for completeness.
 9. One responsibility per function. No catch-all `utils` or `helpers` modules. No single-letter names outside a trivial loop counter.
 10. A UI change re-checks every code path that resets or defaults state (a click handler that re-runs a defaulting function is the known bug class), and regenerates any icon, thumbnail or render that depicts the thing that changed.
-11. An asset carries its license trail; an SVG is well-formed; "looks correct" is backed by a committed render, not asserted.
+11. An asset carries its license trail; an SVG is well-formed; "looks correct" is backed by a render the reviewer can open (in `.ws-evidence/`, or committed when the task asked for it), not asserted.
 12. A read-check-write on a file that more than one process can touch takes a lock.
 13. Imports fail loud. No `try/except ImportError` that logs and continues.
 14. Broad staging (`git add -A`, `git commit -a`) does not sweep in logs, databases, scratch files or unrelated edits.

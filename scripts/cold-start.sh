@@ -6,7 +6,7 @@ set -uo pipefail
 brief=false; [ "${1:-}" = "--brief" ] && brief=true && shift
 slug="${1:-}"
 [ -z "$slug" ] && [ -f "$WS/state/current" ] && slug="$(head -n1 "$WS/state/current")"
-echo "=== ws cold-start $(now_local) ==="
+echo "=== ws cold-start $(now_local) (v$(cat "$WS/VERSION" 2>/dev/null || echo ?)) ==="
 if [ -z "$slug" ] || [ ! -f "$WS/projects/$slug.conf" ]; then
   echo "no project selected. Registered: $(ls "$WS/projects"/*.conf 2>/dev/null | xargs -rn1 basename | sed 's/\.conf$//' | paste -sd' ' | grep . || echo none)"
   echo "start one with: bin/ws <slug>   (register: bin/ws init <path>)"

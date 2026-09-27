@@ -39,7 +39,7 @@ $files
 Diff stat:
 $stat
 
-The full diff is on stdin $capped. Read any changed file in full with Read when you need context. Test logs the builder saved are in the worktree too."
+The full diff is on stdin $capped. Read any changed file in full with Read when you need context. Logs and renders the builder saved are under .ws-evidence/ in the worktree (untracked, so not in the diff); read them there."
 cmd=(claude -p "$prompt" --restricted --permission-prompts none --json-schema "$(cat "$WS/schema/review.json")"
   --max-budget-usd "$budget" --output-format json --name "ws:$SLUG:review:$name")
 [ -n "$model" ] && cmd+=(--model "$model")

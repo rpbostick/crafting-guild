@@ -25,7 +25,8 @@ checklist.md            what the reviewer applies. 18 rules; keep it that size.
 schema/*.json           the JSON a builder and a reviewer must return (Claude Code's --json-schema).
 projects/<slug>.conf    one registered project: path, branch, TEST_CMD, EXTRA_TOOLS, PREVIEW_CMD.
 plans/<slug>/           plans and task files, tracked here so the product repo stays clean.
-runs/<slug>/            logs, results, reviews, server pids. Not tracked. Safe to delete when idle.
+runs/<slug>/            logs, results, reviews, server pids, and evidence/<name>/ from each merged builder. Not tracked.
+VERSION, CHANGELOG.md   the version `ws version` prints, and the notes for each one.
 state/current           the selected project. Not tracked.
 ```
 
@@ -40,7 +41,9 @@ state/current           the selected project. Not tracked.
 | Change what a review checks | `checklist.md`. Add a rule only by removing one. `agents/reviewer.md` sets the reviewer's posture (what blocks, what is a suggestion). |
 | Change what counts as a valid result | `schema/result.json`; then update the checks in `scripts/check-result.sh`. |
 | Change what cold-start shows | `scripts/cold-start.sh`. Keep it under half a minute; it runs on every session start and after every compaction. Never put a test run in it. |
-| Change the merge gate | `scripts/merge.sh`. Today: pinned SHA, review on record, clean trees, no home paths or username in lines the branch adds, tests via `TEST_CMD`, push on green. |
+| Change the merge gate | `scripts/merge.sh`. Today: pinned SHA, review on record, clean trees, no home paths or username in lines the branch adds, tests via `TEST_CMD` (timed; warns over `WS_SUITE_WARN_S`), push on green, evidence moved to `runs/`. |
+| Change where evidence goes | `.ws-evidence/` is created by `scripts/dispatch.sh`, named in `agents/builder.md` and `agents/reviewer.md`, excluded via `.git/info/exclude`, and moved by `scripts/merge.sh`. |
+| Change the timeouts | `WS_DEFAULT_TIMEOUT` and `WS_LIGHT_TIMEOUT` in `config.sh`; `scripts/dispatch.sh` picks the light one when the task says `Track: light`. |
 | Change where worktrees live | `WT_ROOT` in `scripts/lib.sh`. They are under `<project>/.worktrees/` (excluded via `.git/info/exclude`) so the project's own `CLAUDE.md` applies to builders and this workspace's does not. |
 | Change the orchestrator's instructions | `CLAUDE.md`. Keep it short; long instruction files are how v1 spent 50,000 tokens before starting work. |
 | Add a subcommand | a `case` arm in `bin/ws`, calling a script in `scripts/`. |
@@ -49,10 +52,11 @@ state/current           the selected project. Not tracked.
 
 - **Builders run headless with `--permission-prompts none`.** Anything not in the grant is denied instantly and shows up in the result as a denied call. That is deliberate: a headless prompt that waits for approval never returns. If a builder keeps hitting a denial, add the grant; do not switch to bypass mode.
 - **One review per branch, not per commit.** v1 reviewed every commit, including its own fix commits, and the loop fed itself. Suggestions never block a merge.
-- **The merge runs the tests, not a hook.** A hook runs after the fact; the merge script undoes the merge if the suite fails, so main never holds a red commit.
+- **The merge runs the tests, not a hook, and not the builder.** A hook runs after the fact; the merge script undoes the merge if the suite fails, so main never holds a red commit. Builders run only the test files for what they changed: on colorwright, builders running the full suite too was 48% of all builder time, and the suite was 28 minutes for a day before anyone measured it. The merge now prints the suite's time.
+- **Evidence lives in the workspace, not the product.** Colorwright's history carries 180 MB of logs and renders it will never read. Builders write to `.ws-evidence/` in the worktree; the merge moves it to `runs/<slug>/evidence/<name>/`.
 - **Memory is a flat file per role.** No tiers, no decay, no server. If a lessons file passes the cap, prune it; cold-start will nag.
 - **Plans live here, not in the project.** The product repo carries product. A builder gets its task in its prompt and never reads this folder.
-- **No parallel builders by default.** On a subscription plan, parallel runs reach the usage limit sooner; they do not get more work done per day.
+- **Parallel builders are a CPU decision.** The usage limit did not stop one run in colorwright's 42 hours, with two or three builders running most of a day. What parallel runs did cost was the merge gate: a render-heavy builder alongside a merge made the suite two to three times slower. Spikes and light builds in parallel are fine; merge when nothing heavy is running.
 
 ## Testing a change
 
