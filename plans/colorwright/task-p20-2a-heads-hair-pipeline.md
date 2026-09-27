@@ -1,6 +1,8 @@
 # Plan 20 step 2a: 9 bald head styles and hair items (pipeline and catalog)
 
-Patrick wants hair separate from the head: "separate the head style from the hairs, make them work together", with "as much variety in head style as we can". Read first: `scripts/evidence/heads-analysis/README.md` and `part-2/README.md` (the analysis this builds; its code is `heads.py` and `part-2/part2.py`), and the hats round 2 evidence `scripts/evidence/hats-round2/README.md` (the Hat Beanie, Turban, Hat Hip and Hijab heads are already gone from the Hair row).
+Patrick wants hair separate from the head: "separate the head style from the hairs, make them work together", with "as much variety in head style as we can". Read first: `scripts/evidence/heads-analysis/README.md` and `part-2/README.md` (the analysis this builds; its code is `heads.py` and `part-2/part2.py`), and the hats round 2 plan (`hats-round2` is still being built on another branch: it removes the Hat Beanie, Turban, Hat Hip and Hijab heads from the Hair row and adds Hat Hip and Hijab as hats). On your branch those four heads still exist: **leave them alone and build nothing for them**; they are not hair styles or head styles.
+
+**Merging later:** both branches change `assets/catalog/manifest.json`. Keep your manifest changes to adding items and fields (don't reorder or rewrite existing entries by hand), and keep the step that writes them re-runnable, so that after hats round 2 merges your branch can take master and re-run your step plus `compute_option_thumbnail_viewboxes` to rebuild the manifest cleanly. Say in the README exactly which commands rebuild it.
 
 **This step is pipeline and catalog only.** The app keeps working as today: the new items are written to the catalog and manifest, but nothing in the frontend uses them until step 2b. Use one command per Bash call.
 
