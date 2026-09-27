@@ -1,7 +1,7 @@
 # Colorwright: the rest of plan 19 (3a-2, 3b, 3c-2) and the Option C spike
 
-**In flight right now** (2026-09-27 10:57 MDT; rewrite at every dispatch):
-`cw-wrapup` (task-wrapup.md, $15, 150m, ports 8790-8795): docs current, clutter out, carried fixes, every e2e check run. Then review, Patrick signs off, merge, tag colorwright `v1.0`. Hats round 3 merged `7969273`.
+**In flight right now** (2026-09-27, rewrite at every dispatch):
+Nothing is running. **colorwright v1.0 is tagged** at `3625670` (wrap-up merged `db6ebda`, then "Patrick" → "the operator" in 199 tracked files, suite green). Next: the new project that builds on colorwright. Carried, optional: docs/history.md anchors point at README.md sections (link fix); pipeline/README.md is still a dated log in places.
 
 ## Requirements (from v1 `plans/backlog-plan-19.md` and `backlog-plan-18.md`; Patrick's choices there are settled)
 - 3a-2: the old `scripts/*-e2e-check.js` that guard features that still matter work with the carousel rows (a shared find-a-tile helper); one-off investigation scripts are retired with a note naming their last valid commit. Nothing still defaults to :8792.
@@ -49,3 +49,4 @@ All four merged (the spike's evidence with its build, or on its own if Patrick d
 - 2026-09-27: test speed merged `2ac5ac4` (reviewed `51a194f`; build $3.10 + merge-master $0.65). Pipeline suite ~27 min → ~2.3 min (parallel runner, memoised areas); 412 pipeline tests.
 - 2026-09-27: mirroring (`05fdd63`, $5.67, reviewed merge): a Facing control ("As drawn" / "Mirrored", Patrick kept the builder's labels) flips the whole figure; `look.mirrored` saved. Merging; db copied to `backend/colorwright.db.2026-09-27-mirror.bak`. Carried to the wrap-up: keep `mirrored` when `sanitizeRestoredState` returns an empty state (logic.js:1245); pass `state.mirrored` through instead of `=== true` (logic.js:1142).
 - 2026-09-27: hats round 3 (`947dbab`; build $11.56 + fix $8.56, reviewed merge twice). Patrick: Hat Hip right first time; the Beanie came back ("wrong size ... look at the source art") and was rebuilt from the source hat as drawn with the heads' own placement (overlay matched); Bear keeps its beard under hats. "Looks good, merge". db copied to `backend/colorwright.db.2026-09-27-hats3.bak`.
+- 2026-09-27: wrap-up merged `db6ebda` (reviewed `1d296f2`, $12.69): README rewritten for v1.0, docs/history.md, evidence index, 11 stale browser checks updated and passing, carried fixes. The operator signed off; first name → "the operator" across tracked files (`3625670`, suite exit 0); **tagged `v1.0`** and pushed.
