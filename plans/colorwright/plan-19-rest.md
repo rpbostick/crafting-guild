@@ -1,7 +1,7 @@
 # Colorwright: the rest of plan 19 (3a-2, 3b, 3c-2) and the Option C spike
 
 **In flight right now** (2026-09-26 16:54 MDT; rewrite at every dispatch):
-Two builders. `cw-hats2` (task-hats-round2.md, $18, ports 8796-8799) dispatched 16:54; visible, so preview for Patrick, db copy, merge. `cw-heads-spike` part 2 (task-heads-spike-2.md, $16, report only; plan 20) running; stop for Patrick's head-style pick.
+`cw-hats2` (task-hats-round2.md, $18, ports 8796-8799) running since 16:54; visible, so preview for Patrick, db copy, merge. Heads spike merged `6a09967` (parts 1+2, $6.62 + $8.08 + $2.29). Next: `cw-p20-2a` (task-p20-2a-heads-hair-pipeline.md) after hats2 merges.
 
 ## Requirements (from v1 `plans/backlog-plan-19.md` and `backlog-plan-18.md`; Patrick's choices there are settled)
 - 3a-2: the old `scripts/*-e2e-check.js` that guard features that still matter work with the carousel rows (a shared find-a-tile helper); one-off investigation scripts are retired with a note naming their last valid commit. Nothing still defaults to :8792.
