@@ -29,3 +29,6 @@ Commands you may run: `node ...`, `npm test ...`, `bash scripts/run-all-tests.sh
 - `scripts/evidence/README.md` exists; clutter removed or retired with notes.
 - The carried fixes are in with tests; every e2e check has a log with its exit code.
 - `bash scripts/run-all-tests.sh` exits 0; `git status` clean.
+
+## Also (carried from hats round 3's review)
+- `scripts/evidence/hats-round3/README.md:101` points to a `unit-tests.log` that doesn't exist: replace with a pointer to the merge gate's run, or remove.
