@@ -27,3 +27,9 @@ Every hair on every head style, every hat on every head + hair, checked by Patri
 ## Backlog (not scheduled)
 - **Mirror the avatar** (Patrick, 2026-09-26): "i eventually want to be able to have the avatar mirror along the vertical axis (look left, look right), which will allow the prosthesis to be on either side." Likely a look-level flip (one SVG transform on the whole figure), a stored `mirrored` flag on saved looks and session state, and the preview and thumbnails following it; check that nothing asymmetric breaks (text, masks, hat cover regions are drawn in item units so they flip with the figure). After plan 20 and the prosthesis colours.
 - 2026-09-26: Head row names **Head 1–8 + Bear** (descriptive names in the tooltip); an old session/look with one of the 31 heads becomes its head style + its hair. Step 2b task: `task-p20-2b-hair-row.md`.
+
+## Wrap (Patrick, 2026-09-26: "we want to wrap this functionality soon. colorwright will be the foundation for a new project soon.")
+In scope, in order (each after the in-flight prosthesis fix 3 and p20-2b fix 1 merge):
+1. Pipeline test speed (`task-pipeline-tests-speed.md`, light) — first, so every later step runs faster.
+2. Mirror the avatar and redrawn big-hair edges under hats (p20-3) — in parallel (frontend/look state vs pipeline hair covers).
+3. Wrap-up pass: README and requirements current (head styles, hair, hats, colour roles, the pipeline chain), stale scripts and evidence clutter out, the live app on :8800 checked end to end; then tag colorwright `v1.0`.
