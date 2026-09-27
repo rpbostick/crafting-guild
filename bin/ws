@@ -5,6 +5,8 @@ WS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 . "$WS/scripts/lib.sh"
 usage() {
   cat <<USAGE
+ws [--project <slug>] <command> ...   every command below takes the selected project (state/current) unless
+                                       --project names another registered one
 ws <slug>                       open an orchestrator session for a registered project
 ws init <path> [--tests CMD] [--branch B] [--yes]   register a project (and retire v1 hooks if found)
 ws list                         registered projects
@@ -22,6 +24,7 @@ ws version                      print the workspace version (see CHANGELOG.md)
 USAGE
 }
 slugify() { basename "$1" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//'; }
+proj=""; if [ "${1:-}" = "--project" ]; then proj="${2:?ws: --project needs a slug}"; shift 2; fi
 cmd="${1:-}"; shift || true
 case "$cmd" in
   ""|-h|--help|help) usage ;;
@@ -73,33 +76,33 @@ case "$cmd" in
         done; echo "disabled; pre-commit (syntax check) left in place"
       fi
     fi ;;
-  status) "$WS/scripts/cold-start.sh" "$@" ;;
-  dispatch) "$WS/scripts/dispatch.sh" "$@" ;;
-  review) "$WS/scripts/review.sh" "$@" ;;
-  merge) "$WS/scripts/merge.sh" "$@" ;;
-  check) "$WS/scripts/check-result.sh" "$@" ;;
+  status) "$WS/scripts/cold-start.sh" "$@" ${proj:+"$proj"} ;;
+  dispatch) "$WS/scripts/dispatch.sh" ${proj:+--project "$proj"} "$@" ;;
+  review) "$WS/scripts/review.sh" ${proj:+--project "$proj"} "$@" ;;
+  merge) "$WS/scripts/merge.sh" ${proj:+--project "$proj"} "$@" ;;
+  check) "$WS/scripts/check-result.sh" ${proj:+--project "$proj"} "$@" ;;
   wait)
-    name="${1:?ws wait <name> [minutes]}"; mins="${2:-150}"; load_project ""
+    name="${1:?ws wait <name> [minutes]}"; mins="${2:-150}"; load_project "$proj"
     for _ in $(seq 1 $((mins*6))); do
       if [ -f "$RUNS/$name.result.txt" ] && [ ! -f "$RUNS/$name.pid" ]; then cat "$RUNS/$name.result.txt"; grep -q '^FAIL\|^NO RESULT\|^TIMEOUT' "$RUNS/$name.result.txt" && exit 1 || exit 0; fi
       [ -f "$RUNS/$name.pid" ] || [ -f "$RUNS/$name.jsonl" ] || die "no run named $name"
       sleep 10
     done; echo "still running after $mins minutes"; exit 3 ;;
   tail)
-    name="${1:?ws tail <name>}"; load_project ""
+    name="${1:?ws tail <name>}"; load_project "$proj"
     tail -n +1 -f "$RUNS/$name.jsonl" | jq -r --unbuffered '
       if .type=="assistant" then (.message.content[]? | if .type=="text" then "SAY  " + (.text|.[0:160]) elif .type=="tool_use" then "TOOL " + .name + " " + ((.input.command // .input.file_path // .input.pattern // "")|tostring|.[0:120]) else empty end)
       elif .type=="result" then "DONE cost=$" + ((.total_cost_usd // 0)|tostring) + " " + ((.structured_output.status // .subtype // "")|tostring)
       elif .type=="system" and .subtype=="permission_denied" then "DENIED " + ((.tool_input.command // .tool_name // "")|tostring|.[0:120])
       else empty end' 2>/dev/null ;;
   runs)
-    load_project "${1:-}"; echo "runs for $SLUG:"
+    load_project "${1:-$proj}"; echo "runs for $SLUG:"
     for f in $(ls -t "$RUNS"/*.result.txt "$RUNS"/*.pid 2>/dev/null); do
       n=$(basename "$f"); n="${n%.result.txt}"; n="${n%.pid}"
       case "$f" in *.pid) kill -0 "$(cat "$f")" 2>/dev/null && echo "  $n: RUNNING (pid $(cat "$f"))" ;; *) echo "  $n: $(head -n1 "$f" | cut -c1-100)  [$(tail -n1 "$f" | cut -c1-60)]" ;; esac
     done ;;
   serve)
-    load_project ""; [ -n "$PREVIEW_CMD" ] || die "no PREVIEW_CMD in projects/$SLUG.conf"
+    load_project "$proj"; [ -n "$PREVIEW_CMD" ] || die "no PREVIEW_CMD in projects/$SLUG.conf"
     sub="${1:-}"
     case "$sub" in
       list) for sf in "$RUNS"/serve-*.pid; do [ -f "$sf" ] || continue; sp=$(cut -d' ' -f1 "$sf"); kill -0 "$sp" 2>/dev/null && echo "$(basename "$sf" .pid | sed s/^serve-//) on :$(cut -d' ' -f2 "$sf") (pid $sp)"; done ;;
@@ -115,7 +118,7 @@ case "$cmd" in
          if kill -0 "$!" 2>/dev/null; then echo "serving $what at http://127.0.0.1:$port/ (log: runs/$SLUG/serve-$what.log; stop: ws serve stop $what)"; else rm -f "$sf"; tail -n 20 "$RUNS/serve-$what.log"; die "server exited"; fi ;;
     esac ;;
   stop)
-    name="${1:?ws stop <name>}"; load_project ""; pf="$RUNS/$name.pid"; [ -f "$pf" ] || die "no running $name"
+    name="${1:?ws stop <name>}"; load_project "$proj"; pf="$RUNS/$name.pid"; [ -f "$pf" ] || die "no running $name"
     pkill -TERM -P "$(cat "$pf")" 2>/dev/null; sleep 2; pkill -KILL -P "$(cat "$pf")" 2>/dev/null; echo "stopped $name; its worktree is untouched" ;;
   *)
     slug="$(resolve_slug "$cmd")"; load_project "$slug"

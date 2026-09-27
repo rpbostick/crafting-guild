@@ -46,7 +46,7 @@ state/current           the selected project. Not tracked.
 | Change the timeouts | `WS_DEFAULT_TIMEOUT` and `WS_LIGHT_TIMEOUT` in `config.sh`; `scripts/dispatch.sh` picks the light one when the task says `Track: light`. |
 | Change where worktrees live | `WT_ROOT` in `scripts/lib.sh`. They are under `<project>/.worktrees/` (excluded via `.git/info/exclude`) so the project's own `CLAUDE.md` applies to builders and this workspace's does not. |
 | Change the orchestrator's instructions | `CLAUDE.md`. Keep it short; long instruction files are how v1 spent 50,000 tokens before starting work. |
-| Add a subcommand | a `case` arm in `bin/ws`, calling a script in `scripts/`. |
+| Add a subcommand | a `case` arm in `bin/ws`, calling a script in `scripts/`. Use `load_project "$proj"` so a leading `--project <slug>` works; the scripts take `--project` themselves. |
 
 ## Design decisions worth knowing before you change them
 

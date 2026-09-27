@@ -45,6 +45,7 @@ Builders never push and never touch the main checkout. Every run has a dollar bu
 
 | Command | What it does |
 |---|---|
+| `ws --project <slug> <command> ...` | run any command below against a registered project other than the selected one (`state/current`, set by `ws <slug>`) |
 | `ws <slug>` | open an orchestrator session for a registered project |
 | `ws init <path> [--tests CMD] [--branch B]` | register a project |
 | `ws list`, `ws status [slug]` | projects; cold-start by hand |

@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.1.1 (2026-09-27)
+
+- **`ws --project <slug> <command>`.** `wait`, `tail`, `runs`, `stop` and `serve` used the selected project (`state/current`) and had no way to name another; `dispatch`, `review`, `merge` and `check` already took `--project` but only after the subcommand. A leading `--project` now applies to every subcommand, and `status` too. Found while testing 2.1.0 on a scratch repo from a terminal whose selected project was colorwright: `ws wait` looked in the wrong `runs/` folder and said the run did not exist.
+
 ## 2.1.0 (2026-09-27)
 
 The changes report 11 of the [research repo](https://github.com/rpbostick/agentic-framework-research) proposed after v2 built colorwright `v1.0`. All five come from the run logs of that build: builders spent 48% of their wall time in test commands, the merge gate grew from 6 to 28 minutes in a day before anyone measured it, and the product repo gained 188,000 lines of evidence against 8,800 of code.
