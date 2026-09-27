@@ -16,6 +16,13 @@ for pidf in "$RUNS"/*.pid; do
   budget=$(sed -n 's/^budget=//p' "$RUNS/$n.task.txt" 2>/dev/null)
   out+=("▶ $n $((el/60))m$(printf '%02d' $((el%60)))s · $calls calls · quiet ${idle}s${budget:+ · \$$budget cap}")
 done
+# Merges and reviews run without pid files; find them by command line (ps etimes = seconds since start).
+while read -r pid et args; do
+  set -- $args; kind=$(basename "$2" .sh)
+  case "$kind" in merge|review) ;; *) continue ;; esac
+  n="${@: -1}"; [ "$kind" = merge ] && n="${@: -2:1}"
+  out+=("⧗ $kind $n $((et/60))m$(printf '%02d' $((et%60)))s")
+done < <(ps -eo pid=,etimes=,args= | grep -E "bash [^ ]*/scripts/(merge|review)\.sh " | grep -v grep)
 for sf in "$RUNS"/serve-*.pid; do
   [ -f "$sf" ] || continue
   kill -0 "$(cut -d' ' -f1 "$sf")" 2>/dev/null || continue
