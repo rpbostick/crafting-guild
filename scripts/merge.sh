@@ -19,6 +19,11 @@ fi
 [ -d "$wt" ] && [ "$(git -C "$wt" status --short -uno | wc -l)" -gt 0 ] && die "worktree $wt has modified tracked files"
 [ "$(git -C "$PROJECT_PATH" rev-parse --abbrev-ref HEAD)" = "$PROJECT_BRANCH" ] || die "$PROJECT_PATH is not on $PROJECT_BRANCH"
 [ "$(git -C "$PROJECT_PATH" status --short -uno | wc -l)" -eq 0 ] || die "$PROJECT_PATH has modified tracked files; commit or discard first"
+# Home paths and the username in lines the branch adds (reviews no longer block on them in evidence
+# logs, so the gate does). Only added lines count, so old evidence already on the main branch can't block.
+leaks=$(git -C "$PROJECT_PATH" diff -U0 "$PROJECT_BRANCH...$tip" | grep -E '^\+[^+]' | grep -nF -e "$HOME" -e "-of-$USER" -e "/$USER/" | head -5)
+[ -z "$leaks" ] || die "branch $br adds home paths or the username (first 5 below); scrub them on the branch, commit, and review again:
+$leaks"
 has_remote=false
 if git -C "$PROJECT_PATH" remote get-url origin >/dev/null 2>&1; then
   has_remote=true; timeout 20 git -C "$PROJECT_PATH" fetch origin -q || die "fetch failed"
