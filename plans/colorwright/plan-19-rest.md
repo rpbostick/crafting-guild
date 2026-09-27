@@ -1,7 +1,7 @@
 # Colorwright: the rest of plan 19 (3a-2, 3b, 3c-2) and the Option C spike
 
 **In flight right now** (2026-09-27, rewrite at every dispatch):
-Nothing is running. **colorwright v1.0 is tagged** at `3625670` (wrap-up merged `db6ebda`, then "Patrick" → "the operator" in 199 tracked files, suite green). Next: the new project that builds on colorwright. Carried, optional: docs/history.md anchors point at README.md sections (link fix); pipeline/README.md is still a dated log in places.
+Nothing is running. colorwright `v1.0` tagged at `3625670`; loose ends after the tag merged on master: history links `6623043`, pipeline README as a reference `355fec5`, add_outline_region re-run fix `b527691`. Next: the new project that builds on colorwright.
 
 ## Requirements (from v1 `plans/backlog-plan-19.md` and `backlog-plan-18.md`; Patrick's choices there are settled)
 - 3a-2: the old `scripts/*-e2e-check.js` that guard features that still matter work with the carousel rows (a shared find-a-tile helper); one-off investigation scripts are retired with a note naming their last valid commit. Nothing still defaults to :8792.
