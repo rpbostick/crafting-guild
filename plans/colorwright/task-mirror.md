@@ -1,6 +1,6 @@
 # Mirror the avatar (look left / look right)
 
-Patrick, 2026-09-26: "i eventually want to be able to have the avatar mirror along the vertical axis (look left, look right), which will allow the prosthesis to be on either side." Use one command per Bash call; anything over 10 minutes in parts; scratch under `build/`. Browser ports 8790-8795.
+Patrick, 2026-09-26: "i eventually want to be able to have the avatar mirror along the vertical axis (look left, look right), which will allow the prosthesis to be on either side." Use one command per Bash call; anything over 10 minutes in parts; scratch under `build/`. Browser ports 8796-8799.
 
 Commands you may run: `node ...`, `npm test ...`, `bash scripts/run-all-tests.sh`, `backend/.venv/bin/pytest ...`, `backend/.venv/bin/python ...`, `pipeline/.venv/bin/python3 ...`, `pipeline/.venv/bin/pytest ...`, `git grep ...`, `git status`, `git diff ...`, git add/commit/rm/mv.
 
@@ -13,7 +13,7 @@ Commands you may run: `node ...`, `npm test ...`, `bash scripts/run-all-tests.sh
 ## Tests (shown failing before)
 - Frontend unit: the control toggles the flag; the preview group gets the transform; state and saved-look round trip; old state defaults to unmirrored.
 - Backend: the migration adds `mirrored`; old looks load false; save and load keep it.
-- e2e (`--port 8790`): the mirrored preview is the pixel mirror of the unmirrored one (within antialiasing), with a hat, the Hijab, facial hair and a prosthesis outfit; the flag survives a reload and a saved-look load.
+- e2e (`--port 8796`): the mirrored preview is the pixel mirror of the unmirrored one (within antialiasing), with a hat, the Hijab, facial hair and a prosthesis outfit; the flag survives a reload and a saved-look load.
 
 ## Done when
 - Tests pass and were shown failing first; a screenshot pair (left/right) of 2 poses with a prosthesis outfit and a hat.
