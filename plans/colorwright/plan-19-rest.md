@@ -1,7 +1,7 @@
 # Colorwright: the rest of plan 19 (3a-2, 3b, 3c-2) and the Option C spike
 
-**In flight right now** (2026-09-26 20:56 MDT; rewrite at every dispatch):
-`cw-p20-2a` rebase (task-p20-2a-rebase.md, $10): take master (hats round 2), rebuild the manifest, hair roles for Gray Bun ring / Cornrows 2 backing / Bun 2 speck; then review and merge (db copy). Next: p20-2b (Hair row in the app; task to write) and the prosthesis colours (task-prosthesis-colours.md) in parallel. Backlog: mirror the avatar.
+**In flight right now** (2026-09-26 22:12 MDT; rewrite at every dispatch):
+Two builders. `cw-p20-2b` (task-p20-2b-hair-row.md, $25, ports 8796-8799): head styles + Hair row in the app. `cw-prosthesis` (task-prosthesis-colours.md, $10, ports 8790-8795). Both visible: preview for Patrick (2b on :8801, prosthesis on :8802), db copy, merge. Then p20-3 (hat tucks by class + redrawn big-hair edges). Backlog: mirror the avatar.
 
 ## Requirements (from v1 `plans/backlog-plan-19.md` and `backlog-plan-18.md`; Patrick's choices there are settled)
 - 3a-2: the old `scripts/*-e2e-check.js` that guard features that still matter work with the carousel rows (a shared find-a-tile helper); one-off investigation scripts are retired with a note naming their last valid commit. Nothing still defaults to :8792.
@@ -43,3 +43,4 @@ All four merged (the spike's evidence with its build, or on its own if Patrick d
 - 2026-09-26: heads analysis part 1 (`773c083`, $6.62; review fix-first on stale Q2 numbers, fixed in part 2). Patrick: keep every head variation as head styles, separate hair from head, all hats on all heads + hairs; Bear a head style that takes hair and hats; redraw big-hair edges under hats. New plan: `plan-20-heads-hair-hats.md`.
 - 2026-09-26: Option C merged `a55a376` (reviewed `0467797`; build $10.79 + fixes $3.98 + $4.43; reviews $1.39, $1.01, $1.14). Patrick on :8801 twice: black under Twists' front hair → fix 1; six ear-top wedges and Twists' brow knobs in hair colour with a thin (5-unit) outline → fix 2; "looks good, merge". db copied to `backend/colorwright.db.2026-09-26-optc.bak`. The merge's test run took over 10 minutes with a spike running alongside.
 - 2026-09-26: hats round 2 merged `4d0f332` (reviewed `4b6f2f4`; build $16.36 + finish $19.00; reviews $1.31, $1.33; the orchestrator committed the finish round's suite log and fixed two evidence blockers). Patrick on :8801: first pass "hat hip, beanie, and turban don't work with afro ... no hair above the rim", Beanie band merged into the hat, Hat Hip ear lines dropped, Hijab own crop, worn hat wins; second pass "looks good, merge", keep the fringe under the brim. db copied to `backend/colorwright.db.2026-09-26-hats2.bak`.
+- 2026-09-26: p20-2a merged `3b3ee79` (reviewed `a8efe21`; build $14.61 + rebase $5.38; reviews $1.40, $1.31; the orchestrator ran and committed the full suite and scrubbed home paths). db copied to `backend/colorwright.db.2026-09-26-p20-2a.bak`.
