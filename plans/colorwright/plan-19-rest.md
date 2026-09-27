@@ -1,7 +1,7 @@
 # Colorwright: the rest of plan 19 (3a-2, 3b, 3c-2) and the Option C spike
 
-**In flight right now** (2026-09-27 00:45 MDT; rewrite at every dispatch):
-`cw-p20-2b` fix round 1 (task-p20-2b-fix-1.md, $30, ports 8796-8799) running; master has moved (prosthesis `a343cf3`), so 2b may need `git merge master` before its merge. Then preview for Patrick, db copy, merge. Then the wrap (plan 20, "Wrap"): pipeline test speed; mirror + big-hair edges in parallel; wrap-up pass and the v1.0 tag.
+**In flight right now** (2026-09-27 01:48 MDT; rewrite at every dispatch):
+Two builders. `cw-p20-2b` finish (task-p20-2b-finish.md, $15, timeout 150m, ports 8796-8799; the fix round timed out at 90m with its feedback work committed): commit leftovers, last checks, merge master, full suite; then preview for Patrick, db copy, merge. `cw-testspeed` (task-pipeline-tests-speed.md, light, $8, 120m, no browser). Then mirror + big-hair edges in parallel (tasks written), then the wrap-up pass and v1.0.
 
 ## Requirements (from v1 `plans/backlog-plan-19.md` and `backlog-plan-18.md`; Patrick's choices there are settled)
 - 3a-2: the old `scripts/*-e2e-check.js` that guard features that still matter work with the carousel rows (a shared find-a-tile helper); one-off investigation scripts are retired with a note naming their last valid commit. Nothing still defaults to :8792.
