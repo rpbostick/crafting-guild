@@ -1,7 +1,7 @@
 # rpbostick.github.io: plan
 
 **In flight right now**
-`site-fw` (step 1, `task-site-1-figurewright.md`) dispatched 2026-09-28 from the bike-weather session (use `--project rpbostick-github-io`): Pages deploy Action, card index at `/`, figurewright landing page at `/figurewright/` with React Bits Waves. When it finishes: review, preview on :8803 for Patrick, merge (the push deploys to https://rpbostick.github.io/).
+`site-fw` round 2 (`task-site-2-waves-colour.md`, $12) dispatched 2026-09-28 11:35 MDT on the same branch: 72-stop OKLCH palette (12 hue families × A–F, serpentine), drift + click-to-activate wheel stepping, colour tag, splash lineup (`figurewright/docs/renders/splash.svg`, merged as 2a3f8ce) over a translucent panel, and the round-1 review's suggestions. Round 1 was reviewed **merge** at 5ef1b00; re-review after round 2. Preview on :8803 (`ws serve site-fw 8803`, already running). Then Patrick looks, merge, the push deploys.
 
 ## Requirements (Patrick, 2026-09-28)
 - Live, somewhat interactive demos of colorwright, figurewright, skywright and later projects, for a job-building class (Multiverse, run by Lizthedeveloper).
@@ -17,3 +17,4 @@
 
 ## Decisions
 - 2026-09-28: user site (option 2) over a `demos` repo; colorwright gets a static mode, not a hosted backend; simple card index; work starts now alongside fw-refs; figurewright landing page uses React Bits Waves (Patrick).
+- 2026-09-28, on the preview (Patrick): the hero is a toy: Waves ripples on the mouse; colours drift slowly on their own; click into the hero and the wheel steps forward/back through 12 hue families (every 30°) × 6 shades A (tint) to F (shade); drift resumes 8 s after the last tick; a lineup of five figures in front, opaque, with a slightly transparent surround. Serpentine order through the stops is the orchestrator's call (no lightness jumps).
