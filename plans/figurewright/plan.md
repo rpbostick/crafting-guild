@@ -1,7 +1,7 @@
 # figurewright: plan
 
 **In flight right now**
-Dispatched 2026-09-27 20:02 MDT from the bike-weather session (use `--project figurewright`), in parallel, each in its own `src/` module (index lines pre-added on main, e20ce47): `fw-body` (step 3, $12), `fw-ink` (step 4, $15; commits `spike/renders/ink-closeup.png` for Patrick to approve), `fw-extremities` (step 5, $15; commits `assets/extremities/contact.png` for Patrick). Merged today: spike 706335f, port 0533525. When each finishes: review, show Patrick the committed render where there is one, merge one at a time. Then step 6 (garments) after body.
+From the bike-weather session (use `--project figurewright`): `fw-extremities` (step 5, dispatched 20:02; commits `assets/extremities/contact.png` for Patrick) and `fw-garments` (step 6, $15, dispatched 2026-09-27 20:15 MDT; commits `docs/renders/garments.png` for Patrick). Merged today: spike 706335f, port 0533525, body b482cad, ink 5ab7ba0. Waiting on Patrick: the ink close-up (`spike/renders/ink-closeup.png`), especially whether the corner gaps stay on. Then step 7 (compose) after extremities and garments.
 
 ## Requirements (Patrick, 2026-09-27; see `plans/bike-weather/product.md`)
 - An open-source (MIT) avatar tool in TypeScript for React Native/Expo, with a small Expo demo app, released separately from Bike Weather, which consumes it.
@@ -33,3 +33,5 @@ Bike Weather can build a figure from a body shape, colorwright head parts and la
 
 ## Carried suggestions
 - spike (review of f07dc8d): `spike/vendored.ts` draws only a subset of colorwright's DRAW_ORDER; the port is the reference, not the spike. `cast.ts` silently draws no head when a body has no head; body/head counts must be checked. Unused helpers `cmToUnits`, `writeSvg`, `figureHeightUnits`. The shoulder line is ~0.80-0.82 of height, not constant. Log arm angles as evidence when porting `buildArm`. `shapes.png` cells are too narrow for broad/round bodies.
+- ink (review of 4083f09): a seam jog where each closed outline starts (the variation field doesn't wrap; blend or fit whole periods, and test it); `cornerAngle` has no range check; unexport `sub`, `dist`, `findCorners`; the options comment cites a gitignored `.ws-evidence/` file (move the measurements into `docs/`).
+- body (review of ddcf1c4): scripts import helpers from `test/`; move shared corners/extremes into a shared module. The waist slider reaches only a fifth of the way to round (arm-angle limit); `limbs` is thickness, not length.
