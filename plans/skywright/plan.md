@@ -1,7 +1,7 @@
 # skywright: plan
 
 **In flight right now**
-Nothing running. `sky-demo` merged 2026-09-28 as 41af13e after Patrick's OK on the preview. Merged 2026-09-27: geocode 6a2b378, model d96489d, comfort ac0ebda, ride 8830fdc. Next: step 6 (cache and release prep) with the carried suggestions; the demo site's skywright page (rpbostick.github.io step 2) can now use the Expo web export.
+`sky-release` (step 6, `task-sky-6-release.md`, $12) dispatched 2026-09-28: cache with injectable storage, the carried suggestions, publish-ready package (0.1.0, dist/), README with Open-Meteo terms, demo back link. Merged today: sky-demo 41af13e, sky-web 320c7c0 (credit, /skywright base path, demo:export:site). Patrick decides when to publish.
 
 ## Requirements (Patrick, 2026-09-27; see `plans/bike-weather/product.md`)
 - An open-source (MIT) weather library in TypeScript, usable from React Native/Expo and Node (only `fetch`, no Node-only APIs in `src/`), plus a small Expo demo app released with it.
