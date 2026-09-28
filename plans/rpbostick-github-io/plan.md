@@ -1,7 +1,7 @@
 # rpbostick.github.io: plan
 
 **In flight right now**
-`site-controls`: round 1 (hero controls: middle-click, drag-to-morph, theme switch; $2.32) done; round 2 (`task-site-5-process-art.md`: easing lineup from figurewright dd82f04, "How it's made" process art, drag hint) dispatched 2026-09-28 on the same branch; the orchestrator committed the source art (576e979). Then: one review of the branch, preview on :8803, Patrick looks, merge (the push deploys). Drag knobs to tune on Patrick's feedback: `patternDrive.ts` PIXELS_PER_PRESET=600, GAIN_SPEED=1, MAX_GAIN=8, COAST_TAU_MS=350.
+Live: site-controls merged as 8f94fe1 and deployed 2026-09-28 (Actions green): theme switch, middle-click toggle, drag-to-morph, the easing lineup with the Open Peeps easing and pointing_finger originals as bookends (figurewright ad6d850), "How it's made". Nothing running. Next: step 2 (skywright) after sky-demo merges. Carried: hand clip-seam hairlines in the generated figures (fixed by the body build's baked clip); theme storage key duplicated in the inline scripts; focus the hero on middle-press activation; bump configure-pages/deploy-pages for Node 24.
 
 ## Requirements (Patrick, 2026-09-28)
 - Live, somewhat interactive demos of colorwright, figurewright, skywright and later projects, for a job-building class (Multiverse, run by Lizthedeveloper).
