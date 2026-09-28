@@ -1,7 +1,7 @@
 # rpbostick.github.io: plan
 
 **In flight right now**
-`site-fw` rounds 1–3 done and reviewed **merge** at 8e4c527 (2026-09-28): palette, drift, click-to-activate wheel, colour tag, splash lineup, bottom scroll strip. Waiting on Patrick's look at :8803, then `ws merge site-fw 8e4c527...` (the push deploys). Carried: clicks on the strip's empty area activate the hero (ignore targets inside `.hero-strip`); save a hero screenshot as evidence; README note that Pages source is Actions (already set).
+Live since 2026-09-28: site-fw merged as c3dc755 and deployed to https://rpbostick.github.io/ (Actions run green). Nothing running. Next: step 2 (skywright) after sky-demo merges. Carried: clicks on the strip's empty area activate the hero (ignore targets inside `.hero-strip`); save a hero screenshot as evidence; README note that Pages source is Actions; bump configure-pages/deploy-pages when Node 24 versions ship.
 
 ## Requirements (Patrick, 2026-09-28)
 - Live, somewhat interactive demos of colorwright, figurewright, skywright and later projects, for a job-building class (Multiverse, run by Lizthedeveloper).
