@@ -1,7 +1,7 @@
 # figurewright: plan
 
 **In flight right now**
-`fw-pose` (step B1, `task-fw-17-pose.md`, $15) dispatched 2026-09-28: the easing rig and posed skeleton into `src/body`, shoulders narrowed toward Open Peeps (43–44 cm average). Next, B2: dress the posed body (posed garments, easing's hands and shoes sized from its parts and scaled with height, the hand clip baked into the skin path, the sleeve line broken with a gap, ink gaps off by default, the tee's shoulder ink blob and chest seam). Then compose (step 7) on the layering spike's model (`spike/layers/`, merged 0f5ef51), then the garment import engine. Merged today: body A 4706925 (with fix round 1), layers 0f5ef51, fw-refs2 5ae8863.
+`fw-dress` (step B2, `task-fw-18-dress-pose.md`, $20, 180m) dispatched 2026-09-28: posed garments, easing's hands and shoes (scaled with height, clip baked into the skin path), arms that read as arms, the shoulders slider moving the joint outward, broken sleeve line, ink gaps off by default, tee blob and chest seam. B1 (pose) merged as 18dd6e9. Next: compose (step 7) on the layering spike's model, then the garment import engine.
 
 ## Requirements (Patrick, 2026-09-27; see `plans/bike-weather/product.md`)
 - An open-source (MIT) avatar tool in TypeScript for React Native/Expo, with a small Expo demo app, released separately from Bike Weather, which consumes it.
