@@ -45,10 +45,15 @@ if [ -n "$TEST_CMD" ]; then
     tail -n 30 "$log"; die "tests failed on the merged tree; merge undone. Log: ${log#"$WS/"}"
   fi
 else echo "no TEST_CMD for $SLUG; merging without a test gate"; fi
-if $has_remote; then git -C "$PROJECT_PATH" push -q origin "$PROJECT_BRANCH" && echo "pushed $merged to origin/$PROJECT_BRANCH"; fi
+push_failed=false
+if $has_remote; then
+  if git -C "$PROJECT_PATH" push -q origin "$PROJECT_BRANCH"; then echo "pushed $merged to origin/$PROJECT_BRANCH"
+  else push_failed=true; fi
+fi
 if [ -d "$wt/.ws-evidence" ] && [ -n "$(ls -A "$wt/.ws-evidence" 2>/dev/null)" ]; then
   rm -rf "$RUNS/evidence/$name"; mkdir -p "$RUNS/evidence"; mv "$wt/.ws-evidence" "$RUNS/evidence/$name" && echo "evidence kept at runs/$SLUG/evidence/$name/"
 fi
 [ -d "$wt" ] && git -C "$PROJECT_PATH" worktree remove --force "$wt" 2>/dev/null && echo "worktree removed (untracked files discarded)"
 git -C "$PROJECT_PATH" branch -d "$br" -q 2>/dev/null && echo "branch $br deleted"
 echo "merged $br as $merged"
+if $push_failed; then echo "PUSH FAILED: $merged is merged locally but not on origin/$PROJECT_BRANCH; fix the cause above, then: git -C $PROJECT_PATH push origin $PROJECT_BRANCH" >&2; exit 3; fi
