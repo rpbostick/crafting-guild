@@ -25,6 +25,8 @@ Nothing for Bike Weather itself yet. Milestone 1 (the tools) is running: skywrig
 | colorwright | The body tool is a new project that copies colorwright's head/hair/face/hat/accessory SVGs (Open Peeps, CC0) and ports its slot, colour-role and draw-order logic. colorwright is unchanged. Store listings must not use the Open Peeps name. |
 | Order | Both tools in parallel; Bike Weather after both are satisfactory. Milestone 1 is the core loop. |
 
+- 2026-09-28: the app may become multi-activity ("Hike Weather" or broader); the name waits on SEO research. No riding pose for now: cycling clothes on the regular pose.
+
 ## Orchestrator defaults (not objected to)
 - Weather goes through a provider interface. Open-Meteo's free tier while building (non-commercial only); choose a commercial provider (Open-Meteo paid, WeatherKit, OpenWeather) before launch.
 - Recommendation: rules comparing garment warmth ratings against feels-like temperature (wind chill at riding speed in ride mode), plus a learned per-user hot/cold offset from comfort ratings.
