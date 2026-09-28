@@ -40,3 +40,5 @@ Nothing for Bike Weather itself yet. Milestone 1 (the tools) is running: skywrig
 
 ## Machine
 - 2026-09-27: Patrick: use a current Node ("no sense building on outdated"). Switched at 21:40 MDT: `~/.local/node` → `node-v24.21.0` (LTS; old kept at `~/.local/node-v20.17.0`). node_modules reinstalled in skywright, skywright/example, figurewright; all suites green (skywright 158, figurewright 1405), no engine warnings.
+
+- 2026-09-28: clothing layers like real clothing (underwear to coat, hats, snowpants, gloves); several colour-coded garments at once with lower layers visible; add/remove layers in order; later a get-dressed / undress / layer animation with garments exploding out like FreeCell. figurewright's compose step must expose per-garment groups and an exploded layout (see `plans/figurewright/plan.md`, Requirements).

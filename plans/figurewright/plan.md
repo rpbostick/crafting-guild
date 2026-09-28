@@ -10,6 +10,7 @@
 - A **garment layering engine** and a basic set of **parametric garments** (tee, long sleeve, jacket, pants, shorts, shoes; generated in code to fit every body shape, recolourable). Bike Weather adds its own closed catalog (cycling gear, ratings) on top of the engine.
 - An illustrator may redraw garments later if the app sells; the engine must accept hand-drawn garment art as well as generated.
 
+- **Real layering** (Patrick, 2026-09-28): clothing layers like real clothing: undergarments, base, mid, insulation, shell, coats; hats, snowpants, gloves, etc. Several colour-coded garments worn at once, lower layers visible under upper ones (collars, cuffs, hems; an open/cutaway view), layers removable and addable in a tidy, correct order. Future animation: "get dressed", "get undressed", "remove/add a layer", garments exploding out and flying back like FreeCell's win screen. Design implications: zones with ordered layer ranks and several garments per zone; each layer fits over what is beneath it; a dressing-order rule (what must come off first); `renderFigure` output as body + one group per garment with stable ids and anchors, plus an exploded-layout function (target transforms per garment in layer order); the app animates, the engine supplies positions and order; hand-drawn garments use the same model.
 Guesses (tell Patrick if one turns out wrong): renders are SVG strings (react-native-svg in the app, resvg for tests and contact sheets); the body is drawn in the Open Peeps line style (black outline, flat fills) so heads and body match.
 
 ## Steps
