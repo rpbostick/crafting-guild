@@ -10,6 +10,8 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - Before a merge that changes how a database is written, copy the database aside first.
 - A test-count claim cites the log it came from.
 
+- Nothing goes public without `release-audit.md` passing and Patrick seeing the findings. colorwright's static build shipped dated comments quoting him to the public site (2026-09-28).
+
 ## Running builders
 - Parallel builders share the CPU, not only the plan. Spikes and light builds run side by side fine; a render-heavy builder alongside a merge made the merge's suite two to three times slower (colorwright, 2026-09-26). The usage limit stopped no run in 42 hours. Merge when nothing heavy is running, and every dispatch gets a budget.
 - Wait for a run with `bin/ws wait <name>` under `run_in_background`, never with a foreground loop that can time out.
