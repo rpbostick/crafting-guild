@@ -1,7 +1,7 @@
 # figurewright: plan
 
 **In flight right now**
-`fw-dress` (step B2, `task-fw-18-dress-pose.md`, $20, 180m) dispatched 2026-09-28: posed garments, easing's hands and shoes (scaled with height, clip baked into the skin path), arms that read as arms, the shoulders slider moving the joint outward, broken sleeve line, ink gaps off by default, tee blob and chest seam. B1 (pose) merged as 18dd6e9. Next: compose (step 7) on the layering spike's model, then the garment import engine.
+Review page for Patrick: http://127.0.0.1:8802/ serves `/tmp/claude-1000/-home-patrickb-agentic-workspace-v2/d8f29e9e-f7dd-4d90-8d36-6fb604b5c300/scratchpad/review` (index.html sections A–H, photos.html); a new session copies it into its own scratchpad and adds section I for B2's renders. `fw-dress` (step B2, `task-fw-18-dress-pose.md`, $20, 180m) dispatched 2026-09-28: posed garments, easing's hands and shoes (scaled with height, clip baked into the skin path), arms that read as arms, the shoulders slider moving the joint outward, broken sleeve line, ink gaps off by default, tee blob and chest seam. B1 (pose) merged as 18dd6e9. Next: compose (step 7) on the layering spike's model, then the garment import engine.
 
 ## Requirements (Patrick, 2026-09-27; see `plans/bike-weather/product.md`)
 - An open-source (MIT) avatar tool in TypeScript for React Native/Expo, with a small Expo demo app, released separately from Bike Weather, which consumes it.
