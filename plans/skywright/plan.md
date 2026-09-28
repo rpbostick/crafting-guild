@@ -1,7 +1,7 @@
 # skywright: plan
 
 **In flight right now**
-Dispatched 2026-09-27 19:00 MDT from the bike-weather session (use `--project skywright`): `sky-model` (step 1, $10), `sky-comfort` (step 2, $8), `sky-geocode` (step 3, light, $5), in parallel, each in its own file. When each finishes: review, merge (one merge at a time). When 1 and 2 are merged, write and dispatch step 4 (ride window).
+`sky-ride` (step 4 + review fixes A: wind height in feels-like at speed, B: per-hour DST offsets; $10) dispatched 2026-09-27 19:05 MDT from the bike-weather session (use `--project skywright`). Steps 1-3 merged 2026-09-27: geocode 6a2b378, model d96489d, comfort ac0ebda. When sky-ride finishes: review, merge; then the orchestrator installs Expo in `example/` and writes step 5 (demo app).
 
 ## Requirements (Patrick, 2026-09-27; see `plans/bike-weather/product.md`)
 - An open-source (MIT) weather library in TypeScript, usable from React Native/Expo and Node (only `fetch`, no Node-only APIs in `src/`), plus a small Expo demo app released with it.
@@ -24,3 +24,8 @@ Bike Weather can import skywright, fetch a forecast for any searched place, and 
 
 ## Decisions
 - 2026-09-27: MIT; name skywright; Open-Meteo first; tool built before Bike Weather's own work (Patrick).
+
+## Carried suggestions (fold into the next task on that code)
+- geocode (review of 9aabc3c): record a real geocoding-API error body for the provider-error test; rename or tighten "parses every result"; decide whether `AbortSignal.timeout()`'s `TimeoutError` passes through like `AbortError` and pin it with a test; validate `count` consistently for short queries.
+- model (review of a3ba23f): the out-of-range `days` clamp is silent (document it on ForecastOptions or throw); `abort(reason)` with a custom reason is wrapped as 'network' (check `signal.aborted`); a null sunrise/sunset (polar day) fails the parse; consider making them optional. DST offsets are fixed in step 4.
+- comfort (review of 6a12190): the wind-height fix, the literal-copy test and the loose no-heading bounds are in step 4. Open: the heat index has no wind term, so riding doesn't cool the hot-weather feels-like; a cycling hot-weather model belongs in Bike Weather's recommendation engine or a later skywright step.
