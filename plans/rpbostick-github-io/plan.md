@@ -1,7 +1,7 @@
 # rpbostick.github.io: plan
 
 **In flight right now**
-`site-controls` (`task-site-4-hero-controls.md`, $10) dispatched 2026-09-28: middle-click toggles colour mode ↔ page scroll, left-drag morphs the wave pattern through ~6 Waves presets (faster drags accelerate), a System/Light/Dark switch upper right (default System, saved per browser). The site has been live since c3dc755. Then: review, preview on :8803, Patrick looks, merge (the push deploys).
+`site-controls`: round 1 (hero controls: middle-click, drag-to-morph, theme switch; $2.32) done; round 2 (`task-site-5-process-art.md`: easing lineup from figurewright dd82f04, "How it's made" process art, drag hint) dispatched 2026-09-28 on the same branch; the orchestrator committed the source art (576e979). Then: one review of the branch, preview on :8803, Patrick looks, merge (the push deploys). Drag knobs to tune on Patrick's feedback: `patternDrive.ts` PIXELS_PER_PRESET=600, GAIN_SPEED=1, MAX_GAIN=8, COAST_TAU_MS=350.
 
 ## Requirements (Patrick, 2026-09-28)
 - Live, somewhat interactive demos of colorwright, figurewright, skywright and later projects, for a job-building class (Multiverse, run by Lizthedeveloper).
@@ -18,4 +18,5 @@
 ## Decisions
 - 2026-09-28: user site (option 2) over a `demos` repo; colorwright gets a static mode, not a hosted backend; simple card index; work starts now alongside fw-refs; figurewright landing page uses React Bits Waves (Patrick).
 - 2026-09-28 (Patrick): middle-click toggles colour mode and page scroll; dragging morphs the wave pattern, accelerating with speed; a theme switch (System default; black background wanted if only one); orchestrator picked the preset loop and drag axes.
+- 2026-09-28 (Patrick): the hero uses the easing-pose lineup; the process art (measurements, traces, rig, sliders) goes on the page as "How it's made".
 - 2026-09-28, on the preview (Patrick): the hero is a toy: Waves ripples on the mouse; colours drift slowly on their own; click into the hero and the wheel steps forward/back through 12 hue families (every 30°) × 6 shades A (tint) to F (shade); drift resumes 8 s after the last tick; a lineup of five figures in front, opaque, with a slightly transparent surround. Serpentine order through the stops is the orchestrator's call (no lightness jumps).
