@@ -1,7 +1,7 @@
 # Bike Weather: product plan
 
 **In flight right now**
-Nothing for Bike Weather itself yet. Milestone 1 (the tools) is running: skywright steps 1-3 and figurewright's spike and port, dispatched 2026-09-27 19:00 MDT; see `plans/skywright/plan.md` and `plans/figurewright/plan.md`. The Bike Weather skeleton (Expo app) waits until both tools are satisfactory.
+Nothing for Bike Weather itself yet. Milestone 1: skywright is done (steps 1-6 merged 2026-09-28); figurewright is at step B2 (`fw-dress`). The Bike Weather skeleton waits until figurewright is satisfactory. **Release gate:** skywright is published to npm only after Bike Weather's core loop uses it (skywright plan step 7).
 
 ## Requirements (operator, 2026-09-27)
 - A closed-source, paid app for the iOS and Android app stores. Working title "Bike Weather".
@@ -34,7 +34,7 @@ Nothing for Bike Weather itself yet. Milestone 1 (the tools) is running: skywrig
 
 ## Milestones
 1. **Tools satisfactory** (separate projects): the weather library + demo app; the body/garment tool + demo app.
-2. **Bike Weather core loop**: avatar builder, clothing library from garment templates with ratings, today's forecast, suggested outfit on the avatar in ride/everyday mode, comfort rating, export/import.
+2. **Bike Weather core loop**: avatar builder, clothing library from garment templates with ratings, today's forecast, suggested outfit on the avatar in ride/everyday mode, comfort rating, export/import. Closing this milestone includes publishing skywright (its plan's step 7) and asking Patrick about figurewright's release.
 3. **Trips, tiers and purchases**: multi-day, multi-place trips with a packing list; free/paid gating; in-app purchase.
 4. Later: poses (riding), opt-in data contribution, partner products, commercial weather provider, store release.
 

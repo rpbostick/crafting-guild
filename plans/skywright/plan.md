@@ -1,7 +1,7 @@
 # skywright: plan
 
 **In flight right now**
-Nothing. Step 6 (`sky-release`) merged 2026-09-28 as 647e120: cache, README, publish-ready 0.1.0. All six steps are done; Patrick decides when to publish to npm.
+Nothing. Step 6 (`sky-release`) merged 2026-09-28 as 647e120: cache, README, publish-ready 0.1.0. Steps 1-6 are done. Step 7 (publish) waits until Bike Weather uses skywright.
 
 ## Requirements (Patrick, 2026-09-27; see `plans/bike-weather/product.md`)
 - An open-source (MIT) weather library in TypeScript, usable from React Native/Expo and Node (only `fetch`, no Node-only APIs in `src/`), plus a small Expo demo app released with it.
@@ -18,6 +18,7 @@ Guesses (tell Patrick if one turns out wrong): metric internally with unit helpe
 4. **Ride window** (after 1 and 2): `src/ride.ts`: given a forecast, a start time, a duration, a speed and optionally a heading, return the window's range of feels-like at speed, the worst rain hour, the peak gust, and whether it ends after sunset. One new line in `src/index.ts`.
 5. **Demo app** (after 4): `example/`, an Expo app: place search, current conditions, hourly, and a ride-window picker showing feels-like at speed. The orchestrator installs Expo in `example/` first; preview through Expo web on :8801.
 6. **Cache and release prep** (after 5): a response cache with injectable storage; README with the API and examples; package.json ready to publish (`private` off, `dist` build). Patrick decides when to publish.
+7. **Publish** (after Bike Weather's core loop uses skywright; Patrick, 2026-09-28): fold in the API changes Bike Weather needed, then run `release-audit.md` on the source and `dist/`, show Patrick the findings, create a fresh single-commit public repo (the private one keeps its history), fix `repository`/`homepage` in package.json, and `npm publish` after he approves (he runs `npm login`). The name `skywright` was free on npm on 2026-09-28.
 
 ## Done when (satisfactory for Bike Weather)
 Bike Weather can import skywright, fetch a forecast for any searched place, and get a ride-window summary; the demo app shows the same; the suite passes.
