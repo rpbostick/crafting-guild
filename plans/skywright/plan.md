@@ -1,7 +1,7 @@
 # skywright: plan
 
 **In flight right now**
-`sky-demo` (step 5, $12) dispatched 2026-09-27 19:59 MDT from the bike-weather session (use `--project skywright`). Expo SDK 57 is in `example/` (2c5f607); preview with `bin/ws --project skywright serve sky-demo 8801`. Merged today: geocode 6a2b378, model d96489d, comfort ac0ebda, ride 8830fdc. Status 2026-09-27 22:16 MDT: finished and reviewed **merge** at 94984c5; waiting on Patrick's look at the preview (server stopped when VS Code closed at 21:43; restart it for him), then merge at 94984c5; then step 6 (cache and release prep) with the carried suggestions.
+`sky-demo` (step 5, $12) dispatched 2026-09-27 19:59 MDT from the bike-weather session (use `--project skywright`). Expo SDK 57 is in `example/` (2c5f607); preview with `bin/ws --project skywright serve sky-demo 8801`. Merged today: geocode 6a2b378, model d96489d, comfort ac0ebda, ride 8830fdc. Status 2026-09-27 22:16 MDT: finished and reviewed **merge** at 94984c5; waiting on Patrick's look at the preview (preview restarted on :8801 2026-09-28 10:20 MDT), then merge at 94984c5; then step 6 (cache and release prep) with the carried suggestions.
 
 ## Requirements (Patrick, 2026-09-27; see `plans/bike-weather/product.md`)
 - An open-source (MIT) weather library in TypeScript, usable from React Native/Expo and Node (only `fetch`, no Node-only APIs in `src/`), plus a small Expo demo app released with it.

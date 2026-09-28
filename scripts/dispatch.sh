@@ -22,6 +22,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 name="${1:?usage: dispatch.sh [flags] <name> <task-file>}"; task="${2:?missing task file}"
+[ $# -gt 2 ] && die "flags go before the name; ignored would be: ${*:3}"
 case "$name" in *[!A-Za-z0-9._-]*) die "bad name '$name'" ;; esac
 [ -f "$task" ] || die "no task file $task"
 # Timeout follows the track unless --timeout was given: a light task gets the short cap.
