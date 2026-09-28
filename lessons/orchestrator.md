@@ -14,6 +14,7 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - Parallel builders share the CPU, not only the plan. Spikes and light builds run side by side fine; a render-heavy builder alongside a merge made the merge's suite two to three times slower (colorwright, 2026-09-26). The usage limit stopped no run in 42 hours. Merge when nothing heavy is running, and every dispatch gets a budget.
 - Wait for a run with `bin/ws wait <name>` under `run_in_background`, never with a foreground loop that can time out.
 - A missing grant stalls a builder silently. Name every command the task needs and pass extras with `--allow`. Tell the task to use one command per Bash call.
+- `cp`, `curl` and `rm` are not in the base grants: a task that copies an asset in from another repo needs `--allow "Bash(cp *)"` (site-fw round 2, 2026-09-28, shipped without its splash image). Flags go before the builder name; since 2.1.3 dispatch refuses them after it.
 - When a run stops on the usage limit, its uncommitted work is still in the worktree. Resume with a task that says so and dispatch at the stated reset time.
 - Do not edit files an open branch also touches. Put the edit in that branch's task.
 - Never `cd` in a Bash call. It moves this session's working directory.
