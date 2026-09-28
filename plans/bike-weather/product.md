@@ -37,4 +37,4 @@ Nothing for Bike Weather itself yet. Milestone 1 (the tools) is running: skywrig
 4. Later: poses (riding), opt-in data contribution, partner products, commercial weather provider, store release.
 
 ## Machine
-- 2026-09-27: Patrick: use a current Node ("no sense building on outdated"). Node v24.21.0 LTS unpacked at `~/.local/node-v24.21.0`; switch `~/.local/node` to it (old kept as `~/.local/node-v20.17.0`) when no builder is running, then reinstall `node_modules` in skywright, skywright/example and figurewright and rerun their suites.
+- 2026-09-27: Patrick: use a current Node ("no sense building on outdated"). Switched at 21:40 MDT: `~/.local/node` → `node-v24.21.0` (LTS; old kept at `~/.local/node-v20.17.0`). node_modules reinstalled in skywright, skywright/example, figurewright; all suites green (skywright 158, figurewright 1405), no engine warnings.
