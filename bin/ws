@@ -107,13 +107,15 @@ case "$cmd" in
     case "$sub" in
       list) for sf in "$RUNS"/serve-*.pid; do [ -f "$sf" ] || continue; sp=$(cut -d' ' -f1 "$sf"); kill -0 "$sp" 2>/dev/null && echo "$(basename "$sf" .pid | sed s/^serve-//) on :$(cut -d' ' -f2 "$sf") (pid $sp)"; done ;;
       stop) what="${2:-main}"; sf="$RUNS/serve-$what.pid"; [ -f "$sf" ] || die "nothing serving for $what"; sp=$(cut -d' ' -f1 "$sf")
-            pkill -TERM -P "$sp" 2>/dev/null; kill -TERM "$sp" 2>/dev/null; sleep 1; pkill -KILL -P "$sp" 2>/dev/null; rm -f "$sf"; echo "stopped $what" ;;
+            # the server runs in its own process group (setsid below), so npx's grandchildren go too
+            kill -TERM -- "-$sp" 2>/dev/null; pkill -TERM -P "$sp" 2>/dev/null; kill -TERM "$sp" 2>/dev/null; sleep 1
+            kill -KILL -- "-$sp" 2>/dev/null; pkill -KILL -P "$sp" 2>/dev/null; rm -f "$sf"; echo "stopped $what" ;;
       "") die "usage: ws serve <worktree-name|main> [port] | ws serve stop [name] | ws serve list" ;;
       *) what="$sub"; port="${2:-}"
          if [ "$what" = main ]; then dir="$PROJECT_PATH"; [ -z "$port" ] && port=8800; else dir="$(worktree_dir "$what")"; [ -d "$dir" ] || die "no worktree $what"; [ -z "$port" ] && port=8801; fi
          sf="$RUNS/serve-$what.pid"; [ -f "$sf" ] && kill -0 "$(cut -d' ' -f1 "$sf")" 2>/dev/null && die "$what is already serving (ws serve stop $what)"
          cmd="${PREVIEW_CMD//\{port\}/$port}"
-         ( cd "$dir" && exec bash -c "$cmd" ) > "$RUNS/serve-$what.log" 2>&1 &
+         ( cd "$dir" && exec setsid bash -c "$cmd" ) > "$RUNS/serve-$what.log" 2>&1 &
          echo "$! $port" > "$sf"; sleep 2
          if kill -0 "$!" 2>/dev/null; then echo "serving $what at http://127.0.0.1:$port/ (log: runs/$SLUG/serve-$what.log; stop: ws serve stop $what)"; else rm -f "$sf"; tail -n 20 "$RUNS/serve-$what.log"; die "server exited"; fi ;;
     esac ;;
