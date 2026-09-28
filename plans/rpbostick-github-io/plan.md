@@ -1,7 +1,7 @@
 # rpbostick.github.io: plan
 
 **In flight right now**
-`site-fw` round 2 (`task-site-2-waves-colour.md`, $12) dispatched 2026-09-28 11:35 MDT on the same branch: 72-stop OKLCH palette (12 hue families × A–F, serpentine), drift + click-to-activate wheel stepping, colour tag, splash lineup (`figurewright/docs/renders/splash.svg`, merged as 2a3f8ce) over a translucent panel, and the round-1 review's suggestions. Round 1 was reviewed **merge** at 5ef1b00; re-review after round 2. Preview on :8803 (`ws serve site-fw 8803`, already running). Queued after round 2: `task-site-3-scroll-strip.md` (a bottom strip where the wheel scrolls normally; Patrick). Then review, Patrick looks, merge, the push deploys.
+`site-fw` rounds 1–3 done and reviewed **merge** at 8e4c527 (2026-09-28): palette, drift, click-to-activate wheel, colour tag, splash lineup, bottom scroll strip. Waiting on Patrick's look at :8803, then `ws merge site-fw 8e4c527...` (the push deploys). Carried: clicks on the strip's empty area activate the hero (ignore targets inside `.hero-strip`); save a hero screenshot as evidence; README note that Pages source is Actions (already set).
 
 ## Requirements (Patrick, 2026-09-28)
 - Live, somewhat interactive demos of colorwright, figurewright, skywright and later projects, for a job-building class (Multiverse, run by Lizthedeveloper).
