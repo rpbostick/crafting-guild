@@ -1,7 +1,7 @@
 # skywright: plan
 
 **In flight right now**
-`sky-ride` fix 1 (`task-sky-4-ride-fix-1.md`, $8) dispatched 2026-09-27 19:13 MDT: the review of de4f9ff was fix-first (Fix B shifted hours after DST; Open-Meteo uses one fixed offset per response, verified live; redo with timeformat=unixtime + real per-instant offsets). First round dispatched 19:05 from the bike-weather session (use `--project skywright`). Steps 1-3 merged 2026-09-27: geocode 6a2b378, model d96489d, comfort ac0ebda. When sky-ride finishes: review, merge; then the orchestrator installs Expo in `example/` and writes step 5 (demo app).
+`sky-demo` (step 5, $12) dispatched 2026-09-27 19:59 MDT from the bike-weather session (use `--project skywright`). Expo SDK 57 is in `example/` (2c5f607); preview with `bin/ws --project skywright serve sky-demo 8801`. Merged today: geocode 6a2b378, model d96489d, comfort ac0ebda, ride 8830fdc. When sky-demo finishes: review, preview for Patrick, merge; then step 6 (cache and release prep) with the carried suggestions.
 
 ## Requirements (Patrick, 2026-09-27; see `plans/bike-weather/product.md`)
 - An open-source (MIT) weather library in TypeScript, usable from React Native/Expo and Node (only `fetch`, no Node-only APIs in `src/`), plus a small Expo demo app released with it.
