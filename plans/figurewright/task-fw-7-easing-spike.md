@@ -27,3 +27,6 @@ One command per Bash call. `npx tsx spike/easing/<file>.ts`, `npx tsc --noEmit` 
 
 ## Done when
 The three renders and the report are committed and `git diff main...HEAD --stat -- ':!spike/easing'` is empty.
+
+## Resume (2026-09-27 21:47 MDT)
+The first run was cut off after two minutes when another builder's script used up the machine's memory; nothing of yours was at fault. Your earlier files are still uncommitted under `spike/easing/` (and `survey-easing-*.png` in `.ws-evidence/`); read them before carrying on. Builders now run under a 4 GB cap: hold one raster at a time and render at the scale the question needs.

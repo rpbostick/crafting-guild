@@ -10,7 +10,7 @@ bin/ws                  the command. Subcommands call the scripts below; `ws <sl
 .claude/settings.json   one SessionStart hook: runs scripts/cold-start.sh --brief on start, resume, clear and
                         compaction. Its output becomes context. This is how the session always knows the state.
 CLAUDE.md               what the orchestrator session reads. Under 60 lines on purpose.
-config.sh               defaults: budgets, timeout, models, timezone, lessons cap.
+config.sh               defaults: budgets, timeout, builder memory cap, models, timezone, lessons cap.
 scripts/lib.sh          shared helpers; loads projects/<slug>.conf into variables.
 scripts/cold-start.sh   ground truth in ~20 s. Git state, worktrees, running builders, servers, in-flight block.
 scripts/dispatch.sh     creates the worktree, builds the builder prompt and grant, runs claude -p in the background,
@@ -45,6 +45,7 @@ state/current           the last project opened with `ws <slug>`; what a termina
 | Change the merge gate | `scripts/merge.sh`. Today: pinned SHA, review on record, clean trees, no home paths or username in lines the branch adds, tests via `TEST_CMD` (timed; warns over `WS_SUITE_WARN_S`), push on green, evidence moved to `runs/`. |
 | Change where evidence goes | `.ws-evidence/` is created by `scripts/dispatch.sh`, named in `agents/builder.md` and `agents/reviewer.md`, excluded via `.git/info/exclude`, and moved by `scripts/merge.sh`. |
 | Change the timeouts | `WS_DEFAULT_TIMEOUT` and `WS_LIGHT_TIMEOUT` in `config.sh`; `scripts/dispatch.sh` picks the light one when the task says `Track: light`. |
+| Change the builder memory cap | `WS_BUILDER_MEM` in `config.sh` (systemd `MemoryMax` form, empty = none); `scripts/dispatch.sh` wraps the run in `systemd-run --user --scope` when systemd is there. |
 | Change where worktrees live | `WT_ROOT` in `scripts/lib.sh`. They are under `<project>/.worktrees/` (excluded via `.git/info/exclude`) so the project's own `CLAUDE.md` applies to builders and this workspace's does not. |
 | Change the orchestrator's instructions | `CLAUDE.md`. Keep it short; long instruction files are how v1 spent 50,000 tokens before starting work. |
 | Add a subcommand | a `case` arm in `bin/ws`, calling a script in `scripts/`. Use `load_project "$proj"` so a leading `--project <slug>` works; the scripts take `--project` themselves. |

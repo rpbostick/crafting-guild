@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.1.3 (2026-09-27)
+
+- **Builders run under a memory cap.** `dispatch` starts each run in its own systemd user scope with `MemoryMax=$WS_BUILDER_MEM` (default 4G, `config.sh`; empty turns it off) and `OOMPolicy=continue`, so a runaway script is killed alone and the builder lives to see the failure. Without systemd the run starts uncapped, as before. Found when figurewright's body-analysis spike ran a probe script to 7.6 GB on a 14 GB machine without swap: the kernel's OOM killer took the script, and systemd then stopped the whole VS Code scope it ran in, with the editor, the orchestrator's terminal and both builders.
+
 ## 2.1.2 (2026-09-27)
 
 - **A session is pinned to its project.** `ws <slug>` sets `WS_PROJECT` for the Claude Code session it opens, and every script prefers it over `state/current`, so a second session opened on another project no longer redirects the first. `state/current` still serves terminals. Cold-start prints a `selected:` line saying which one is in force, `CONFLICT` when `state/current` has moved to another project, and the other registered projects. `CLAUDE.md` tells the orchestrator to check that line before the first dispatch, review, merge, wait or stop, and to use `--project` when the plan's project is not the selected one.

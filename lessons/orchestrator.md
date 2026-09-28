@@ -22,6 +22,7 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - A merge is pinned to the reviewed SHA. If the branch moved after the review, review again.
 - `ws merge` needs the project's main checkout free of modified tracked files; untracked files are fine. v1's hooks used to append to `reviews/checklist-proposals.md` behind your back; check `git status -uno` first.
 - `ws merge` refuses any verdict but `merge`. When Patrick overrides a fix-first review, pass `--no-review` (the SHA pin and the test gate still apply) and record his decision in the plan.
+- The machine has 14 GB and no swap. A spike's probe script reached 7.6 GB and the OOM kill took down VS Code with the orchestrator and both builders (fw-bodyshape, 2026-09-27). Builders are capped at `WS_BUILDER_MEM` since 2.1.3; tell image-processing spikes to hold one raster at a time.
 - A builder that backgrounds a long script loses it when the run ends (cw-heads-spike part 2, 2026-09-26). Tell spikes with long render jobs to run them in the foreground, split if needed.
 - `ws merge` can take over 10 minutes when builders run alongside; run it with `run_in_background`.
 - Mark small, low-risk tasks `Track: light` (code + unit tests, no evidence ceremony; the merge gate runs the suite). Evidence formatting doesn't block reviews; `ws merge` refuses a branch that adds home paths or the username, so scrub them on the branch first. (Patrick, 2026-09-26: a two-outfit colour split took an hour of process.)

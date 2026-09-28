@@ -29,3 +29,9 @@ One command per Bash call. `npx tsx spike/body-analysis/<file>.ts`, `npx tsc --n
 
 ## Done when
 The three renders and the report are committed and `git diff main...HEAD --stat -- ':!spike/body-analysis'` is empty.
+
+## Resume (2026-09-27 21:47 MDT)
+The first run was killed after two minutes: `probe.ts shirt pointing_finger` grew to 7.6 GB and the machine ran out of memory. Your earlier files are still uncommitted under `spike/body-analysis/` (`art.ts`, `landmarks.ts`, `probe.ts`, `survey.ts`); read them before carrying on. Builders now run under a 4 GB cap, so a script that grows past it is killed.
+- Hold one raster at a time. `probe.ts` keeps the whole figure plus a full raster per paint layer alive at once; reduce each layer to the row runs you need right after rasterising it and drop the raster, or rasterise one layer per row pass.
+- Rasterise at the smallest scale that answers the question (a few hundred pixels tall is enough for runs every 10 viewBox units).
+- If a script is killed (exit 137), shrink it; don't retry it unchanged.

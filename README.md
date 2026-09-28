@@ -10,7 +10,7 @@ It is the successor to [agentic-workspace](https://github.com/rpbostick/agentic-
 
 ## Install
 
-Requirements: [Claude Code](https://code.claude.com) 2.1.257 or later, `git`, `jq`, GNU `timeout`. Linux or macOS.
+Requirements: [Claude Code](https://code.claude.com) 2.1.257 or later, `git`, `jq`, GNU `timeout`. Linux or macOS. On Linux with systemd, builders run under a memory cap (`WS_BUILDER_MEM`).
 
 ```bash
 git clone https://github.com/rpbostick/agentic-workspace-v2.git ~/agentic-workspace-v2

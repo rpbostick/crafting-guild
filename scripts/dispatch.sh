@@ -99,7 +99,7 @@ cmd=(claude -p "$prompt" --allowedTools "${TOOLS[@]}" --disallowedTools "${DENY[
 [ -n "$effort" ] && cmd+=(--effort "$effort")
 
 if $dry; then
-  echo "cwd: $wt"; echo "tools: ${TOOLS[*]}"; echo "deny: ${DENY[*]}"; echo "budget: \$$budget timeout: $tmo model: ${model:-default}"
+  echo "cwd: $wt"; echo "tools: ${TOOLS[*]}"; echo "deny: ${DENY[*]}"; echo "budget: \$$budget timeout: $tmo model: ${model:-default} memory cap: ${WS_BUILDER_MEM:-none}"
   echo "prompt bytes: ${#prompt}"; echo "evidence: $wt/.ws-evidence"; exit 0
 fi
 
@@ -108,16 +108,22 @@ stamp=$(date -u +%Y%m%dT%H%M%SZ)
 for ext in jsonl result.txt task.txt; do [ -e "$RUNS/$name.$ext" ] && mv "$RUNS/$name.$ext" "$RUNS/$name.$stamp.$ext"; done
 { echo "task=$(cd "$(dirname "$task")" && pwd)/$(basename "$task")"; echo "started=$(now_local)"; echo "budget=$budget"; echo "timeout=$tmo"; echo "worktree=$wt"; } > "$RUNS/$name.task.txt"
 start_sha=$(git -C "$wt" rev-parse HEAD)
+# Memory cap: the run gets its own systemd scope, so a runaway script is killed alone (OOMPolicy=continue
+# keeps the builder alive to see it) instead of the kernel taking out the editor the session runs in.
+cap=() mem="uncapped"
+if [ -n "$WS_BUILDER_MEM" ] && systemd-run --user --scope --quiet true >/dev/null 2>&1; then
+  cap=(systemd-run --user --scope --quiet -p "MemoryMax=$WS_BUILDER_MEM" -p MemorySwapMax=0 -p OOMPolicy=continue --unit "ws-$SLUG-$name-$stamp" --description "ws builder $SLUG/$name"); mem="$WS_BUILDER_MEM"
+fi
 (
   cd "$wt"
-  timeout --kill-after=30s "$tmo" "${cmd[@]}" < /dev/null > "$RUNS/$name.jsonl" 2>&1
+  "${cap[@]}" timeout --kill-after=30s "$tmo" "${cmd[@]}" < /dev/null > "$RUNS/$name.jsonl" 2>&1
   rc=$?
   "$WS/scripts/check-result.sh" --project "$SLUG" --since "$start_sha" "$name" > "$RUNS/$name.result.txt" 2>&1 || true
   [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] && sed -i "1i TIMEOUT after $tmo (exit $rc); partial work may be in $wt" "$RUNS/$name.result.txt"
   rm -f "$RUNS/$name.pid"
 ) < /dev/null > /dev/null 2>&1 &
 echo $! > "$RUNS/$name.pid"
-echo "dispatched $name (pid $!) in $wt (budget \$$budget, timeout $tmo)"
+echo "dispatched $name (pid $!) in $wt (budget \$$budget, timeout $tmo, memory $mem)"
 echo "  log:    runs/$SLUG/$name.jsonl"
 echo "  result: runs/$SLUG/$name.result.txt (written when it finishes)"
 echo "  wait:   bin/ws wait $name      watch: bin/ws tail $name"
