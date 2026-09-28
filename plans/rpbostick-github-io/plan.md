@@ -1,7 +1,7 @@
 # rpbostick.github.io: plan
 
 **In flight right now**
-Live since 2026-09-28: site-fw merged as c3dc755 and deployed to https://rpbostick.github.io/ (Actions run green). Nothing running. Next: step 2 (skywright) after sky-demo merges. Carried: clicks on the strip's empty area activate the hero (ignore targets inside `.hero-strip`); save a hero screenshot as evidence; README note that Pages source is Actions; bump configure-pages/deploy-pages when Node 24 versions ship.
+`site-controls` (`task-site-4-hero-controls.md`, $10) dispatched 2026-09-28: middle-click toggles colour mode ↔ page scroll, left-drag morphs the wave pattern through ~6 Waves presets (faster drags accelerate), a System/Light/Dark switch upper right (default System, saved per browser). The site has been live since c3dc755. Then: review, preview on :8803, Patrick looks, merge (the push deploys).
 
 ## Requirements (Patrick, 2026-09-28)
 - Live, somewhat interactive demos of colorwright, figurewright, skywright and later projects, for a job-building class (Multiverse, run by Lizthedeveloper).
@@ -17,4 +17,5 @@ Live since 2026-09-28: site-fw merged as c3dc755 and deployed to https://rpbosti
 
 ## Decisions
 - 2026-09-28: user site (option 2) over a `demos` repo; colorwright gets a static mode, not a hosted backend; simple card index; work starts now alongside fw-refs; figurewright landing page uses React Bits Waves (Patrick).
+- 2026-09-28 (Patrick): middle-click toggles colour mode and page scroll; dragging morphs the wave pattern, accelerating with speed; a theme switch (System default; black background wanted if only one); orchestrator picked the preset loop and drag axes.
 - 2026-09-28, on the preview (Patrick): the hero is a toy: Waves ripples on the mouse; colours drift slowly on their own; click into the hero and the wheel steps forward/back through 12 hue families (every 30°) × 6 shades A (tint) to F (shade); drift resumes 8 s after the last tick; a lineup of five figures in front, opaque, with a slightly transparent surround. Serpentine order through the stops is the orchestrator's call (no lightness jumps).
