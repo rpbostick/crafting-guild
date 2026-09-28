@@ -25,6 +25,8 @@ Bike Weather can import skywright, fetch a forecast for any searched place, and 
 ## Decisions
 - 2026-09-27: MIT; name skywright; Open-Meteo first; tool built before Bike Weather's own work (Patrick).
 
+- 2026-09-28 (Patrick): private GitHub repo rpbostick/skywright (merges now push); the cycling hot-weather model belongs in Bike Weather's recommendation engine, not skywright; npm publish not yet decided.
+
 ## Carried suggestions (fold into the next task on that code)
 - geocode (review of 9aabc3c): record a real geocoding-API error body for the provider-error test; rename or tighten "parses every result"; decide whether `AbortSignal.timeout()`'s `TimeoutError` passes through like `AbortError` and pin it with a test; validate `count` consistently for short queries.
 - model (review of a3ba23f): the out-of-range `days` clamp is silent (document it on ForecastOptions or throw); `abort(reason)` with a custom reason is wrapped as 'network' (check `signal.aborted`); a null sunrise/sunset (polar day) fails the parse; consider making them optional. DST offsets are fixed in step 4.
