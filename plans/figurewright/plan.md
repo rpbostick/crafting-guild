@@ -1,7 +1,7 @@
 # figurewright: plan
 
 **In flight right now**
-Merging (2026-09-29 11:40 MDT): `fw-dress2` (reviewed f9fb874: B2's jacket and jersey hem bands meet their side outlines; tops hang straight from the waist; the far sleeve painted over the hem bands) and `fw-splash-hair` (reviewed 065aec9: the hero lineup with a pink `#FF2D95` Mohawk on pointing_finger and `#2F6FE0` blue Long-Curly on the red-shirt figure). The new `docs/renders/splash-easing.svg` goes to the site as the hero and the index card (site plan). Next: compose (step 7) on the layering spike's model (`spike/layers/`), then the garment import engine.
+`fw-zones` (C1, `task-fw-21-zones.md`, Track: light, $10) running since 2026-09-29 11:58 MDT: zones, ranks, depth and drawKey replace GARMENT_LAYERS; nothing drawn changes (byte-identical renders). Merged today: c29d954 (fw-dress2 hems), c5063c5 (hero hair). Next: C2 (dressing order) and C3 (renderFigure) in parallel once C1 merges, then C4 (thickness), then the import engine.
 
 ## Requirements (Patrick, 2026-09-27; see `plans/bike-weather/product.md`)
 - An open-source (MIT) avatar tool in TypeScript for React Native/Expo, with a small Expo demo app, released separately from Bike Weather, which consumes it.
@@ -20,7 +20,13 @@ Guesses (tell Patrick if one turns out wrong): renders are SVG strings (react-na
 4. **Ink renderer** (`task-fw-4-ink.md`, parallel with 3): `src/ink/`: closed outlines to variable-width ink (swell and taper, open ends, seeded). Patrick approves a close-up next to a vendored head.
 5. **Open Peeps hands, feet and shoes** (`task-fw-5-extremities.md`, parallel with 3 and 4): cut from the vendored poses into `assets/extremities/` with a wrist/ankle frame each; a few shoe styles.
 6. *(after 3)* **Garment engine + basic garments**: `src/garments/`: GarmentDef, fitting, layer order, detail clipping; tee, jersey, zip jacket, shorts, tights, pants, gloves, base layer.
-7. *(after 2, 4, 5, 6)* **Compose**: heads (ported logic, skin colour, head scale), body, garments, extremities; collar drawn after the head and clipped under the chin; `renderFigure(look)`; outfits retired.
+7. *(after 2, 4, 5, 6)* **Compose**, in four steps (Patrick, 2026-09-29), on the layering spike's model (`spike/layers/REPORT.md` §7 build steps 1–3 and §2):
+   - **C1** zones, ranks, depth, drawKey in `definition.ts`/`dress.ts`; basic garments migrated; renders byte-identical (`task-fw-21-zones.md`).
+   - **C2** dressing order: covers, exit routes, `blockersOf`, `canAdd`, `undress`, `dress`, `removeOne` in a new `src/garments/order.ts` (parallel with C3).
+   - **C3** `renderFigure(look)` returns a `LayeredFigure`: body per drawing group (far, main, near, head, neck), one `GarmentLayer` per garment (id, zone, rank, depth, drawKey, anchor, painted box, parts); colorwright heads through the ported logic with **every face, borrowed across poses** (Patrick); skin; head scale; the neck group so collars show under the chin; feet belong to the body; boots, gloves and hats through a drawn-part contract; per-garment tuck and glove-under/over defaults.
+   - **C4** thickness accumulation (one `thickness` per garment, ease grows over what is under it; compression floor).
+   Then the garment import engine. **Cutaway and exploded layout come after import, with the demo app** (Patrick, 2026-09-29).
+   Original line: **Compose**: heads (ported logic, skin colour, head scale), body, garments, extremities; collar drawn after the head and clipped under the chin; `renderFigure(look)`; outfits retired.
 8. *(after 7)* Demo Expo app (`example/`): body sliders, head rows, garment picker, colours; preview on :8801.
 9. Release prep: README, API docs, contact sheet of every body × basic garment, publish-ready package. Garment details (pockets, folds) through the segment-coordinate import come after the release unless Patrick asks sooner.
 
