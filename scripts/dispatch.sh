@@ -28,7 +28,7 @@ case "$name" in *[!A-Za-z0-9._-]*) die "bad name '$name'" ;; esac
 [ -f "$task" ] || die "no task file $task"
 # Builders copy a task's wording into comments: tasks state requirements, not who asked or when.
 if [ -n "${WS_ATTRIBUTION_RE:-}" ] && ! $names_ok; then
-  hits=$(grep -niE "$WS_ATTRIBUTION_RE" "$task" | cut -c1-160 | head -5)
+  hits=$(grep -niE "$WS_ATTRIBUTION_RE" "$task" | cut -c1-160 | head -5 || true)
   [ -z "$hits" ] || die "task $task attributes work to a person or to this process (first 5 below); state the requirement plainly, or pass --names-ok for a task that must quote the words (a scrub):
 $hits"
 fi
