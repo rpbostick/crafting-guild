@@ -32,6 +32,8 @@ Nothing for Bike Weather itself yet. Milestone 1: skywright is done (steps 1-6 m
 - Recommendation: rules comparing garment warmth ratings against feels-like temperature (wind chill at riding speed in ride mode), plus a learned per-user hot/cold offset from comfort ratings.
 - Data model from day one: garments carry warmth/wind/water ratings and optional brand/model; each comfort rating is stored with the conditions and the outfit worn.
 
+- `projects/bike-weather.conf` has no `TEST_CMD`, `EXTRA_TOOLS` or `PREVIEW_CMD` yet (the repo is one README commit). The skeleton task sets up Jest and typecheck; set all three in the conf in the same step, before its merge, so no Bike Weather merge pushes without a gate.
+
 ## Milestones
 1. **Tools satisfactory** (separate projects): the weather library + demo app; the body/garment tool + demo app.
 2. **Bike Weather core loop**: avatar builder, clothing library from garment templates with ratings, today's forecast, suggested outfit on the avatar in ride/everyday mode, comfort rating, export/import. Closing this milestone includes publishing skywright (its plan's step 7) and asking Patrick about figurewright's release.
