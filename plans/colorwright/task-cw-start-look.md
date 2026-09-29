@@ -5,7 +5,45 @@ The look "pointing baddie 01", made in the static demo, is the pointing_finger b
 
 The look, exactly as the static demo saved it (the value under `looks["pointing baddie 01"]` in localStorage `colorwright_static_looks_v1`):
 ```json
-LOOK_JSON
+{
+  "name": "pointing baddie 01",
+  "sub_family": "pointing_finger",
+  "items": {
+    "head-style": "pointing_finger/head-style/No-Hair-1",
+    "hair": "pointing_finger/hair/Mohawk",
+    "face": "pointing_finger/face/Cute",
+    "facial-hair": "pointing_finger/facial-hair/*-None",
+    "hat": "pointing_finger/hat/*-None",
+    "accessories": "pointing_finger/accessories/*-None",
+    "outfit": "pointing_finger/outfit/pointing_finger-1"
+  },
+  "colors": {
+    "head-style": {
+      "skin": "#AE5D29",
+      "outline": "#000000"
+    },
+    "hair": {
+      "hair": "#dc8add",
+      "hair-outline": "#000000"
+    },
+    "face": {
+      "outline": "#000000"
+    },
+    "facial-hair": {},
+    "hat": {},
+    "accessories": {},
+    "outfit": {
+      "skin": "#AE5D29",
+      "shoes": "#78e185",
+      "top": "#78E185",
+      "outline": "#000000"
+    }
+  },
+  "carried_colors": {
+    "hair": "#dc8add"
+  },
+  "mirrored": false
+}
 ```
 
 ## Build
