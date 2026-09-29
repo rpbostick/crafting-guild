@@ -2,6 +2,7 @@
 
 **In flight right now**
 Live: one fresh audited commit 3eee33d (2026-09-28, history replaced after the release audit found colorwright journey comments; the old history is kept locally only as branch `backup-before-fresh-history`, never push it). All three demos, card thumbnails, THIRD_PARTY_LICENSES. Every change to this public repo follows `release-audit.md`. Carried: Actions Node 24 bump when released.
+**Theme switch on the demos** (Patrick, 2026-09-29): System / Light / Dark at the top right of `/colorwright/` and `/skywright/`, sharing the site's `theme` localStorage key. Builders running since 10:21 MDT: `cw-theme` (colorwright, `plans/colorwright/task-cw-theme.md`) and `sky-theme` (skywright, `plans/skywright/task-sky-theme.md`). When both have merged: rebuild `dist-static/` and `demo:export:site`, copy them into `public/`, regenerate the skywright licences, preview, run `release-audit.md`, show Patrick the findings, then push.
 
 ## Requirements (Patrick, 2026-09-28)
 - Live, somewhat interactive demos of colorwright, figurewright, skywright and later projects, for a job-building class (Multiverse, run by Lizthedeveloper).
