@@ -2,12 +2,7 @@
 
 **In flight right now**
 Live: one fresh audited commit 3eee33d (2026-09-28, history replaced after the release audit found colorwright journey comments; the old history is kept locally only as branch `backup-before-fresh-history`, never push it). All three demos, card thumbnails, THIRD_PARTY_LICENSES. Every change to this public repo follows `release-audit.md`. Carried: Actions Node 24 bump when released.
-**Theme switch + backdrops on the demos.** `site-backdrops` built (tip 8dc9c2a, preview on :8802). Patrick looked and it's good apart from the items below. Local site `main` is ahead of origin with abe747c and 665bf6f, **not pushed**. Running: `cw-site-links`, `sky-site-links` (a relative "More demos" link `/`, a static React Bits credit in each demo's footer under host-backdrop, American spelling) and `fw-splash-src` (hero lineup through src: far-sleeve layering on the red tee and the zip jacket). When they merge: copy the rebuilt demos and the new splash SVG into the `site-backdrops` worktree and commit them on the branch, then **site fix round**:
-- remove the floating React Bits credit (the demos carry it statically now) and keep figurewright's static credit;
-- American English in all visible text, `THIRD_PARTY_LICENSES.txt` generator output ("license"), `src/reactbits/LICENSE.md` notes, and "Colour theme" → "Color theme";
-- gate colorwright's `--text-faint` in `check:backdrops`;
-- keep "on" saved for reduced-motion visitors who opt in.
-
+**Theme switch + backdrops on the demos: last round, then publish.** cw-site-links (colorwright dd667c9), sky-site-links (skywright a76b197) and fw-splash-src (figurewright 9bc7e8f) merged 2026-09-29. Their rebuilt demos and the new splash are committed on `agent/site-backdrops` (9bf3ac0). Running since 13:46 MDT: `site-backdrops` fix round (`task-site-7-fix-1.md`, light): no floating credit, American English, `--text-faint` gated, reduced-motion opt-in kept, card re-rendered. Local site `main` is still ahead of origin with abe747c and 665bf6f, **not pushed**. Patrick (2026-09-29): after this round, stop polishing the demos, publish, and go back to Bike Weather.
 Then review, `release-audit.md` with findings shown to Patrick, merge (which pushes).
 
 ## Requirements (Patrick, 2026-09-28)
