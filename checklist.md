@@ -20,3 +20,4 @@ Eighteen rules. Adding one means removing one. A rule earns its place by having 
 16. A commit that answers a review finding fixes the finding; it does not reword the claim the finding was about.
 17. Dates written into docs are the author's calendar date (see `config.sh`, `WS_TZ`), never the UTC date after 18:00 local.
 18. No secrets, credentials, absolute home-directory paths or personal identifiers in tracked files.
+19. Tracked files state reasons, never who asked, decided or approved, or when: no names outside intended credits, no "the operator", no dated decisions or quotes. A fixed choice reads "Deliberate: <reason>".

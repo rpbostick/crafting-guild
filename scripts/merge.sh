@@ -24,6 +24,14 @@ fi
 leaks=$(git -C "$PROJECT_PATH" diff -U0 "$PROJECT_BRANCH...$tip" | grep -E '^\+[^+]' | grep -nF -e "$HOME" -e "-of-$USER" -e "/$USER/" | head -5)
 [ -z "$leaks" ] || die "branch $br adds home paths or the username (first 5 below); scrub them on the branch, commit, and review again:
 $leaks"
+# Lines the branch adds that attribute work to a person or to this process (WS_ATTRIBUTION_RE).
+if [ -n "${WS_ATTRIBUTION_RE:-}" ]; then
+  mapfile -t exempt < <(attribution_exempt)
+  attrib=$(git -C "$PROJECT_PATH" diff -U0 "$PROJECT_BRANCH...$tip" -- . "${exempt[@]}" \
+    | awk '/^\+\+\+ /{f=substr($0,7); next} /^\+/{print f": "substr($0,2)}' | grep -iE "$WS_ATTRIBUTION_RE" | cut -c1-200 | head -5)
+  [ -z "$attrib" ] || die "branch $br adds lines that attribute work to a person or to this process (first 5 below). State the reason as a fact, or 'Deliberate:' for a choice that must stay; commit, and review again. An intended credit belongs in the project's CREDIT_PATHS.
+$attrib"
+fi
 has_remote=false
 if git -C "$PROJECT_PATH" remote get-url origin >/dev/null 2>&1; then
   has_remote=true; timeout 20 git -C "$PROJECT_PATH" fetch origin -q || die "fetch failed"

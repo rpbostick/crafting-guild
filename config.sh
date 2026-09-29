@@ -10,3 +10,8 @@ WS_MODEL=""                     # builder model alias ("sonnet", "opus", ...); e
 WS_REVIEW_MODEL=""              # reviewer model alias; empty = default
 WS_EFFORT=""                    # builder effort (low|medium|high|xhigh|max); empty = default
 WS_LESSONS_CAP="40"             # cold-start warns when a lessons/ file passes this many lines
+# Words that attribute work to people or to this process. ws merge refuses a branch that adds a line
+# matching them (case-insensitive ERE), and ws dispatch refuses a task file that contains them: repos
+# state reasons, the workspace's plans keep who and when. Exempt: LICENSE*, package manifests, license
+# lists, and each project's CREDIT_PATHS. Empty = no check.
+WS_ATTRIBUTION_RE="\\bpatrick\\b|\\bbostick\\b|the operator|operator's|orchestrator"

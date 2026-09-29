@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Run one builder on one task, headless, in its own worktree on branch agent/<name>.
 # Usage: dispatch.sh [--project slug] [--budget USD] [--model M] [--effort E] [--timeout 90m]
-#                    [--allow "Bash(cmd *)"]... [--dry-run] <name> <task-file>
+#                    [--allow "Bash(cmd *)"]... [--dry-run] [--names-ok] <name> <task-file>
 # The builder gets: the builder sheet, lessons/builder.md, the task file, a grant to edit inside its
 # worktree and commit on its branch plus the project's test command and EXTRA_TOOLS, a budget, a timeout,
 # and a JSON result schema. Logs to runs/<slug>/<name>.jsonl; the result check lands in <name>.result.txt.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
-slug="" budget="$WS_DEFAULT_BUDGET" model="$WS_MODEL" effort="$WS_EFFORT" tmo="" dry=false; extra=()
+slug="" budget="$WS_DEFAULT_BUDGET" model="$WS_MODEL" effort="$WS_EFFORT" tmo="" dry=false names_ok=false; extra=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --project) slug="$2"; shift 2 ;;
@@ -17,6 +17,7 @@ while [ $# -gt 0 ]; do
     --timeout) tmo="$2"; shift 2 ;;
     --allow) extra+=("$2"); shift 2 ;;
     --dry-run) dry=true; shift ;;
+    --names-ok) names_ok=true; shift ;;
     -*) die "unknown flag $1" ;;
     *) break ;;
   esac
@@ -25,6 +26,12 @@ name="${1:?usage: dispatch.sh [flags] <name> <task-file>}"; task="${2:?missing t
 [ $# -gt 2 ] && die "flags go before the name; ignored would be: ${*:3}"
 case "$name" in *[!A-Za-z0-9._-]*) die "bad name '$name'" ;; esac
 [ -f "$task" ] || die "no task file $task"
+# Builders copy a task's wording into comments: tasks state requirements, not who asked or when.
+if [ -n "${WS_ATTRIBUTION_RE:-}" ] && ! $names_ok; then
+  hits=$(grep -niE "$WS_ATTRIBUTION_RE" "$task" | cut -c1-160 | head -5)
+  [ -z "$hits" ] || die "task $task attributes work to a person or to this process (first 5 below); state the requirement plainly, or pass --names-ok for a task that must quote the words (a scrub):
+$hits"
+fi
 # Timeout follows the track unless --timeout was given: a light task gets the short cap.
 if [ -z "$tmo" ]; then if grep -qi 'track: *light' "$task"; then tmo="$WS_LIGHT_TIMEOUT"; else tmo="$WS_DEFAULT_TIMEOUT"; fi; fi
 load_project "$slug"
@@ -85,7 +92,7 @@ $(cat "$WS/lessons/builder.md")
 
 # Project
 Main branch: $PROJECT_BRANCH. Project test command: ${TEST_CMD:-none configured}. The merge gate runs it on the merged tree; you do not. Run only the test files that cover what you changed, with the same runners, from the worktree root, in the foreground.
-Evidence: save every log and render under .ws-evidence/ in the worktree root (it is untracked and the reviewer reads it there). Commit code, tests and docs; commit a render only when the task asks for one the operator will judge.
+Evidence: save every log and render under .ws-evidence/ in the worktree root (it is untracked and the reviewer reads it there). Commit code, tests and docs; commit a render only when the task asks for one.
 
 # Task
 $(cat "$task")

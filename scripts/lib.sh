@@ -21,12 +21,17 @@ resolve_slug() {
 # and sets SLUG, RUNS (this project's log dir) and WT_ROOT (where its worktrees go).
 load_project() {
   SLUG="$(resolve_slug "${1:-}")"
-  PROJECT_PATH="" PROJECT_BRANCH="master" TEST_CMD="" PREVIEW_CMD=""; EXTRA_TOOLS=()
+  PROJECT_PATH="" PROJECT_BRANCH="master" TEST_CMD="" PREVIEW_CMD=""; EXTRA_TOOLS=(); CREDIT_PATHS=()
   # shellcheck disable=SC1090
   . "$WS/projects/$SLUG.conf"
   [ -d "$PROJECT_PATH/.git" ] || [ -f "$PROJECT_PATH/.git" ] || die "project path $PROJECT_PATH is not a git repo"
   RUNS="$WS/runs/$SLUG"; mkdir -p "$RUNS" "$WS/plans/$SLUG"
   WT_ROOT="$PROJECT_PATH/.worktrees"
+}
+# Pathspecs exempt from the attribution check: intended credits, not attribution.
+attribution_exempt() {
+  printf '%s\n' ':!LICENSE*' ':!**/LICENSE*' ':!package.json' ':!**/package.json' ':!package-lock.json' ':!**/package-lock.json' ':!**/THIRD_PARTY_LICENSES*'
+  local p; for p in "${CREDIT_PATHS[@]}"; do printf ':!%s\n' "$p"; done
 }
 worktree_dir() { echo "$WT_ROOT/$1"; }
 branch_of() { echo "agent/$1"; }

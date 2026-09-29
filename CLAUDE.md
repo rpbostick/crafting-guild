@@ -25,5 +25,5 @@ Cold-start says so. Ask the operator which repository to work on, register it wi
 
 ## Where things are
 - `projects/<slug>.conf`: path, branch, test command, extra tool grants, preview command. `plans/<slug>/`: plans and task files (tracked). `runs/<slug>/`: logs, results and each merged builder's evidence (not tracked).
-- `checklist.md`: 18 review rules. `release-audit.md`: what must pass before anything goes public (fresh history, no secrets, no journey text, licences, built output). `agents/`: builder, reviewer, planner. `lessons/`: one file per role, always loaded.
+- `checklist.md`: 19 review rules. `release-audit.md`: what must pass before anything goes public (fresh history, no secrets, no journey text, licences, built output). `agents/`: builder, reviewer, planner. `lessons/`: one file per role, always loaded.
 - `MODIFYING.md` explains every file for whoever changes the tool. `bin/ws help` lists the commands.

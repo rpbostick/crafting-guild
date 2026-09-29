@@ -1,7 +1,7 @@
 # colorwright: the static demo starts on "pointing baddie 01"; a card image of it
 Track: light
 
-Patrick made a look in the static demo, "pointing baddie 01": the pointing_finger body, a pink Mohawk, a green shirt and green accents on the shoes. It becomes the public demo's **starting look**, and its picture becomes colorwright's card on the demo site's index.
+The look "pointing baddie 01", made in the static demo, is the pointing_finger body, a pink Mohawk, a green shirt and green accents on the shoes. It becomes the public demo's **starting look**, and its picture becomes colorwright's card on the demo site's index.
 
 The look, exactly as the static demo saved it (the value under `looks["pointing baddie 01"]` in localStorage `colorwright_static_looks_v1`):
 ```json
