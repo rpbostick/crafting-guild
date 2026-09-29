@@ -1,7 +1,7 @@
 # Bike Weather: product plan
 
 **In flight right now**
-Nothing for Bike Weather itself yet. Milestone 1: skywright is done (steps 1-6 merged 2026-09-28); figurewright is at step B2 (`fw-dress`). The Bike Weather skeleton waits until figurewright is satisfactory. **Release gate:** skywright is published to npm only after Bike Weather's core loop uses it (skywright plan step 7).
+Nothing for Bike Weather itself yet. Milestone 1: skywright is done; figurewright is in its import build (C1–C4 compose merged 2026-09-29; import spike merged; I1 next). Patrick (2026-09-29): finish figurewright before starting Bike Weather. **Release gate:** skywright is published to npm only after Bike Weather's core loop uses it (skywright plan step 7).
 
 ## Requirements (operator, 2026-09-27)
 - A closed-source, paid app for the iOS and Android app stores. Working title "Bike Weather".
