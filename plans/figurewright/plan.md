@@ -5,6 +5,7 @@ Merged today: C1 0c9b4af (zones), C2 27d0001 (dressing order, tucked and glovesU
 
 ## Requirements (Patrick, 2026-09-27; see `plans/bike-weather/product.md`)
 - **Shoulders follow the chest** (Patrick, 2026-10-01): the shoulder anchors to the chest, so shoulder width comes mainly from chest breadth; thicker arms add a little. Garments follow the body's shoulder, so fix shoulders in the body, not in the garments.
+- **Arms hang from the armpit** (Patrick, 2026-10-01): the shoulder's anchor is the armpit; a hanging arm meets the torso at the armpit with no gap. Shoulder options round 1 → C (slope + width from chest and arm), "and go farther": round 2 `fw-shoulder-armpit`.
 - An open-source (MIT) avatar tool in TypeScript for React Native/Expo, with a small Expo demo app, released separately from Bike Weather, which consumes it.
 - Users make an avatar that looks like them: **body shapes** (builds: slim to broad, height, chest/waist/hips) in one standing pose now, more poses (e.g. riding) later.
 - colorwright's head parts (head styles, hair, faces, facial hair, hats, accessories; Open Peeps CC0 art) on top, with colorwright's colour roles, skin, hat/hair covering and draw order, ported to TypeScript. The art and colorwright's tests are in `vendor/colorwright/` (commit b527691).
