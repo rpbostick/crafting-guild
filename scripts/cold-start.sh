@@ -26,7 +26,7 @@ echo
 echo "--- $SLUG git ---"
 cur=$(git -C "$PROJECT_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null)
 echo "checked out: $cur"
-if git -C "$PROJECT_PATH" status --short 2>/dev/null | grep -q .; then
+if [ -n "$(git -C "$PROJECT_PATH" status --short 2>/dev/null)" ]; then
   echo "uncommitted:"; git -C "$PROJECT_PATH" status --short | head -15
 else echo "working tree clean"; fi
 git -C "$PROJECT_PATH" log -5 --format="  %h %ad %s" --date=short
@@ -43,7 +43,7 @@ merged=$(git -C "$PROJECT_PATH" log "$PROJECT_BRANCH" --first-parent --merges --
 echo "last 7 days on $PROJECT_BRANCH: $merged branch merges, $direct direct commits$([ "$direct" -gt "$merged" ] && [ "$direct" -gt 3 ] && echo '  <- more direct commits than merges: is work going through builders?')"
 echo
 echo "--- worktrees and runs ---"
-if [ -d "$WT_ROOT" ] && ls "$WT_ROOT" 2>/dev/null | grep -q .; then
+if [ -d "$WT_ROOT" ] && [ -n "$(ls "$WT_ROOT" 2>/dev/null)" ]; then
   for d in "$WT_ROOT"/*/; do
     n=$(basename "$d"); br=$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null)
     ahead=$(git -C "$PROJECT_PATH" rev-list --count "$PROJECT_BRANCH..$br" 2>/dev/null || echo ?)

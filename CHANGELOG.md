@@ -2,6 +2,11 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.2.2 (2026-10-01)
+
+- **`ws chain` no longer re-dispatches a merged step.** Its merged-step check piped `git log` into `grep -q`; on a long history grep exits at the first match, git dies of SIGPIPE, and `pipefail` turns the match into a failure. A restart on figurewright re-dispatched I2, caught within two minutes, before it committed anything. Cold-start's two `grep -q` pipelines had the same flaw. The selftest now builds a 4,000-merge history and checks that the chain skips a merged step.
+- **A chain checks every queued task for attribution before it starts**, instead of stopping hours in when dispatch refuses one.
+
 ## 2.2.1 (2026-10-01)
 
 - **A chain outlives the session that started it.** `ws chain` starts the chain detached in its own systemd scope (as builders run) and then waits on it; closing the session stops only the wait. `ws chain-wait` waits on a running chain from any session and prints where it stopped (exit 0 done, 4 gate, 1 stopped).

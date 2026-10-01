@@ -16,10 +16,18 @@ Read first: `spike/import/REPORT.md` (failure mode 2, proof (d)), `src/garments/
 - Parametric-only outfits render byte-identically to `main`.
 
 ## Evidence
-A contact sheet: the imported jacket over the parametric tee, and over a puffy, on the seven bodies, with 3× close-ups of the shoulder and cuff. Patrick approves this sheet before the merge.
+A contact sheet: the imported jacket over the parametric tee, and over a puffy, on the seven bodies, with 3× close-ups of the shoulder and cuff. A person approves this sheet before the merge.
 
 ## Commands
 One command per Bash call: `npx jest --runInBand <files>`, `npx tsc --noEmit`, `npx tsx <file>.ts`, `node`. Do not run `npm install`. Hold one raster at a time.
 
 ## Done when
 Imported garments press and ease like parametric ones; the coverage test holds on seven bodies; parametric renders are unchanged; the tests and tsc pass.
+
+## Carried from the fw-render-pins review (suggestions; do them where the code is yours to touch)
+- `spike/body-analysis/REPORT.md:272`: Rule 6: the report still names scripts/render-bodies.ts and scripts/render-garments.ts, which this branch deletes. Point it at scripts/sheets/specs/bodies.ts and garments.ts, or say the scripts were replaced by `npm run renders:sheets`.
+- `docs/renders/rigid-rule.png:1`: The README says renders:approve should run only after a person has approved the new sheet. This re-render (the importer asset v2 moved the pocket, logo and zip pull outlines; .ws-evidence/rigid-rule-diff.png) was committed by the builder. Have a person look at the diff render before merging, or drop commit 3f16476.
+- `scripts/sheets/specs/posed-garments.ts:118`: Rule 3/8 wording: the unpinned close-ups are not 'the same drawings' that posed-garments.png and garments.png pin. They use other seeds, skins, heads and builds (for example z5 is the round build with the jersey). They share code paths, not markup. Reword to say that.
+- `scripts/sheets/specs/garments.ts:52`: Wording: splash.svg draws with bodySvg and garmentSvg directly, not dressedSvg, so it is not 'the same straight-on drawing' garments.png uses. Reword.
+- `.ws-evidence/runs.tsv:33`: The final run covered only the affected suites, not the whole `npm test`. A full run would confirm that nothing else imported the deleted scripts. A grep finds no remaining imports, so this is low risk.
+- `test/renders/golden/bodies/average-155-cm.svg:1`: Rule 11 precheck noise: the goldens are fragments with several top-level elements, so SVG tools can't open them. A .svg.txt extension, or wrapping them in a <g>/<svg> in goldenText, would stop the parse flag from recurring and let a reviewer open a golden directly.

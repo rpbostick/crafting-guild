@@ -12,7 +12,7 @@ Read first: `spike/import/REPORT.md` (proof (c), failure modes 5–7), `spike/im
    - **Small details** (buttons, pulls) go through `isRigidBySize`.
    - The output is a normal art SVG that the I2 importer reads unchanged.
 2. **A batch:** run it over every top (and, if it works, every bottom) in the vendored outfits that has a rig. Write a report `docs/found-art.md`: per garment, imported or refused, and why. A refusal is fine; a silent bad import is not.
-3. **A contact sheet** per imported garment on the seven bodies, for a person to accept or reject. Do not commit any found-art asset to `assets/garments/` until Patrick has looked at the sheets; put the candidates under `assets/garments/candidates/`.
+3. **A contact sheet** per imported garment on the seven bodies, for a person to accept or reject. Do not commit any found-art asset to `assets/garments/` until a person has looked at the sheets; put the candidates under `assets/garments/candidates/`.
 
 ## Tests
 - easing-2's shirt imports with no hand-placed numbers and lands within 1 cm of the spike's hand-cut import at the chest, waist, hem and sleeve end on the seven bodies.
@@ -27,4 +27,4 @@ The contact sheets, `docs/found-art.md`, and a side-by-side of easing-2's shirt:
 One command per Bash call: `npx jest --runInBand <files>`, `npx tsc --noEmit`, `npx tsx <file>.ts`, `node`. Do not run `npm install`. Hold one raster at a time; run long render jobs in the foreground, split if needed.
 
 ## Done when
-`found-art.ts` imports easing-2's shirt with no manual input to the stated bound; the batch report covers every rigged top; candidate contact sheets are ready for Patrick; the tests and tsc pass.
+`found-art.ts` imports easing-2's shirt with no manual input to the stated bound; the batch report covers every rigged top; candidate contact sheets are ready for a person to review; the tests and tsc pass.

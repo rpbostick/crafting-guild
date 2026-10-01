@@ -21,11 +21,18 @@ tee_to="$logf"; [ "$(readlink -f /proc/$$/fd/1 2>/dev/null)" = "$(readlink -f "$
 log() { echo "$(now_local)  $*" | tee -a "$tee_to"; }
 status() { echo "$1 $(now_local) $2" > "$statf"; }
 stop() { status stopped "$1: $2"; log "STOP at $1: $2"; exit "${3:-1}"; }
-merged() { git -C "$PROJECT_PATH" log "$PROJECT_BRANCH" --merges --format=%s | grep -qE "^Merge agent/$1([: ]|$)"; }
+# grep -c, not grep -q: -q exits at the first match, git dies of SIGPIPE, and pipefail turns a match into a failure
+# (on a long history only; it re-dispatched a merged step, 2026-10-01).
+merged() { [ "$(git -C "$PROJECT_PATH" log "$PROJECT_BRANCH" --merges --format=%s | grep -cE "^Merge agent/$1([: ]|$)")" -gt 0 ]; }
 running() { [ -f "$RUNS/$1.pid" ] && kill -0 "$(cat "$RUNS/$1.pid")" 2>/dev/null; }
 max_fix="${WS_CHAIN_FIX_ROUNDS:-1}"
 
 mapfile -t steps < <(grep -vE '^[[:space:]]*(#|$)' "$queue")
+# Every step's task must pass dispatch's attribution check; find out now, not hours in.
+if [ -n "${WS_ATTRIBUTION_RE:-}" ]; then
+  bad=$(for st in "${steps[@]}"; do set -f; eval "f=( $st )"; set +f; t="${f[1]:-}"; [ -f "$t" ] && [ "$(printf '%s\n' "${f[@]}" | grep -cx -- --names-ok)" -eq 0 ] && grep -liE "$WS_ATTRIBUTION_RE" "$t"; done | paste -sd' ')
+  [ -z "$bad" ] || stop "start" "task files that dispatch will refuse (they name a person or this process): $bad"
+fi
 log "chain start: $queue (${#steps[@]} steps, project $SLUG)"
 for i in "${!steps[@]}"; do
   # Quoted flags (--allow "Bash(npm run x*)") stay one word; globbing is off so a pattern is not expanded.

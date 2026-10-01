@@ -25,3 +25,9 @@ One command per Bash call: `npx jest --runInBand <files>`, `npx tsc --noEmit`, `
 
 ## Done when
 Every approved sheet is pinned by golden markup tests that fail on a changed look; one spec-driven tool regenerates the sheets; `renders:approve` is the only way goldens change; the tests and tsc pass.
+
+## Carried from the fw-import-warp review (suggestions; do them where the code is yours to touch)
+- `.ws-evidence/runs.tsv:18`: Rule 15: the last verification runs only selected directories (garments/import, garment-import, figure, posed, ink, spike-import). This branch changes exported signatures (`layerPosedFigure` and `posedFigureSvg` now take `LookGarment`, and `inkReach` moved to src/ink), so record one run of the project's full test command before merge.
+- `test/garments/import/warp.test.ts:36`: The byte pins (PINS) were recorded from this branch's own output, so they guard against later regressions but don't show the rendering is correct. The close-up renders in .ws-evidence are the only visual check. If the near-shoulder and far-sleeve close-ups are meant to be the approved renders, commit them or add a render-comparison test (rule 11/15).
+- `test/garments/import/warp.test.ts:121`: The comment's figure 'inkReach: 7.4 units at the default ink' is a hard-coded constant. Compute the 8-unit threshold from `inkReach({ seed: 5 })` so it can't drift from DEFAULT_INK.
+- `src/figure/posed.ts:96`: Known gap: imported garments don't ease over or press inside parametric ones, which is why the parametric tee's sleeve shows past the imported jacket's shoulders (NOTES.md, failure mode 2). The docstring says so. Carry it forward as a follow-up so it isn't lost.
