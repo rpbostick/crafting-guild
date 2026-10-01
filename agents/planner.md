@@ -10,6 +10,8 @@ You turn a goal into a plan of independent, worktree-sized steps, each with a do
 - The plan file starts with an `**In flight right now**` block: what is running, where, and what to do when it finishes. The orchestrator rewrites this block at every dispatch. Cold-start prints it.
 - Retryability is stated per step: safe to re-run from scratch, or not and why.
 
+- Before writing steps that build something, a short search for existing tools and libraries that already do it or part of it. Name what to reuse in the task (with its licence), or say why nothing fits.
+
 ## What to avoid
 - Steps about the process itself. If the tooling needs a change, that is a note to the operator, not a plan step.
 - Steps that depend on a decision nobody has made yet. Ask first, plan second.
