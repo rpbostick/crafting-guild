@@ -2,6 +2,11 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.2.3 (2026-10-01)
+
+- **Precheck false alarms.** A backticked path is looked up relative to the file that names it as well as the repo root (a spike's REPORT.md linking `renders/x.png`). A failing run on record is no longer flagged when a later passing run covered the same test files in a combined command (the save-a-failing-run-first pattern). Both showed up on figurewright's shoulder spikes.
+- **Builders may `cp` inside the worktree** (a before-copy into `.ws-evidence/` was denied 12 times across projects), and the builder sheet says to change files with Edit and Write, not `python -c`, `sed -i` or heredocs (the other common denial).
+
 ## 2.2.2 (2026-10-01)
 
 - **`ws chain` no longer re-dispatches a merged step.** Its merged-step check piped `git log` into `grep -q`; on a long history grep exits at the first match, git dies of SIGPIPE, and `pipefail` turns the match into a failure. A restart on figurewright re-dispatched I2, caught within two minutes, before it committed anything. Cold-start's two `grep -q` pipelines had the same flaw. The selftest now builds a 4,000-merge history and checks that the chain skips a merged step.

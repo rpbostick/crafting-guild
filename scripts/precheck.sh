@@ -16,9 +16,11 @@ added=$(git -C "$PROJECT_PATH" diff -U0 "$base" "$tip" -- . "${exempt[@]}" | awk
 changed=$(git -C "$PROJECT_PATH" diff --name-status "$base" "$tip")
 
 # Rule 4: paths named in added prose (markdown, comments) exist at the tip.
-missing=$(printf '%s\n' "$added" | grep -oE '`[A-Za-z0-9_./-]+/[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,5}`' | tr -d '`' | sort -u | while read -r p; do
+# A path may be relative to the repo root or to the file that names it (a REPORT.md linking renders/x.png).
+missing=$(printf '%s\n' "$added" | while IFS=$'\t' read -r file line; do
+  printf '%s\n' "$line" | grep -oE '`[A-Za-z0-9_./-]+/[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,5}`' | tr -d '`' | sed "s|^|$(dirname "$file")\t|"; done | sort -u | while IFS=$'\t' read -r dir p; do
   case "$p" in /*|*://*|*'*'*) continue ;; esac
-  git -C "$wt" cat-file -e "$tip:$p" 2>/dev/null || [ -e "$wt/$p" ] || echo "$p"; done | head -10 | paste -sd' ')
+  for c in "$p" "$dir/$p"; do git -C "$wt" cat-file -e "$tip:$c" 2>/dev/null || [ -e "$wt/$c" ] && continue 2; done; echo "$p"; done | head -10 | paste -sd' ')
 [ -n "$missing" ] && flag 4 "paths named in added lines that are not in the branch: $missing" || ok 4 "every backticked path in added lines exists"
 
 # Rule 6: a deleted or renamed file is no longer referenced.
@@ -60,7 +62,19 @@ fi
 tsv="$wt/.ws-evidence/runs.tsv"
 if [ -f "$tsv" ]; then
   runs=$(($(wc -l < "$tsv") - 1)); fails=$(awk -F'\t' 'NR>1 && $3!=0' "$tsv" | wc -l)
-  last_bad=$(awk -F'\t' 'NR>1{last[$5]=$3} END{for(c in last) if(last[c]!=0) print c}' "$tsv" | head -3 | paste -sd';')
+  # A command whose last run failed is fine when a later passing run named the same test files (or their
+  # directory): builders save a failing run first, then pass a combined command.
+  last_bad=$(awk -F'\t' '
+    NR>1 { n++; cmd[n]=$5; rc[n]=$3 }
+    END {
+      for (i=1;i<=n;i++) { if (rc[i]==0) continue; later=0
+        for (j=i+1;j<=n;j++) if (cmd[j]==cmd[i]) { later=1; break }
+        if (later) continue
+        k=split(cmd[i], w, " "); covered=1; files=0
+        for (x=1;x<=k;x++) { if (w[x] !~ /(\.(ts|js|py|tsx)$|^test\/|^tests\/)/) continue; files++; ok=0
+          for (j=i+1;j<=n;j++) if (rc[j]==0) { m=split(cmd[j], v, " "); for (y=1;y<=m;y++) if (index(w[x], v[y])==1 && v[y] ~ /^(test|tests|src|spike)/) { ok=1; break } if (ok) break }
+          if (!ok) covered=0 }
+        if (!files || !covered) print cmd[i] } }' "$tsv" | head -3 | paste -sd';')
   ok 15 "$runs runs recorded by ws-run with exit codes ($fails non-zero)"
   [ -n "$last_bad" ] && flag 15 "commands whose last recorded run failed: $last_bad"
   new_tests=$(printf '%s\n' "$changed" | awk '$1=="A"{print $NF}' | grep -E '(^|/)(test|tests|__tests__)/|\.(test|spec)\.[a-z]+$|(^|/)test_[^/]+\.py$' || true)
