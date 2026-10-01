@@ -1,0 +1,27 @@
+# figurewright I3: imported garments in renderFigure (the warper, open edges, the far sleeve over bands)
+
+Import build, step I3 of 5. I1 gave src the frames and the asset parser; I2 committed real assets under `assets/garments/`. This step moves the warper into src so `renderFigure` draws an imported garment beside parametric ones, and fixes the two drawing gaps the spike found.
+
+Read first: `spike/import/REPORT.md` ("The warper", failure modes 1 and 3, proof (d)), `spike/import/warper.ts`, `src/figure/render.ts`, `layered.ts`, `src/garments/posed-svg.ts` (`posedGarmentMainSvg`, `farInFront`, `brokenTubeInk`), `src/garments/order.ts` (`wornDrawKeys`).
+
+## Build
+1. **`src/garments/import/warp.ts`**: `GarmentAsset` + posed body → `GarmentLayer`, as the spike's warper does. Parts on the near arm are `near` unless `behind`; the rest join `main` with the torso. Ink with the garment's own seed (`posedGarmentInk`). Anchor at the neck base; the box is the warped points plus the ink's reach.
+2. **`renderFigure` takes imported assets.** The look's garments may name an imported asset beside a definition (choose the shape; keep the existing call sites compiling unchanged). Imported garments are keyed with `wornDrawKeys` together with the parametric ones, so an untucked imported top draws over the pants' waistband. Recolouring: the look's colours override the asset's role defaults, as for parametric garments.
+3. **Open edges (failure mode 1).** Add an `open-edge` path class (or flag; decide and document it in `assets/garments/README.md` and the importer from I2). An edge marked open is filled but not inked. Mark the near sleeve's top in the committed tee and zip jacket art and regenerate their JSON with I2's script. The near shoulder shows no line across the sleeve top.
+4. **The far sleeve over bands (failure mode 3).** Refill an imported garment's far sleeve over the torso's bands, as `posedGarmentMainSvg` does with `farInFront`, so the hem band never shows over the far sleeve.
+
+## Tests (test/garments/import/)
+- A render test pins the markup of the imported tee and zip jacket on the average body for a fixed seed (snapshot or a committed SVG, whichever the repo's other render tests use).
+- An untucked imported top draws over the pants; a tucked one under.
+- The near sleeve's top edge carries no ink: the inked runs of the near part do not cross the sleeve top (assert on geometry, not on a picture).
+- The hem band does not paint over the far sleeve on the seven spike bodies.
+- Recolour: a look colour replaces the asset's `main`.
+
+## Evidence
+Close-ups at 3× of the near shoulder and the far sleeve over the hem on the broad and round bodies, before (the spike) and after, plus the imported jacket over a parametric tee and shorts on the seven bodies, next to the all-parametric outfit.
+
+## Commands
+One command per Bash call: `npx jest --runInBand <files>`, `npx tsc --noEmit`, `npx tsx <file>.ts`, `node`. Do not run `npm install`. Hold one raster at a time.
+
+## Done when
+`renderFigure` draws imported assets with the parametric ones; open edges and the far-sleeve refill work on all seven bodies; the tests and tsc pass.
