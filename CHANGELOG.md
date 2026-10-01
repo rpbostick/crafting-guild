@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.2.1 (2026-10-01)
+
+- **A chain outlives the session that started it.** `ws chain` starts the chain detached in its own systemd scope (as builders run) and then waits on it; closing the session stops only the wait. `ws chain-wait` waits on a running chain from any session and prints where it stopped (exit 0 done, 4 gate, 1 stopped).
+
 ## 2.2.0 (2026-10-01)
 
 Anything run more than once is code. Measured from 113 builder runs: builders spent 34% of colorwright's Bash calls in hand-written evidence wrappers; 32 of colorwright's browser checks were never in the merge gate; figurewright's render scripts were re-run by hand in up to 10 runs each with nothing pinning the approved look; and the orchestrator drove every dispatch, wait, review and merge by hand.

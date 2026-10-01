@@ -16,7 +16,9 @@ ws() { "$WS/bin/ws" --project "$SLUG" "$@"; }
 pidf="$RUNS/chain.pid"; statf="$RUNS/chain.status"; logf="$RUNS/chain.log"
 if [ -f "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null; then die "a chain is already running for $SLUG (pid $(cat "$pidf"))"; fi
 echo $$ > "$pidf"; trap 'rm -f "$pidf"' EXIT
-log() { echo "$(now_local)  $*" | tee -a "$logf"; }
+# Detached (ws chain), stdout is the log itself: write lines once. Attached, show them and append them to the log.
+tee_to="$logf"; [ "$(readlink -f /proc/$$/fd/1 2>/dev/null)" = "$(readlink -f "$logf" 2>/dev/null)" ] && tee_to=/dev/null
+log() { echo "$(now_local)  $*" | tee -a "$tee_to"; }
 status() { echo "$1 $(now_local) $2" > "$statf"; }
 stop() { status stopped "$1: $2"; log "STOP at $1: $2"; exit "${3:-1}"; }
 merged() { git -C "$PROJECT_PATH" log "$PROJECT_BRANCH" --merges --format=%s | grep -qE "^Merge agent/$1([: ]|$)"; }
@@ -36,13 +38,13 @@ for i in "${!steps[@]}"; do
   if running "$name"; then log "$name: a run is going; waiting for it"
   elif [ -d "$wt" ] && [ -f "$RUNS/$name.result.txt" ]; then log "$name: worktree and result exist; going to review"
   elif [ -d "$wt" ]; then stop "$name" "worktree exists with no run and no result (a stopped run?); resume it with a task that says so"
-  else ws dispatch "${flags[@]}" "$name" "$task" 2>&1 | tee -a "$logf" | tail -1; running "$name" || stop "$name" "dispatch failed (see $logf)"; fi
+  else ws dispatch "${flags[@]}" "$name" "$task" 2>&1 | tee -a "$tee_to" | tail -1; running "$name" || stop "$name" "dispatch failed (see $logf)"; fi
   fix=0
   while :; do
     # The wait outlives the run's own timeout, so a timed-out run still reports.
     tmo=$(sed -n 's/^timeout=//p' "$RUNS/$name.task.txt" 2>/dev/null); mins=$(( ${tmo%m} + 15 )); [ "$mins" -gt 15 ] || mins=150
     ws wait "$name" "$mins" >> "$logf" 2>&1; rc=$?
-    head -1 "$RUNS/$name.result.txt" 2>/dev/null | cut -c1-160 | sed "s/^/$name result: /" | tee -a "$logf"
+    head -1 "$RUNS/$name.result.txt" 2>/dev/null | cut -c1-160 | sed "s/^/$name result: /" | tee -a "$tee_to"
     [ "$rc" -eq 0 ] || stop "$name" "the run's result did not check out (runs/$SLUG/$name.result.txt)"
     grep -q '^done:' "$RUNS/$name.result.txt" || stop "$name" "the builder did not finish (status $(head -1 "$RUNS/$name.result.txt" | cut -d: -f1)); see its open questions"
     tip=$(git -C "$wt" rev-parse HEAD)
@@ -62,7 +64,7 @@ for i in "${!steps[@]}"; do
       echo; echo "## The original task (for context)"; sed 's/^#/##/' "$task"
     } > "$ft"
     log "$name: fix-first; automatic fix round $fix ($ft)"
-    ws dispatch "${flags[@]}" "$name" "$ft" 2>&1 | tee -a "$logf" | tail -1; running "$name" || stop "$name" "fix dispatch failed (see $logf)"
+    ws dispatch "${flags[@]}" "$name" "$ft" 2>&1 | tee -a "$tee_to" | tail -1; running "$name" || stop "$name" "fix dispatch failed (see $logf)"
   done
   $gate && stop "$name" "reviewed $(short "$tip"), verdict merge; gated: show the operator, then run ws merge $name $tip and restart the chain" 4
   ws merge "$name" "$tip" >> "$logf" 2>&1 || stop "$name" "the merge failed or the tests failed (see $logf and runs/$SLUG/$name.merge-tests.log)"

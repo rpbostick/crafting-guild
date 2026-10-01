@@ -19,6 +19,7 @@ ws review [flags] <name>        review the branch; prints the verdict and the SH
 ws merge <name> <sha>           merge a reviewed branch, test, push, clean up
 ws chain <queue-file>           run a queue of steps: dispatch, wait, review (one automatic fix round), merge, next;
                                 stops on a failure, a gate or a judgment call (run it under run_in_background)
+ws chain-wait                   wait on the project's running chain (from any session) and print where it stopped
 ws precheck <name>              the checklist rules a script can check (ws review runs it first)
 ws audit [days]                 what builders keep doing by hand, from the run logs (default 30 days)
 ws stop <name>                  stop a running builder
@@ -85,7 +86,24 @@ case "$cmd" in
   review) "$WS/scripts/review.sh" ${proj:+--project "$proj"} "$@" ;;
   merge) "$WS/scripts/merge.sh" ${proj:+--project "$proj"} "$@" ;;
   check) "$WS/scripts/check-result.sh" ${proj:+--project "$proj"} "$@" ;;
-  chain) "$WS/scripts/chain.sh" ${proj:+--project "$proj"} "$@" ;;
+  chain)
+    # The chain runs detached in its own systemd scope (as builders do), so closing the session that started it
+    # stops only this wait, not the chain. Run `ws chain-wait` from a new session to wait on it again.
+    load_project "$proj"; q="${1:?ws chain <queue-file>}"; [ -f "$q" ] || die "no queue file $q"
+    if [ -f "$RUNS/chain.pid" ] && kill -0 "$(cat "$RUNS/chain.pid")" 2>/dev/null; then die "a chain is already running for $SLUG (pid $(cat "$RUNS/chain.pid")); wait on it with: ws chain-wait"; fi
+    rm -f "$RUNS/chain.status"
+    sc=(); systemd-run --user --scope --quiet true >/dev/null 2>&1 && sc=(systemd-run --user --scope --quiet --unit "ws-$SLUG-chain-$(date -u +%Y%m%dT%H%M%SZ)" --description "ws chain $SLUG")
+    ( "${sc[@]}" setsid "$WS/scripts/chain.sh" --project "$SLUG" "$q" ) < /dev/null >> "$RUNS/chain.log" 2>&1 &
+    for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f "$RUNS/chain.status" ] && break; sleep 1; done
+    echo "chain started for $SLUG on $q (log runs/$SLUG/chain.log)"
+    exec "$WS/bin/ws" --project "$SLUG" chain-wait ;;
+  chain-wait)
+    # Block until the chain stops; print its status and the log's milestones. Exit 0 done, 4 gate, 1 stopped.
+    load_project "$proj"
+    while [ -f "$RUNS/chain.pid" ] && kill -0 "$(cat "$RUNS/chain.pid")" 2>/dev/null; do sleep 15; done
+    grep -E "review at|merged \(|STOP|fix round|carried|chain (start|done)" "$RUNS/chain.log" 2>/dev/null | tail -20
+    st=$(cat "$RUNS/chain.status" 2>/dev/null || echo "no status"); echo "status: $st"
+    case "$st" in done*) exit 0 ;; *gated*) exit 4 ;; *) exit 1 ;; esac ;;
   precheck) "$WS/scripts/precheck.sh" ${proj:+--project "$proj"} "$@" ;;
   audit) load_project "$proj"; python3 "$WS/scripts/audit.py" "$SLUG" "$PROJECT_PATH" "$TEST_CMD" "$RUNS" "$WS/plans/$SLUG" "${1:-30}" ;;
   wait)
