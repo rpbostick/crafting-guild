@@ -77,6 +77,8 @@ TOOLS=(Read Grep Glob "Edit(./**)"
 # Per-project extras from projects/<slug>.conf (EXTRA_TOOLS), then this dispatch's --allow flags.
 [ ${#EXTRA_TOOLS[@]} -gt 0 ] && TOOLS+=("${EXTRA_TOOLS[@]}")
 [ ${#extra[@]} -gt 0 ] && TOOLS+=("${extra[@]}")
+# A task that names WebSearch or WebFetch (research) gets them; without a grant they are denied silently.
+for t in WebSearch WebFetch; do grep -q "\\b$t\\b" "$task" && TOOLS+=("$t"); done
 # The evidence runner (bin/ws-run) checks each command against these same Bash grants, read from a file the
 # builder cannot edit, so wrapping a command in it grants nothing new.
 RUN_GRANTS="$RUNS/$name.grants"

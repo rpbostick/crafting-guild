@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.2.5 (2026-10-01)
+
+- **Research tasks get web access.** `ws dispatch` grants WebSearch and WebFetch when the task file names them. Builders never had them by default, so a licence report dispatched without `--allow` ran with every web call denied and came back partial.
+
 ## 2.2.4 (2026-10-01)
 
 - **A chain resumes after the usage limit by itself.** `check-result` recognises a run stopped by the limit (HTTP 429) and writes `LIMIT` with the reset time as `reset_epoch`; `ws wait` treats it as a failure. `ws chain` waits until two minutes past the reset, then re-dispatches the step with a resume note (at most three times per step), and its status says when it will resume. A shoulder build sat dead for an hour after a 429 before this.
