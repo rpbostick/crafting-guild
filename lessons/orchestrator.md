@@ -17,7 +17,7 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - Parallel builders share the CPU, not only the plan. Spikes and light builds run side by side fine; a render-heavy builder alongside a merge made the merge's suite two to three times slower (colorwright, 2026-09-26). The usage limit stopped no run in 42 hours. Merge when nothing heavy is running, and every dispatch gets a budget.
 - A missing grant stalls a builder silently. Name every command the task needs and pass extras with `--allow`. Tell the task to use one command per Bash call.
 - A builder cannot copy a file in from another repo: `cp` from outside its worktree is denied even with `--allow "Bash(cp *)"` (site-fw rounds 2 and 3, 2026-09-28). Copy cross-repo assets into the worktree yourself before dispatch, or after it finishes. Flags go before the builder name; dispatch refuses them after it.
-- When a run stops on the usage limit, its uncommitted work is still in the worktree. Resume with a task that says so and dispatch at the stated reset time.
+- When a run stops on the usage limit, `ws chain` waits for the reset and resumes it (2.2.4). Outside a chain, re-dispatch after the reset with a task that says to resume.
 - Do not edit files an open branch also touches. Put the edit in that branch's task.
 - Never `cd` in a Bash call. It moves this session's working directory.
 - Two sessions, two projects: `state/current` is one file, so the second `ws <slug>` moves it under the first. Sessions are pinned by `WS_PROJECT` since 2.1.2, but a session started any other way is not; when cold-start prints `CONFLICT` or `not pinned`, use `--project` on every command (found 2026-09-27 testing 2.1.0 from a terminal).

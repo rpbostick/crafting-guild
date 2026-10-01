@@ -52,6 +52,17 @@ for i in "${!steps[@]}"; do
     tmo=$(sed -n 's/^timeout=//p' "$RUNS/$name.task.txt" 2>/dev/null); mins=$(( ${tmo%m} + 15 )); [ "$mins" -gt 15 ] || mins=150
     ws wait "$name" "$mins" >> "$logf" 2>&1; rc=$?
     head -1 "$RUNS/$name.result.txt" 2>/dev/null | cut -c1-160 | sed "s/^/$name result: /" | tee -a "$tee_to"
+    # Usage limit: wait for the reset, then resume the same step (its work so far is in the worktree).
+    if grep -q '^LIMIT' "$RUNS/$name.result.txt" 2>/dev/null; then
+      ep=$(sed -n 's/^reset_epoch=//p' "$RUNS/$name.result.txt"); case "$ep" in ''|*[!0-9]*) stop "$name" "usage limit, reset time unknown: $(head -1 "$RUNS/$name.result.txt")" ;; esac
+      limits=$((${limits:-0}+1)); [ "$limits" -le 3 ] || stop "$name" "usage limit hit 3 times on this step"
+      wake=$((ep + 120)); status waiting "$name: usage limit, resuming at $(date -d "@$wake" '+%H:%M')"; log "$name: usage limit; resuming at $(date -d "@$wake" '+%H:%M')"
+      while [ "$(date +%s)" -lt "$wake" ]; do sleep 60; done
+      rt="$(dirname "$task")/$(basename "$task" .md)-resume-limit.md"
+      { echo "# Resume after the usage limit"; echo; echo "An earlier run of this task stopped at the usage limit. Run \`git status\` and \`git log --oneline main..\` first, keep what is there, and finish the task below."; echo; sed 's/^#/##/' "$task"; } > "$rt"
+      ws dispatch "${flags[@]}" "$name" "$rt" 2>&1 | tee -a "$tee_to" | tail -1; running "$name" || stop "$name" "resume dispatch failed (see $logf)"
+      status running "$name"; continue
+    fi
     [ "$rc" -eq 0 ] || stop "$name" "the run's result did not check out (runs/$SLUG/$name.result.txt)"
     grep -q '^done:' "$RUNS/$name.result.txt" || stop "$name" "the builder did not finish (status $(head -1 "$RUNS/$name.result.txt" | cut -d: -f1)); see its open questions"
     tip=$(git -C "$wt" rev-parse HEAD)

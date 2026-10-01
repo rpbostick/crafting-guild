@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.2.4 (2026-10-01)
+
+- **A chain resumes after the usage limit by itself.** `check-result` recognises a run stopped by the limit (HTTP 429) and writes `LIMIT` with the reset time as `reset_epoch`; `ws wait` treats it as a failure. `ws chain` waits until two minutes past the reset, then re-dispatches the step with a resume note (at most three times per step), and its status says when it will resume. A shoulder build sat dead for an hour after a 429 before this.
+
 ## 2.2.3 (2026-10-01)
 
 - **Precheck false alarms.** A backticked path is looked up relative to the file that names it as well as the repo root (a spike's REPORT.md linking `renders/x.png`). A failing run on record is no longer flagged when a later passing run covered the same test files in a combined command (the save-a-failing-run-first pattern). Both showed up on figurewright's shoulder spikes.

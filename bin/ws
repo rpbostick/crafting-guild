@@ -109,7 +109,7 @@ case "$cmd" in
   wait)
     name="${1:?ws wait <name> [minutes]}"; mins="${2:-150}"; load_project "$proj"
     for _ in $(seq 1 $((mins*6))); do
-      if [ -f "$RUNS/$name.result.txt" ] && [ ! -f "$RUNS/$name.pid" ]; then cat "$RUNS/$name.result.txt"; grep -q '^FAIL\|^NO RESULT\|^TIMEOUT' "$RUNS/$name.result.txt" && exit 1 || exit 0; fi
+      if [ -f "$RUNS/$name.result.txt" ] && [ ! -f "$RUNS/$name.pid" ]; then cat "$RUNS/$name.result.txt"; grep -q '^FAIL\|^NO RESULT\|^TIMEOUT\|^LIMIT' "$RUNS/$name.result.txt" && exit 1 || exit 0; fi
       [ -f "$RUNS/$name.pid" ] || [ -f "$RUNS/$name.jsonl" ] || die "no run named $name"
       sleep 10
     done; echo "still running after $mins minutes"; exit 3 ;;
