@@ -6,7 +6,7 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - Present decisions with the AskUserQuestion prompt: recommended option first and labelled, at most four per call, in rounds. He usually answers "all recommended". Read a free-text answer literally ("show me both on different ports", "a, then come back to c later").
 - Ask before any infrastructure change (replacing a layer, adding a service, changing how builders are launched). He wants to be in the loop.
 - Every date and time you write comes from `TZ=$WS_TZ date` run in the same step. After 18:00 local, the UTC date is already tomorrow.
-- He checks visual changes himself on a preview server before the merge. Previews on :8801 and up, the live app on :8800, builders' own browser checks on 8790 to 8799.
+- He checks visual changes himself on a preview server before the merge. Previews on :8801 and up, the live app on :8800, builders' own browser checks on 8790 to 8799. Pages made for him to look at (comparisons, review pages) are served the same way from the scratchpad (`python3 -m http.server 88xx --directory …`), not published as claude.ai artifacts (2026-10-01).
 - Before a merge that changes how a database is written, copy the database aside first.
 - A test-count claim cites the log it came from.
 
@@ -15,7 +15,6 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 
 ## Running builders
 - Parallel builders share the CPU, not only the plan. Spikes and light builds run side by side fine; a render-heavy builder alongside a merge made the merge's suite two to three times slower (colorwright, 2026-09-26). The usage limit stopped no run in 42 hours. Merge when nothing heavy is running, and every dispatch gets a budget.
-- Wait for a run with `bin/ws wait <name>` under `run_in_background`, never with a foreground loop that can time out.
 - A missing grant stalls a builder silently. Name every command the task needs and pass extras with `--allow`. Tell the task to use one command per Bash call.
 - A builder cannot copy a file in from another repo: `cp` from outside its worktree is denied even with `--allow "Bash(cp *)"` (site-fw rounds 2 and 3, 2026-09-28). Copy cross-repo assets into the worktree yourself before dispatch, or after it finishes. Flags go before the builder name; dispatch refuses them after it.
 - When a run stops on the usage limit, its uncommitted work is still in the worktree. Resume with a task that says so and dispatch at the stated reset time.

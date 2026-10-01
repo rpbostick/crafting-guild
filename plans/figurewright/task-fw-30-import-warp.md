@@ -29,3 +29,9 @@ One command per Bash call: `npx jest --runInBand <files>`, `npx tsc --noEmit`, `
 
 ## Done when
 `renderFigure` draws imported assets with the parametric ones; open edges and the far-sleeve refill work on all seven bodies; the tests and tsc pass.
+
+## Carried from the fw-importer review (suggestions; do them where the code is yours to touch)
+- `assets/garments/README.md:5`: Rule 11: reference-body.svg and art/*.svg embed the figure's head, hands and shoes from FIGURE_ART, which is Open Peeps art (CC0, see assets/extremities/NOTICE.md and vendor/colorwright/NOTICE.md). The garment assets carry no licence trail. Add one line pointing to those NOTICE files.
+- `scripts/garment-import/importer.ts:96`: Rule 1: chainPath's per-side catch swallows any error, not just OutsideSegment, because located() rethrows other errors. A real bug on one side is hidden whenever the other side fits. Catch only OutsideSegment-derived errors there and rethrow everything else.
+- `.ws-evidence/tests-final.log:7`: Rule 15: the final run covers only test/garment-import, test/garments/import and figure.test.ts (10 suites), not the project's full test command, and was not recorded through ws-run (there is no runs.tsv). Run the whole suite through ws-run before merging.
+- `docs/renders/rigid-rule.png:1`: Rule 15: the 600 KB render backs the reasoning for the 2/3 rule, but nothing regenerates or checks it. If it is meant to stay in step with RIGID_WIDTH_OF_HALF, consider a no-drift style check or a note that it is illustrative only.
