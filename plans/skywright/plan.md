@@ -1,7 +1,7 @@
 # skywright: plan
 
 **In flight right now**
-Nothing. Step 6 (`sky-release`) merged 2026-09-28 as 647e120: cache, README, publish-ready 0.1.0. Steps 1-6 are done. Step 7 (publish) waits until Bike Weather uses skywright.
+Nothing. Step 6 (`sky-release`) merged 2026-09-28 as 647e120: cache, README, publish-ready 0.1.0. Steps 1-6 are done. Step 7 (publish) waits until Bike Weather uses skywright. Privacy audit 2026-10-01: `sky-coarse-location` merged as f376705 (forecast requests carry coordinates rounded to 0.01°; one `roundedCoordinate` in `src/coords.ts` for the cache and the URL). Carry into the next task on this code: rename the fixture-query test (it now checks rounded coordinates), say 'the Open-Meteo request' in the `src/coords.ts` docstring (a wrapped custom provider still gets exact coordinates), and move the test coordinate off the 40.015 rounding boundary.
 
 ## Requirements (Patrick, 2026-09-27; see `plans/bike-weather/product.md`)
 - An open-source (MIT) weather library in TypeScript, usable from React Native/Expo and Node (only `fetch`, no Node-only APIs in `src/`), plus a small Expo demo app released with it.

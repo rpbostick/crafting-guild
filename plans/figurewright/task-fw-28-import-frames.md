@@ -1,5 +1,7 @@
 # figurewright I1: segment frames, the shoulder-arc frame, and the garment asset format in src
 
+**Resume.** An earlier run of this task was stopped before it committed anything. Its work is still in this worktree: an edit to `src/body/skeleton.ts` and a new `src/garments/import/`. Run `git status` and `git diff` first, read what is there, keep what fits this task and finish it. Commit as you go.
+
 Import build, step I1 of 5. The spike in `spike/import/` proved drawn garments can be imported and warped onto every body (`spike/import/REPORT.md`). Move its **frames** and **asset format** into `src/garments/import/`. Replace the spike's shoulder blend with a **dedicated shoulder-arc frame**. Leave the SVG reader, importer and warper in the spike for now: they are steps I2 and I3.
 
 Read first: `spike/import/REPORT.md` (the asset format, "Two changes to the design", and failure modes 5–6), `spike/import/frames.ts`, `asset.ts` and `measure.ts`, and `src/garments/posed.ts` (`posedShoulders`, `shoulderArcOnto`).

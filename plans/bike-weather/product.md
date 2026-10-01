@@ -34,6 +34,13 @@ Nothing for Bike Weather itself yet. Milestone 1: skywright is done; figurewrigh
 
 - `projects/bike-weather.conf` has no `TEST_CMD`, `EXTRA_TOOLS` or `PREVIEW_CMD` yet (the repo is one README commit). The skeleton task sets up Jest and typecheck; set all three in the conf in the same step, before its merge, so no Bike Weather merge pushes without a gate.
 
+## Privacy (audit, 2026-10-01)
+- **Protect:** the user's location (GPS fix, home and commute), body measurements (height, chest, waist, hips), clothing library and comfort ratings, and trip plans (where and when they will be away from home). Later, the commercial weather provider's API key.
+- **Collect:** nothing on a server. Everything stays on the device; export is a file the user makes. Third parties receive only what a forecast needs: coordinates (weather provider) and place-search text (geocoder), plus the device's IP address.
+- **Expose:** each forecast request to the provider; the export file (plain JSON); skywright and figurewright once public (no keys, no personal data in history: `release-audit.md`); any API key shipped in the app bundle is extractable.
+- **Misuse:** exact coordinates logged by a provider reveal a home and daily ride times; a leaked export joins body measurements, home and trip dates (an empty house); an extracted key runs up the bill.
+- **Rules for the build:** coordinates leave the device rounded to 0.01° (skywright, `sky-coarse-location`); never log coordinates or measurements; the export carries no location history unless the user includes it, and the app says what is in it; the paid provider's key goes through a proxy or a restricted key before launch, never a bare key in the bundle; ask for "while using" location only, and allow a typed place instead.
+
 ## Milestones
 1. **Tools satisfactory** (separate projects): the weather library + demo app; the body/garment tool + demo app.
 2. **Bike Weather core loop**: avatar builder, clothing library from garment templates with ratings, today's forecast, suggested outfit on the avatar in ride/everyday mode, comfort rating, export/import. Closing this milestone includes publishing skywright (its plan's step 7) and asking Patrick about figurewright's release.
