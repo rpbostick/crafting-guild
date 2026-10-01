@@ -7,7 +7,7 @@ Read first: `src/body/skeleton.ts` (`shoulderShift`, `shoulderArc`, `shoulderArc
 ## Build (spike/shoulders/)
 Make the shoulder shape a spike-only parameter (an options object passed through, or a spike copy of the functions), so `src/` defaults and every committed render stay byte-identical. Render these options:
 - **A. Slope and cap.** The shoulder line drops from the neck base to the arm top at a natural slope (measure it on easing-2 and on the photos in `spike/body-refs*/`, roughly 15 to 25°), ending in a rounded deltoid cap that joins the arm. Width unchanged.
-- **B. Width back to the data.** Shoulders +1 ends at 43 cm instead of 47, and the round builds' shoulder width does not grow with the belly (check what `shoulderShift` and the build slider do today, and say). Shape unchanged.
+- **B. Width follows the chest.** Anatomy: the shoulder girdle anchors to the rib cage, so shoulder width comes mainly from how broad the chest is; thicker upper arms add a little; a big belly or wide hips add nothing. Derive the shoulder width from the chest breadth plus a small upper-arm term instead of an independent value. Fit the relationship to the photo measurements in `spike/body-refs*/` (shoulder against chest, and against upper arm, per photo), and report the fit and its error. Say what becomes of the `shoulders` slider: removed, or kept as a small offset around the derived width (recommend one). On a round build the shoulders then follow its chest, not its belly. Shape unchanged.
 - **C. A and B together.**
 - Add a fourth option only if the measurements point to one clearly, and say why.
 
@@ -19,7 +19,7 @@ For each of current, A, B and C, one row on the builds listed above plus the ave
 Add 3× close-ups of the near shoulder on broad and round for each option, and easing-2 on the same scale beside them. Label each row with the option, its slope in degrees and its shoulder width in cm per build.
 
 ## Measurements (spike/shoulders/REPORT.md)
-Per option and build: shoulder width (cm), slope (°), and how far the jacket's sleeve top stands out from the arm at the shoulder (cm, near and far side). Compare the widths and slopes with the photo data. Recommend one option, in a sentence, with the reason; say what else in `src/` would change if it were adopted (garment fit, the import frames' shoulder-arc frame, the render goldens that would need re-approving).
+Per option and build: shoulder width (cm), slope (°), and how far the jacket's sleeve top stands out from the arm at the shoulder (cm, near and far side). Compare the widths and slopes with the photo data, and for option B give the chest-to-shoulder fit per build. Recommend one option, in a sentence, with the reason; say what else in `src/` would change if it were adopted (garment fit, the import frames' shoulder-arc frame, the render goldens that would need re-approving).
 
 ## Tests
 - `src/` is unchanged in behaviour: the render golden tests (`test/renders/`) pass untouched.
