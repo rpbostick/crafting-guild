@@ -4,4 +4,5 @@ fw-importer        plans/figurewright/task-fw-29-importer.md
 fw-import-warp     plans/figurewright/task-fw-30-import-warp.md
 fw-render-pins     plans/figurewright/task-fw-33-render-pins.md --allow "Bash(npm run renders:*)"
 fw-import-layering plans/figurewright/task-fw-31-import-layering.md gate
+fw-shoulder-options plans/figurewright/task-fw-34-shoulder-options.md gate --timeout 150m
 fw-found-art       plans/figurewright/task-fw-32-found-art.md gate --timeout 180m

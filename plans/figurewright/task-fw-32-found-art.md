@@ -28,3 +28,11 @@ One command per Bash call: `npx jest --runInBand <files>`, `npx tsc --noEmit`, `
 
 ## Done when
 `found-art.ts` imports easing-2's shirt with no manual input to the stated bound; the batch report covers every rigged top; candidate contact sheets are ready for a person to review; the tests and tsc pass.
+
+## Carried from the fw-import-layering review (suggestions; do them where the code is yours to touch)
+- `test/garments/import/layering.test.ts:151`: Rule 2 / precheck FLAG: runs.tsv has no failing run on record. The in-suite control test covers the 'can fail' proof. Saving a ws-run log of the tests failing with assetShift stubbed out would settle the precheck.
+- `test/garments/import/warp.test.ts:81`: `not.toEqual` on the tee's markup only proves something changed, not that the sleeve was pressed inward. A tighter assertion would be better, e.g. the tee's sleeve outline narrower than before, or a pointer to the coverage test as the real check.
+- `.ws-evidence/after-garments.log:1`: Rule 15: the recorded run covers test/garments, renders, figure and garment-import, not the full `npm test`. A full-suite run would cover any other code that imports src/garments or src/figure/posed.ts.
+- `src/garments/import/offset.ts:149`: The module-level CACHE keyed by asset id keeps the last asset object for each id indefinitely. That's fine for a fixed set of assets, but if assets are ever loaded dynamically, consider a WeakMap keyed by the asset object.
+- `src/garments/import/layering.ts:26`: `as OrderedItem` on find() hides a missing entry. It can't be missing today, because every drawn layer is passed to wornDrawOrder. An explicit throw would match the fail-loud style used elsewhere (rule 1).
+- Known gap from I4: a drawn top follows a round belly back in instead of hanging straight (0.37 cm on the round body, under the ink; 0.68 cm at the round hem in the import spike). Not this task's to fix; leave it to the per-part `hang` follow-up.
