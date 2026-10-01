@@ -38,8 +38,12 @@ Stable ids: the parser gives every source block an id that survives edits elsewh
 ## Tests
 `node:test`, no dependencies: `tests/site-parse.test.js` (fixtures for each block kind, malformed blocks, grouping, stable ids that do not change when an unrelated block is edited, and the real `rules/v1/synthesis.md` parsing with no errors and every proposal matched to a discussion); `tests/site-diff.test.js` (insert, delete, replace, identical, empty); `tests/site-store.test.js` (the memory and localStorage backends, the latter with a stub: decisions, note create/edit/delete, export then import round-trip); `tests/build-review.test.js` (runs the build into a temp path and checks the output contains every proposal id and no `<script src` or `fetch(`).
 
+## Also (from the review of the synthesis step)
+- `scripts/check-coverage.js`: add a small allow-list for known decorative-glyph lines (the Remix title-page line `#g sf { hedonic.ink } 2021 g#`, text file line 18) so a clean run exits 0. Add `tests/coverage.test.js` that runs the check when `/home/patrickb/pen-paper-rpg/resources/text/` holds the three text files and skips (`t.skip`) otherwise; the text files stay out of git.
+- `scripts/synthesis-format.js` line 4: its comment names the diff page as a reader of the format; make it true by having `site/parse.js` reuse or agree with this validator (one definition of the format, not two).
+
 ## Leave alone
-`rules/`, `resources/`, `README.md`.
+`rules/` (read only), `resources/`, `README.md`.
 
 ## Commands
 `node --test` with the test files above, `node scripts/build-review.js`, `git add`, `git commit`. One command per Bash call. You cannot run a browser; keep the logic worth testing in `parse.js`, `diff.js` and `store.js`.
