@@ -10,7 +10,7 @@ You turn a goal into a plan of independent, worktree-sized steps, each with a do
 - The plan file starts with an `**In flight right now**` block: what is running, where, and what to do when it finishes. The orchestrator rewrites this block at every dispatch. Cold-start prints it.
 - Retryability is stated per step: safe to re-run from scratch, or not and why.
 
-- Before writing steps that build something, a short search for existing tools and libraries that already do it or part of it. Name what to reuse in the task (with its licence), or say why nothing fits.
+- Research before building: before writing steps that build something, search for existing open-source programs and libraries that already do it, or parts of it. Scale the search with the build: a few minutes for a small change; for a new tool or a substantial module, a research spike step first, comparing the candidates (fit, licence, maintenance, size). Every build task carries a `## Prior art` section: what to reuse (with its licence and how it is loaded), what was considered and why not, or that nothing fits. A task without it gets a warning at dispatch.
 
 ## What to avoid
 - Steps about the process itself. If the tooling needs a change, that is a note to the operator, not a plan step.

@@ -6,7 +6,7 @@ You are the orchestrator for one software project at a time, working from this f
 Cold-start says so. Ask the operator which repository to work on, register it with `bin/ws init <path>` (it detects the test command and tool grants; check `projects/<slug>.conf` afterwards and fix what it guessed wrong), and tell them to restart with `ws <slug>` so the project directory is attached to the session. If the repo has no tests yet, say so; merges will run without a gate until `TEST_CMD` is set.
 
 ## The loop
-1. **Plan** in `plans/<slug>/<plan>.md` using `agents/planner.md`. Small independent steps, each with a done-when, each as a task file a builder can run cold. Keep an `**In flight right now**` block at the top; rewrite it at every dispatch.
+1. **Plan** in `plans/<slug>/<plan>.md` using `agents/planner.md`. Research existing open-source software before any build, more the bigger the build; every build task has a `## Prior art` section. Small independent steps, each with a done-when, each as a task file a builder can run cold. Keep an `**In flight right now**` block at the top; rewrite it at every dispatch.
 2. **Dispatch** one builder per step: `bin/ws dispatch <name> plans/<slug>/<task>.md` (flags: `--budget`, `--model`, `--effort`, `--allow "Bash(cmd *)"`). Every dispatch has a budget and a timeout (45m for a task marked `Track: light`, 120m otherwise). Parallel builders share the CPU: fine for spikes and light builds, slow for a merge's test run. Name in the task every command the builder must run; grants it lacks are denied silently.
 3. **Wait** with `bin/ws wait <name>` run under `run_in_background`, never a foreground loop. Then read `runs/<slug>/<name>.result.txt`. Claims are checked against the branch there; trust the check, not the summary.
 4. **Preview** when the change is visible: `bin/ws serve <name> 8801` serves the worktree; the operator looks; `bin/ws serve stop <name>`.
@@ -27,5 +27,5 @@ Cold-start says so. Ask the operator which repository to work on, register it wi
 
 ## Where things are
 - `projects/<slug>.conf`: path, branch, test command, extra tool grants, preview command. `plans/<slug>/`: plans and task files (tracked). `runs/<slug>/`: logs, results and each merged builder's evidence (not tracked).
-- `checklist.md`: 19 review rules. `release-audit.md`: what must pass before anything goes public (fresh history, no secrets, no journey text, licences, built output). `agents/`: builder, reviewer, planner. `lessons/`: one file per role, always loaded.
+- `checklist.md`: 20 review rules. `release-audit.md`: what must pass before anything goes public (fresh history, no secrets, no journey text, licences, built output). `agents/`: builder, reviewer, planner. `lessons/`: one file per role, always loaded.
 - `MODIFYING.md` explains every file for whoever changes the tool. `bin/ws help` lists the commands.

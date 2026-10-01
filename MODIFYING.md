@@ -26,7 +26,7 @@ bin/ws-run              the builders' evidence runner: one granted command, its 
 scripts/selftest.sh     syntax checks plus a dry run against a scratch repo. Run it after any change here.
 agents/*.md             the three roles. Plain prose, pasted into prompts.
 lessons/*.md            per-role notes, pasted into prompts. The whole memory system.
-checklist.md            what the reviewer applies. 19 rules; keep it that size.
+checklist.md            what the reviewer applies. 20 rules; keep it that size.
 schema/*.json           the JSON a builder and a reviewer must return (Claude Code's --json-schema).
 projects/<slug>.conf    one registered project: path, branch, TEST_CMD, EXTRA_TOOLS, PREVIEW_CMD.
 plans/<slug>/           plans and task files, tracked here so the product repo stays clean.

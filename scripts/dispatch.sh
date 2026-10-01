@@ -79,6 +79,10 @@ TOOLS=(Read Grep Glob "Edit(./**)"
 [ ${#extra[@]} -gt 0 ] && TOOLS+=("${extra[@]}")
 # A task that names WebSearch or WebFetch (research) gets them; without a grant they are denied silently.
 for t in WebSearch WebFetch; do grep -q "\\b$t\\b" "$task" && TOOLS+=("$t"); done
+# A build task names what it reuses (agents/planner.md). Light tasks and research-only tasks are exempt.
+if ! grep -q "^## Prior art" "$task" && ! grep -q "Track: light" "$task" && ! grep -q -i -E "research only|no code" "$task"; then
+  echo "ws: warning: $task has no ## Prior art section (what existing software it reuses, or why nothing fits)" >&2
+fi
 # The evidence runner (bin/ws-run) checks each command against these same Bash grants, read from a file the
 # builder cannot edit, so wrapping a command in it grants nothing new.
 RUN_GRANTS="$RUNS/$name.grants"

@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.2.6 (2026-10-01)
+
+- **Reuse before building.** Every build task carries a `## Prior art` section (what existing software it reuses, with its licence, or why nothing fits); research scales with the size of the build, up to a spike before a new tool. `ws dispatch` warns when a task that is neither `Track: light` nor research has none. The planner, builder sheet and lessons say so, and checklist rule 20 makes a hand-written replacement for a maintained library a review finding. The synthesis review page had been dispatched with a hand-written word diff while jsdiff exists.
+
 ## 2.2.5 (2026-10-01)
 
 - **Research tasks get web access.** `ws dispatch` grants WebSearch and WebFetch when the task file names them. Builders never had them by default, so a licence report dispatched without `--allow` ran with every web call denied and came back partial.

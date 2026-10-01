@@ -21,3 +21,4 @@ Nineteen rules. Adding one means removing one. A rule earns its place by having 
 17. Dates written into docs are the author's calendar date (see `config.sh`, `WS_TZ`), never the UTC date after 18:00 local.
 18. No secrets, credentials, absolute home-directory paths or personal identifiers in tracked files.
 19. Tracked files state reasons, never who asked, decided or approved, or when: no names outside intended credits, no "the operator", no dated decisions or quotes. A fixed choice reads "Deliberate: <reason>".
+20. New code does not reimplement what a maintained open-source library already does (a diff, a Markdown or date parser, a CSV reader, an HTTP client, a UI widget) unless the task's `## Prior art` section says why. A hand-written replacement without that reason is a finding; name the library and its licence.
