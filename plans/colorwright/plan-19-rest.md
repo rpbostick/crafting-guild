@@ -1,7 +1,7 @@
 # Colorwright: the rest of plan 19 (3a-2, 3b, 3c-2) and the Option C spike
 
-**In flight right now** (2026-09-27, rewrite at every dispatch):
-Nothing is running. colorwright `v1.0` tagged at `3625670`; loose ends after the tag merged on master: history links `6623043`, pipeline README as a reference `355fec5`, add_outline_region re-run fix `b527691`. Next: the new project that builds on colorwright.
+**In flight right now** (2026-10-01 16:04 MDT, rewrite at every dispatch):
+`cw-gate-speed` running (dispatched 15:53, 90 m cap): parallel browser checks to bring the merge gate from 554 s back under 300 s (`task-cw-gate-speed.md`). Merged today: `cw-e2e-gate` fe6076f (27 browser checks + static build now in `scripts/run-all-tests.sh` via `scripts/run-e2e.sh`). Open from that run: `scripts/demo-screenshots.js` asserts nothing and uses dead selectors (rewrite or retire); `scripts/check_cached_evenodd_area.py` could become a pipeline unit test. colorwright `v1.0` is tagged at `3625670`.
 
 ## Requirements (from v1 `plans/backlog-plan-19.md` and `backlog-plan-18.md`; Patrick's choices there are settled)
 - 3a-2: the old `scripts/*-e2e-check.js` that guard features that still matter work with the carousel rows (a shared find-a-tile helper); one-off investigation scripts are retired with a note naming their last valid commit. Nothing still defaults to :8792.
