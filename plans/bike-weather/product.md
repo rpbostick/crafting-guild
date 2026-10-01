@@ -43,6 +43,16 @@ Nothing for Bike Weather itself yet. Milestone 1: skywright is done; figurewrigh
 
 - 2026-10-01: provider research merged (`docs/research/weather-providers.md`, 755f1ae). Recommends **Open-Meteo commercial behind a small Bike Weather proxy**, WeatherKit REST as fallback; OpenWeather out on cost, Tomorrow.io on terms/privacy. Open for Patrick, after the Dark Sky report: who runs the proxy; iOS-only or both at launch; confirm Open-Meteo prices. Review suggestions for a revision: hourly horizon per provider in the table (OpenWeather 48 h, MET Norway 6-hourly later), state the privacy rule in the doc, WeatherKit's cache limit next to the recommendation, link skywright's files by commit.
 
+## Decisions (Patrick, 2026-10-01, after the provider and Dark Sky reports)
+| Question | Decision |
+|---|---|
+| Core loop | **All of the Dark Sky list** (`docs/research/dark-sky.md`, closing): one-screen timeline (next hour by the minute where available, 24 h, week) in Dark Sky's plain voice; dry-window finder / "leave by" for a ride length; outfit from the worst conditions of the ride window; headwind/tailwind between saved places; opt-in rain alerts for saved rides. |
+| Server features | **Every server-backed feature has a no-server fallback**, so costs stay low early and the app works when the server is unreachable. Proxy down → the app calls a keyless provider directly (MET Norway, CC BY, User-Agent only; coordinates still rounded to 0.01°). Alerts without a server → on-device background fetch with local notifications for saved rides (less timely, OS-throttled). Minute rain unavailable → hourly timeline with the dry-window finder on hourly data. The UI says which mode it is in. |
+| Minute-level nowcast source | Decide later (Rainbow.ai vs WeatherKit next hour vs own MRMS/OPERA nowcast); build the timeline so the minute layer is optional. |
+| Platforms | iOS and Android at launch (WeatherKit, if used, through the proxy's REST signing). |
+| Server | Serverless (e.g. Cloudflare Workers): forecast proxy (key out of the app, no IP to provider, shared 0.01°-cell cache, no client IP logging), later alert checks. |
+| Provider | Open-Meteo commercial behind the proxy (report recommendation); WeatherKit REST as fallback; confirm prices at signup. |
+
 ## Milestones
 1. **Tools satisfactory** (separate projects): the weather library + demo app; the body/garment tool + demo app.
 2. **Bike Weather core loop**: avatar builder, clothing library from garment templates with ratings, today's forecast, suggested outfit on the avatar in ride/everyday mode, comfort rating, export/import. Closing this milestone includes publishing skywright (its plan's step 7) and asking Patrick about figurewright's release.
