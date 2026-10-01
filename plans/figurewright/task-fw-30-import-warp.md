@@ -10,6 +10,10 @@ Read first: `spike/import/REPORT.md` ("The warper", failure modes 1 and 3, proof
 3. **Open edges (failure mode 1).** Add an `open-edge` path class (or flag; decide and document it in `assets/garments/README.md` and the importer from I2). An edge marked open is filled but not inked. Mark the near sleeve's top in the committed tee and zip jacket art and regenerate their JSON with I2's script. The near shoulder shows no line across the sleeve top.
 4. **The far sleeve over bands (failure mode 3).** Refill an imported garment's far sleeve over the torso's bands, as `posedGarmentMainSvg` does with `farInFront`, so the hem band never shows over the far sleeve.
 
+5. **Frame refinements carried from I1** (regenerate the committed assets with I2's script afterwards):
+   - The sleeve's flat-top corners are 1.5 cm off on broad and round: chain points store `along` from the arm's root, but the arm's top moves with the arm's width. Store sleeve points near the top relative to the arm's top (`posedArmTopU`). Target: within 0.5 cm.
+   - The neckline is 0.56 cm off on the round tee: the torso frame scales a neckline point by the torso's half-width, while the parametric neckline follows the neck's. Give neckline points their own across scale (the neck's half-width). Target: within 0.3 cm, and tighten the I2 neckline bound to match.
+
 ## Tests (test/garments/import/)
 - A render test pins the markup of the imported tee and zip jacket on the average body for a fixed seed (snapshot or a committed SVG, whichever the repo's other render tests use).
 - An untucked imported top draws over the pants; a tucked one under.

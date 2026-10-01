@@ -18,6 +18,8 @@ diff=$(git -C "$PROJECT_PATH" diff "$base" "$tip" -- . ':(exclude)*.svg' ':(excl
 bytes=${#diff}; capped=""
 if [ "$bytes" -gt 200000 ]; then diff="${diff:0:200000}"; capped="(diff truncated at 200 KB of $bytes; read the files for the rest)"; fi
 commits=$(git -C "$PROJECT_PATH" log --format='%h %s' "$base..$tip")
+# The rules a script can check, checked first; the reviewer takes these as given and spends its budget on judgment.
+pre=$("$WS/scripts/precheck.sh" --project "$SLUG" "$name" 2>&1); printf '%s\n' "$pre" > "$RUNS/$name.precheck.txt"
 prompt="You are the reviewer for branch $br of project $SLUG, working directory $wt (read-only). Review the whole branch against the checklist and answer with the JSON verdict.
 
 # Your role
@@ -39,6 +41,9 @@ $files
 Diff stat:
 $stat
 
+Mechanical precheck (scripts/precheck.sh, already run on this branch; take its ok lines as checked, judge each FLAG: a real defect is blocking under its rule, a false alarm is not a finding):
+$pre
+
 The full diff is on stdin $capped. Read any changed file in full with Read when you need context. Logs and renders the builder saved are under .ws-evidence/ in the worktree (untracked, so not in the diff); read them there."
 cmd=(claude -p "$prompt" --restricted --permission-prompts none --json-schema "$(cat "$WS/schema/review.json")"
   --max-budget-usd "$budget" --output-format json --name "ws:$SLUG:review:$name")
@@ -55,6 +60,7 @@ verdict=$(jq -r '.verdict' "$out")
   echo "# Review of $br at $(short "$tip") ($(now_local))"; echo; echo "**Verdict: $verdict.** $(jq -r '.summary' "$out")"; echo
   echo "## Blocking"; jq -r '.blocking[] | "- \(.file):\(.line) (rule \(.rule)): \(.why)"' "$out"; [ "$(jq '.blocking|length' "$out")" -eq 0 ] && echo "- none"
   echo; echo "## Suggestions (carry forward, do not block)"; jq -r '.suggestions[] | "- \(.file):\(.line): \(.why)"' "$out"; [ "$(jq '.suggestions|length' "$out")" -eq 0 ] && echo "- none"
+  echo; echo "## Precheck"; grep -E '^(FLAG|note)' "$RUNS/$name.precheck.txt" | sed 's/^/- /'; grep -qE '^(FLAG|note)' "$RUNS/$name.precheck.txt" || echo "- all ok"
   echo; echo "cost=\$$(jq -r '.total_cost_usd // "?"' "$out.raw")  reviewed_sha=$tip"
 } > "$RUNS/$name.review.md"
 cat "$RUNS/$name.review.md"

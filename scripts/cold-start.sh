@@ -62,6 +62,11 @@ for pidf in "$RUNS"/*.pid; do
   fi
 done
 [ "$running" -eq 0 ] && echo "  no builder running"
+if [ -f "$RUNS/chain.status" ]; then
+  cs=$(cat "$RUNS/chain.status")
+  if [ -f "$RUNS/chain.pid" ] && kill -0 "$(cat "$RUNS/chain.pid")" 2>/dev/null; then echo "  CHAIN running (pid $(cat "$RUNS/chain.pid")): $cs (log runs/$SLUG/chain.log; wait on it again under run_in_background if this session did not start it)"
+  else echo "  chain: $cs"; fi
+fi
 for sf in "$RUNS"/serve-*.pid; do
   [ -f "$sf" ] || continue; sp=$(cut -d' ' -f1 "$sf"); port=$(cut -d' ' -f2 "$sf"); what=$(basename "$sf" .pid); what="${what#serve-}"
   if kill -0 "$sp" 2>/dev/null; then echo "  SERVING $what on :$port (pid $sp; stop: ws serve stop $what)"; else rm -f "$sf"; fi
@@ -82,6 +87,10 @@ echo
 echo "--- lessons ---"
 echo "  read lessons/orchestrator.md before dispatching ($(grep -c '^- ' "$WS/lessons/orchestrator.md") lines)"
 for lf in "$WS"/lessons/*.md; do n=$(wc -l < "$lf"); [ "$n" -gt "${WS_LESSONS_CAP:-40}" ] && echo "  ${lf#"$WS"/} is $n lines, over the cap of $WS_LESSONS_CAP: prune it before adding to it"; done
+al=$(cat "$RUNS/audit.last" 2>/dev/null || echo never)
+if [ "$al" = never ] || [ $(( ( $(date +%s) - $(date -d "$al" +%s 2>/dev/null || echo 0) ) / 86400 )) -ge 7 ]; then
+  echo "  automation audit due (last: $al): run ws audit and turn its top finding into the next tool fix or light task"
+fi
 $brief && exit 0
 echo
 echo "--- workspace ---"

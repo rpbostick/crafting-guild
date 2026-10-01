@@ -18,10 +18,15 @@ scripts/dispatch.sh     creates the worktree, builds the builder prompt and gran
 scripts/check-result.sh reads the run's final JSON and checks its claims against the branch.
 scripts/review.sh       diff on stdin to a read-only reviewer; writes runs/<slug>/<name>.review.{json,md}.
 scripts/merge.sh        pinned-SHA merge, test gate, push, cleanup.
+scripts/chain.sh        runs a queue of steps (dispatch, wait, review, one automatic fix round, merge, next); stops on
+                        anything that needs a person. State in runs/<slug>/chain.{pid,status,log}.
+scripts/precheck.sh     the checklist rules a script can check; review.sh runs it and puts the result in the prompt.
+scripts/audit.py        `ws audit`: repeated hand work in the run logs. Writes runs/<slug>/audit.last for cold-start.
+bin/ws-run              the builders' evidence runner: one granted command, its log, its exit code, a row in runs.tsv.
 scripts/selftest.sh     syntax checks plus a dry run against a scratch repo. Run it after any change here.
 agents/*.md             the three roles. Plain prose, pasted into prompts.
 lessons/*.md            per-role notes, pasted into prompts. The whole memory system.
-checklist.md            what the reviewer applies. 18 rules; keep it that size.
+checklist.md            what the reviewer applies. 19 rules; keep it that size.
 schema/*.json           the JSON a builder and a reviewer must return (Claude Code's --json-schema).
 projects/<slug>.conf    one registered project: path, branch, TEST_CMD, EXTRA_TOOLS, PREVIEW_CMD.
 plans/<slug>/           plans and task files, tracked here so the product repo stays clean.
@@ -49,6 +54,9 @@ state/current           the last project opened with `ws <slug>`; what a termina
 | Change the builder memory cap | `WS_BUILDER_MEM` in `config.sh` (systemd `MemoryMax` form, empty = none); `scripts/dispatch.sh` wraps the run in `systemd-run --user --scope` when systemd is there. |
 | Change where worktrees live | `WT_ROOT` in `scripts/lib.sh`. They are under `<project>/.worktrees/` (excluded via `.git/info/exclude`) so the project's own `CLAUDE.md` applies to builders and this workspace's does not. |
 | Change the orchestrator's instructions | `CLAUDE.md`. Keep it short; long instruction files are how v1 spent 50,000 tokens before starting work. |
+| Change what runs without the orchestrator | `scripts/chain.sh`: what stops a chain, the automatic fix round (`WS_CHAIN_FIX_ROUNDS`), how suggestions carry forward. |
+| Check another rule mechanically | `scripts/precheck.sh`; print `FLAG  rule N:` lines. A rule a script checks reliably can leave the reviewer's attention. |
+| Change what the audit looks for | `scripts/audit.py` (the command patterns and the findings). |
 | Add a subcommand | a `case` arm in `bin/ws`, calling a script in `scripts/`. Use `load_project "$proj"` so a leading `--project <slug>` works; the scripts take `--project` themselves. |
 
 ## Design decisions worth knowing before you change them

@@ -2,6 +2,16 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.2.0 (2026-10-01)
+
+Anything run more than once is code. Measured from 113 builder runs: builders spent 34% of colorwright's Bash calls in hand-written evidence wrappers; 32 of colorwright's browser checks were never in the merge gate; figurewright's render scripts were re-run by hand in up to 10 runs each with nothing pinning the approved look; and the orchestrator drove every dispatch, wait, review and merge by hand.
+
+- **`ws chain <queue-file>`** runs a queue of plan steps: dispatch, wait, review, merge, next. A fix-first review gets one automatic fix round (`WS_CHAIN_FIX_ROUNDS`) with its blocking findings as the task. It stops, and says why in `runs/<slug>/chain.status`, on a failed or partial run, a review still not `merge`, a failed merge, or a step marked `gate` (shown to the operator before its merge). A merged step's review suggestions are appended to the next step's task. Rerunning resumes; merged steps are skipped. Cold-start shows the chain.
+- **`bin/ws-run`**, the builders' evidence runner: runs one command in the foreground, saves `.ws-evidence/<label>.log` ending in the real exit code, and appends to `.ws-evidence/runs.tsv`. It checks the command against the builder's own Bash grants (a file under `runs/` the builder cannot edit), so it grants nothing new. Builders are told to use it instead of writing wrappers.
+- **`ws precheck <name>`**: the checklist rules a script can check (paths named in prose exist, deleted files unreferenced, SVGs parse, no logs or scratch staged, no future dates, secrets, home paths, attribution, a failing run on record for new tests, check scripts the test command never runs). `ws review` runs it first and gives the reviewer the result.
+- **`ws audit [days]`**: what builders keep doing by hand, from the run logs. Cold-start says when one is due (weekly).
+- **Checklist rule 15** is now "a check worth running twice is code that re-runs itself"; the exit-code half is mechanical through `ws-run`. The builder and reviewer sheets and the lessons carry the same rule.
+
 ## 2.1.3 (2026-09-27)
 
 - **Builders run under a memory cap.** `dispatch` starts each run in its own systemd user scope with `MemoryMax=$WS_BUILDER_MEM` (default 4G, `config.sh`; empty turns it off) and `OOMPolicy=continue`, so a runaway script is killed alone and the builder lives to see the failure. Without systemd the run starts uncapped, as before. Found when figurewright's body-analysis spike ran a probe script to 7.6 GB on a 14 GB machine without swap: the kernel's OOM killer took the script, and systemd then stopped the whole VS Code scope it ran in, with the editor, the orchestrator's terminal and both builders.

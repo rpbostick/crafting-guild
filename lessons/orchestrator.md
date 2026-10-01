@@ -11,6 +11,7 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - A test-count claim cites the log it came from.
 
 - Nothing goes public without `release-audit.md` passing and Patrick seeing the findings. colorwright's static build shipped dated comments quoting him to the public site (2026-09-28).
+- Automate what repeats (Patrick, 2026-10-01): when a builder or I would do something a second time, it becomes a test, a committed script the suite runs, or a `ws` command. Run `ws audit` when cold-start says it is due and turn its top finding into the next tool fix or light task. Sequential steps go in a queue for `ws chain`, not hand-driven.
 
 ## Running builders
 - Parallel builders share the CPU, not only the plan. Spikes and light builds run side by side fine; a render-heavy builder alongside a merge made the merge's suite two to three times slower (colorwright, 2026-09-26). The usage limit stopped no run in 42 hours. Merge when nothing heavy is running, and every dispatch gets a budget.
@@ -22,7 +23,6 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - Never `cd` in a Bash call. It moves this session's working directory.
 - Two sessions, two projects: `state/current` is one file, so the second `ws <slug>` moves it under the first. Sessions are pinned by `WS_PROJECT` since 2.1.2, but a session started any other way is not; when cold-start prints `CONFLICT` or `not pinned`, use `--project` on every command (found 2026-09-27 testing 2.1.0 from a terminal).
 - Review once per branch, before merge. A fix round is for a real defect or something he would see; suggestions carry forward in the next task on that code.
-- A merge is pinned to the reviewed SHA. If the branch moved after the review, review again.
 - `ws merge` needs the project's main checkout free of modified tracked files; untracked files are fine. v1's hooks used to append to `reviews/checklist-proposals.md` behind your back; check `git status -uno` first.
 - `ws merge` refuses any verdict but `merge`. When Patrick overrides a fix-first review, pass `--no-review` (the SHA pin and the test gate still apply) and record his decision in the plan.
 - The machine has 14 GB and no swap. A spike's probe script reached 7.6 GB and the OOM kill took down VS Code with the orchestrator and both builders (fw-bodyshape, 2026-09-27). Builders are capped at `WS_BUILDER_MEM` since 2.1.3; tell image-processing spikes to hold one raster at a time.

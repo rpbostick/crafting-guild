@@ -17,6 +17,10 @@ ws tail <name>                  follow a run's log as readable lines
 ws runs [slug]                  runs and their results
 ws review [flags] <name>        review the branch; prints the verdict and the SHA to merge
 ws merge <name> <sha>           merge a reviewed branch, test, push, clean up
+ws chain <queue-file>           run a queue of steps: dispatch, wait, review (one automatic fix round), merge, next;
+                                stops on a failure, a gate or a judgment call (run it under run_in_background)
+ws precheck <name>              the checklist rules a script can check (ws review runs it first)
+ws audit [days]                 what builders keep doing by hand, from the run logs (default 30 days)
 ws stop <name>                  stop a running builder
 ws serve <name|main> [port]     start the project's preview server from a worktree (or the main checkout)
 ws serve stop [name|main]       stop it;  ws serve list
@@ -81,6 +85,9 @@ case "$cmd" in
   review) "$WS/scripts/review.sh" ${proj:+--project "$proj"} "$@" ;;
   merge) "$WS/scripts/merge.sh" ${proj:+--project "$proj"} "$@" ;;
   check) "$WS/scripts/check-result.sh" ${proj:+--project "$proj"} "$@" ;;
+  chain) "$WS/scripts/chain.sh" ${proj:+--project "$proj"} "$@" ;;
+  precheck) "$WS/scripts/precheck.sh" ${proj:+--project "$proj"} "$@" ;;
+  audit) load_project "$proj"; python3 "$WS/scripts/audit.py" "$SLUG" "$PROJECT_PATH" "$TEST_CMD" "$RUNS" "$WS/plans/$SLUG" "${1:-30}" ;;
   wait)
     name="${1:?ws wait <name> [minutes]}"; mins="${2:-150}"; load_project "$proj"
     for _ in $(seq 1 $((mins*6))); do

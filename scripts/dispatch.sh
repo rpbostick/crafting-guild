@@ -77,6 +77,10 @@ TOOLS=(Read Grep Glob "Edit(./**)"
 # Per-project extras from projects/<slug>.conf (EXTRA_TOOLS), then this dispatch's --allow flags.
 [ ${#EXTRA_TOOLS[@]} -gt 0 ] && TOOLS+=("${EXTRA_TOOLS[@]}")
 [ ${#extra[@]} -gt 0 ] && TOOLS+=("${extra[@]}")
+# The evidence runner (bin/ws-run) checks each command against these same Bash grants, read from a file the
+# builder cannot edit, so wrapping a command in it grants nothing new.
+RUN_GRANTS="$RUNS/$name.grants"
+TOOLS+=("Bash($WS/bin/ws-run *)")
 DENY=("Bash(git push *)" "Bash(git -c *)" "Bash(git config *)" "Bash(git * --output*)" "Bash(git reset --hard *)" "Bash(git rebase *)" "Bash(git worktree *)")
 
 prompt="You are a headless builder launched by agentic-workspace v2. Working directory: $wt (a git worktree of $PROJECT_PATH on branch $br). Do only the task below, then answer with the JSON result.
@@ -92,7 +96,7 @@ $(cat "$WS/lessons/builder.md")
 
 # Project
 Main branch: $PROJECT_BRANCH. Project test command: ${TEST_CMD:-none configured}. The merge gate runs it on the merged tree; you do not. Run only the test files that cover what you changed, with the same runners, from the worktree root, in the foreground.
-Evidence: save every log and render under .ws-evidence/ in the worktree root (it is untracked and the reviewer reads it there). Commit code, tests and docs; commit a render only when the task asks for one.
+Evidence: run every check you will cite (test files, typecheck, render scripts) through the evidence runner, one command per call: \`$WS/bin/ws-run <label> <command> [args...]\` (for example \`$WS/bin/ws-run before-frames npx jest --runInBand test/a.test.ts\`). It runs the command in the foreground, saves .ws-evidence/<label>.log ending in the real exit code, and adds a row to .ws-evidence/runs.tsv; use a label that says before or after the change. Do not write your own run-and-log scripts. Save every other log and render under .ws-evidence/ in the worktree root (it is untracked and the reviewer reads it there). Commit code, tests and docs; commit a render only when the task asks for one.
 
 # Task
 $(cat "$task")
@@ -106,6 +110,7 @@ cmd=(claude -p "$prompt" --allowedTools "${TOOLS[@]}" --disallowedTools "${DENY[
 [ -n "$model" ] && cmd+=(--model "$model")
 [ -n "$effort" ] && cmd+=(--effort "$effort")
 
+printf '%s\n' "${TOOLS[@]}" | sed -n 's/^Bash(\(.*\))$/\1/p' | grep -v '/bin/ws-run ' > "$RUN_GRANTS"
 if $dry; then
   echo "cwd: $wt"; echo "tools: ${TOOLS[*]}"; echo "deny: ${DENY[*]}"; echo "budget: \$$budget timeout: $tmo model: ${model:-default} memory cap: ${WS_BUILDER_MEM:-none}"
   echo "prompt bytes: ${#prompt}"; echo "evidence: $wt/.ws-evidence"; exit 0
@@ -124,7 +129,7 @@ if [ -n "$WS_BUILDER_MEM" ] && systemd-run --user --scope --quiet true >/dev/nul
 fi
 (
   cd "$wt"
-  "${cap[@]}" timeout --kill-after=30s "$tmo" "${cmd[@]}" < /dev/null > "$RUNS/$name.jsonl" 2>&1
+  WS_RUN_GRANTS="$RUN_GRANTS" "${cap[@]}" timeout --kill-after=30s "$tmo" "${cmd[@]}" < /dev/null > "$RUNS/$name.jsonl" 2>&1
   rc=$?
   "$WS/scripts/check-result.sh" --project "$SLUG" --since "$start_sha" "$name" > "$RUNS/$name.result.txt" 2>&1 || true
   [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] && sed -i "1i TIMEOUT after $tmo (exit $rc); partial work may be in $wt" "$RUNS/$name.result.txt"
