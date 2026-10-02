@@ -1,6 +1,6 @@
 # Character generator: a floating dice tray (2D by default, 3D on request)
 
-Continue on this branch (the character on the World of Dungeons sheet, with animated backgrounds). Add a dice roller. The comparison spike is merged at `spikes/dice/` (read `COMPARISON.md`, `src/`, `tests/wod.test.js`): reuse its light 2D roller (our CSS dice + `@dice-roller/rpg-dice-roller`) and its dice-box integration.
+The toybox version of the generator, `chargen-toybox/` (the World of Dungeons sheet with animated backgrounds; it shares `chargen/`'s rules, data and edits; read its README, `ui.js`, `index.html`, `build.js`, `backdrop/`, `tests/`), gets a dice roller. `chargen/` and `chargen-beta/` do not. The comparison spike is merged at `spikes/dice/` (read `COMPARISON.md`, `src/`, `tests/wod.test.js`): reuse its light 2D roller (our CSS dice + `@dice-roller/rpg-dice-roller`) and its dice-box integration.
 
 ## Behaviour
 - **A floating dice tray window**, default **4 in wide × 8 in tall** (384 × 768 CSS px) at the **lower right** of the window, above the page; **draggable** by its title bar anywhere on screen (kept fully on screen), **resizable** from its corner (minimum about 280 × 420), with minimize and close buttons and a dice button in the controls to reopen it. Position, size and open/minimized state remembered per browser. Not printed.
@@ -13,20 +13,20 @@ Continue on this branch (the character on the World of Dungeons sheet, with anim
 - **Settings in their own popup** (a gear in the tray's title bar opens a dialog, not inline in the tray): 2D/3D, quick roll, dice color/theme (2D: colors and pip style; 3D: dice-box themes and color), sound on/off, throw strength and size for 3D. Remembered per browser.
 
 ## Design
-- The tray's own code stays small; rpg-dice-roller loads lazily on the first roll as one inlined-but-deferred module or a separate file, whichever keeps the single-file page working (say which). dice-box's assets (worker, wasm, theme files) are **separate files** next to the page (`chargen/dist/dice-box/…`), loaded only when 3D is switched on; the single-file page must still work fully in 2D when opened from disk without them. List the files the public site has to host.
-- Keep the spike's WoD band logic and tests; port them into `chargen/`.
+- The tray's own code stays small; rpg-dice-roller loads lazily on the first roll as one inlined-but-deferred module or a separate file, whichever keeps the single-file page working (say which). dice-box's assets (worker, wasm, theme files) are **separate files** next to the page (`chargen-toybox/dist/dice-box/…`), loaded only when 3D is switched on; the single-file page must still work fully in 2D when opened from disk without them. List the files the public site has to host.
+- Keep the spike's WoD band logic and tests; port them into `chargen-toybox/`.
 
 ## Prior art
 `spikes/dice/` (merged): the 2D roller, the dice-box wrapper, WoD band tests. Libraries: `@dice-roller/rpg-dice-roller` (MIT), `@3d-dice/dice-box` (MIT). Draggable/resizable window: plain pointer events and CSS `resize` or a few lines of our own; no window library.
 
 ## Tests
-`node:test` in `chargen/tests/`: WoD bands; d100 reading (00+0 = 100, 90+9 = 99, 10+0 = 10); modifier applied once; the log entry format with time; sheet links produce the right notation (2d6+STR, weapon damage with bonus, Nd6 keep highest); tray position/size kept on screen and remembered; 3D switch loads dice-box lazily (stubbed) and falls back to 2D if it fails; print hides the tray. Rebuild both outputs and commit them. Screenshots: the tray at its default place and size with a few rolls in the log, the settings popup, and the tray dragged and resized.
+`node:test` in `chargen-toybox/tests/`: WoD bands; d100 reading (00+0 = 100, 90+9 = 99, 10+0 = 10); modifier applied once; the log entry format with time; sheet links produce the right notation (2d6+STR, weapon damage with bonus, Nd6 keep highest); tray position/size kept on screen and remembered; 3D switch loads dice-box lazily (stubbed) and falls back to 2D if it fails; print hides the tray. Rebuild both outputs and commit them. Screenshots: the tray at its default place and size with a few rolls in the log, the settings popup, and the tray dragged and resized.
 
 ## Leave alone
-`rules.js` behaviour, `data/`, everything outside `chargen/` and `spikes/dice/` (read-only).
+`rules.js` behaviour, `data/`, everything outside `chargen-toybox/` and `spikes/dice/` (read-only).
 
 ## Commands
-`npm install --prefix chargen --save-dev @dice-roller/rpg-dice-roller @3d-dice/dice-box`, `node --test chargen/tests/<file>.test.js` (one or several), `node chargen/build.js`, `node chargen/build.js --public`, `node chargen/scripts/<script>.js`, `node .ws-evidence/<script>.js`, `firefox --headless …` (as before), `git add`, `git commit`. One command per Bash call.
+`npm install --prefix chargen-toybox --save-dev @dice-roller/rpg-dice-roller @3d-dice/dice-box`, `node --test chargen-toybox/tests/<file>.test.js` (one or several), `node chargen-toybox/build.js`, `node chargen-toybox/build.js --public`, `node chargen-toybox/scripts/<script>.js`, `node .ws-evidence/<script>.js`, `firefox --headless …` (as before), `git add`, `git commit`. One command per Bash call.
 
 ## Done when
 A draggable, resizable 4 × 8 in dice tray sits at the lower right with a timestamped log above the roller and d4–d100 plus a modifier below; sheet attributes, weapon damage and hit dice roll into it; 2D by default with a 3D switch and a settings popup; both builds are rebuilt and the tests pass.
