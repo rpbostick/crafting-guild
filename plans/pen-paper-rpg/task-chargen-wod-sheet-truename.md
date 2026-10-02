@@ -13,6 +13,9 @@ Continue on this branch (the character on the World of Dungeons sheet). `rules.r
 
 The chosen mockup is `/home/patrickb/agentic-workspace-v2/runs/pen-paper-rpg/staging/portrait/true-name-B.png` (open it); match it, with the true name lower as above.
 
+## Two tests to fix first
+Main (the regional names and true names) was merged into this branch, and two tests now fail: `tests/public-build.test.js` "the public page's scripts roll and render what the sources do" (the test appends a `True name:` line that `asText` does not print yet; once Copy as text prints it, drop the appended line there and in `tests/snapshot.test.js` and re-record `snapshot.json` with the true name inside `asText`'s output) and `tests/sheet.test.js` "name and class start under their labels … the longest name fits the wide NAME box unshrunk" (the new names are longer and the NAME box now also holds the true name: update the test to the shrink-to-fit rule above, using the longest possible name from the new tables).
+
 ## Prior art
 The sheet's existing label and field placement code. No library.
 
