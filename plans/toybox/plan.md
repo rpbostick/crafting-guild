@@ -1,6 +1,6 @@
 # toybox: plan
 
-**In flight right now** (2026-10-02): repo ~/toybox created (ba1fa6d) from pen-paper-rpg spikes/toys (16 toys + drawer), MIT, registered. Step 1 merged (4662f48: <toy-drawer>, <toy-box>). Step 2 running: `toybox-widgets` (task-widgets.md; sources staged in incoming/ from pen-paper-rpg chargen-toybox at d0d43f7).
+**In flight right now** (2026-10-02): repo ~/toybox created (ba1fa6d) from pen-paper-rpg spikes/toys (16 toys + drawer), MIT, registered. Step 1 merged (4662f48: <toy-drawer>, <toy-box>). Step 2: `toybox-widgets` widgets ported (326241d, review fix-first: autosave errors swallowed); continuing with task-widgets-2.md (fixes; own dice notation, mathjs gone; own backgrounds + registerBackground plug-in, React Bits only as a site-side example since its licence forbids redistributing components (Patrick 2026-10-02); classic toybox.iife.js toys-only + toybox-all.iife.js) (from task-widgets.md; sources staged in incoming/ from pen-paper-rpg chargen-toybox at d0d43f7).
 
 ## Requirements (Patrick, 2026-10-02)
 - Standalone library, public repo rpbostick/toybox (release audit first), served from rpbostick.github.io/toybox/ for a script tag.
