@@ -1,6 +1,6 @@
 # toybox: plan
 
-**In flight right now** (2026-10-02): repo ~/toybox created (ba1fa6d) from pen-paper-rpg spikes/toys (16 toys + drawer), MIT, registered. Nothing dispatched yet.
+**In flight right now** (2026-10-02): repo ~/toybox created (ba1fa6d) from pen-paper-rpg spikes/toys (16 toys + drawer), MIT, registered. Step 1 running: `toybox-standalone` (task-standalone.md).
 
 ## Requirements (Patrick, 2026-10-02)
 - Standalone library, public repo rpbostick/toybox (release audit first), served from rpbostick.github.io/toybox/ for a script tag.
