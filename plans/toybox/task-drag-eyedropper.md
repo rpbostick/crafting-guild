@@ -17,6 +17,9 @@ Today the background follows the pointer over bare background (`isBareBackground
 - A row of **recent colours** (the last 8 used or picked, newest first) next to the swatch, remembered per browser, keyboard operable.
 - Works on extra pages and in the image editor too.
 
+## Prior art
+The browser EyeDropper API (WICG, Chromium) and canvas pixel sampling (`getImageData`); the drag-only rule already shipped on the chargen toybox and the figurewright hero. No library.
+
 ## Tests
 Background: hover feeds nothing, drag from bare background feeds, drag from content does not, release sends leave, cursors, setting off disables, plug-ins get the same feed. Eyedropper: picking from a stroke, a picture and the host element in a fake/stubbed DOM; the EyeDropper API path stubbed; recent colours order and persistence; Esc cancels. Firefox e2e: drag the background on the demo page, pick a colour from a drawn stroke. CHANGELOG 0.4.0; rebuild `dist/`.
 
