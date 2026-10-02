@@ -16,3 +16,4 @@
 4. Release audit, GitHub public repo, /toybox/ on the site.
 
 - Next round (after widgets-2): backgrounds react only during a left-drag that starts on bare background (grab/grabbing cursors, settle on release), as Patrick asked for every site (2026-10-02).
+- Same next round: an eyedropper in the drawing tools (EyeDropper API where available, else sample the page's own rendered layers/pictures/art), plus a row of recent colours (Patrick 2026-10-02). Momentum/inertia after a fling on the backgrounds: explained to Patrick, waiting for his go.
