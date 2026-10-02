@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.2.9 (2026-10-02)
+
+- **`ATTRIBUTION_EXEMPT` in a project's conf** lists generated files that `ws merge`'s attribution check skips (bundles that inline third-party code, whose own sources are still checked). A dice roller bundling mathjs was refused because mathjs's documentation strings say "the operator".
+
 ## 2.2.8 (2026-10-02)
 
 - **`--timeout 180` means 180 minutes.** `ws dispatch` passed the value to timeout(1), which reads a bare number as seconds; two runs given `--timeout 180` and `--timeout 240` were killed after 3 and 4 minutes. A bare number is now minutes; `90m`, `2h` work as before.
