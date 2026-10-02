@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.2.8 (2026-10-02)
+
+- **`--timeout 180` means 180 minutes.** `ws dispatch` passed the value to timeout(1), which reads a bare number as seconds; two runs given `--timeout 180` and `--timeout 240` were killed after 3 and 4 minutes. A bare number is now minutes; `90m`, `2h` work as before.
+
 ## 2.2.7 (2026-10-01)
 
 - **Research tasks get the web whatever the spelling.** `ws dispatch` granted WebSearch and WebFetch only when a task named them as one word; two research tasks that said "web search and web fetch" ran without them and came back blocked. It now matches `web search`, `web-search` and `WebSearch` (and the same for fetch), case-insensitively.

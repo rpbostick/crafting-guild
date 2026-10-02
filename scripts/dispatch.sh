@@ -34,6 +34,8 @@ $hits"
 fi
 # Timeout follows the track unless --timeout was given: a light task gets the short cap.
 if [ -z "$tmo" ]; then if grep -qi 'track: *light' "$task"; then tmo="$WS_LIGHT_TIMEOUT"; else tmo="$WS_DEFAULT_TIMEOUT"; fi; fi
+# A bare number means minutes (coreutils timeout would read it as seconds: --timeout 180 once killed a run after 3 minutes).
+case "$tmo" in *[!0-9]*) ;; *) tmo="${tmo}m" ;; esac
 load_project "$slug"
 [ -z "$(git -C "$PROJECT_PATH" rev-parse --verify "$PROJECT_BRANCH" 2>/dev/null)" ] && die "no branch $PROJECT_BRANCH in $PROJECT_PATH"
 wt="$(worktree_dir "$name")"; br="$(branch_of "$name")"
