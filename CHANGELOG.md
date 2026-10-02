@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.2.10 (2026-10-02)
+
+- **`ws merge` installs changed dependencies before its test run.** When the merged branch changed a `package-lock.json`, it runs `npm ci --ignore-scripts` in that folder of the main checkout first; builders install packages only in their worktree, so three merges in a row needed a hand install.
+
 ## 2.2.9 (2026-10-02)
 
 - **`ATTRIBUTION_EXEMPT` in a project's conf** lists generated files that `ws merge`'s attribution check skips (bundles that inline third-party code, whose own sources are still checked). A dice roller bundling mathjs was refused because mathjs's documentation strings say "the operator".

@@ -40,6 +40,14 @@ fi
 title=$(sed -n '1s/^#* *//p' "$(sed -n 's/^task=//p' "$RUNS/$name.task.txt" 2>/dev/null)" 2>/dev/null | head -c 70)
 git -C "$PROJECT_PATH" merge --no-ff "$br" -m "Merge $br${title:+: $title} (reviewed at $(short "$tip"))" || { git -C "$PROJECT_PATH" merge --abort; die "merge conflict; resolve by hand or ask a builder to merge $PROJECT_BRANCH into $br"; }
 merged=$(git -C "$PROJECT_PATH" rev-parse --short HEAD)
+# A branch that changed a package-lock.json needs those dependencies in the main checkout before the
+# tests run (builders install them in their worktree only). Install scripts are skipped.
+if [ -n "$TEST_CMD" ] && command -v npm >/dev/null; then
+  git -C "$PROJECT_PATH" diff --name-only "HEAD^1" HEAD -- '*package-lock.json' 'package-lock.json' | while read -r lock; do
+    dir=$(dirname "$lock"); echo "installing dependencies for $dir (its package-lock.json changed)"
+    ( cd "$PROJECT_PATH/$dir" && npm ci --ignore-scripts --no-audit --no-fund --silent ) || echo "ws: npm ci in $dir failed; tests may fail" >&2
+  done
+fi
 if [ -n "$TEST_CMD" ]; then
   log="$RUNS/$name.merge-tests.log"
   echo "running tests on $merged: $TEST_CMD"
