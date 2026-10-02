@@ -78,7 +78,9 @@ TOOLS=(Read Grep Glob "Edit(./**)"
 [ ${#EXTRA_TOOLS[@]} -gt 0 ] && TOOLS+=("${EXTRA_TOOLS[@]}")
 [ ${#extra[@]} -gt 0 ] && TOOLS+=("${extra[@]}")
 # A task that names WebSearch or WebFetch (research) gets them; without a grant they are denied silently.
-for t in WebSearch WebFetch; do grep -q "\\b$t\\b" "$task" && TOOLS+=("$t"); done
+# "WebSearch", "web search" and "web-search" all count (research tasks are written in prose).
+grep -qiE '\bweb[ -]?search\b' "$task" && TOOLS+=("WebSearch")
+grep -qiE '\bweb[ -]?fetch\b' "$task" && TOOLS+=("WebFetch")
 # A build task names what it reuses (agents/planner.md). Light tasks and research-only tasks are exempt.
 if ! grep -q "^## Prior art" "$task" && ! grep -q "Track: light" "$task" && ! grep -q -i -E "research only|no code" "$task"; then
   echo "ws: warning: $task has no ## Prior art section (what existing software it reuses, or why nothing fits)" >&2

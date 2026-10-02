@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.2.7 (2026-10-01)
+
+- **Research tasks get the web whatever the spelling.** `ws dispatch` granted WebSearch and WebFetch only when a task named them as one word; two research tasks that said "web search and web fetch" ran without them and came back blocked. It now matches `web search`, `web-search` and `WebSearch` (and the same for fetch), case-insensitively.
+
 ## 2.2.6 (2026-10-01)
 
 - **Reuse before building.** Every build task carries a `## Prior art` section (what existing software it reuses, with its licence, or why nothing fits); research scales with the size of the build, up to a spike before a new tool. `ws dispatch` warns when a task that is neither `Track: light` nor research has none. The planner, builder sheet and lessons say so, and checklist rule 20 makes a hand-written replacement for a maintained library a review finding. The synthesis review page had been dispatched with a hand-written word diff while jsdiff exists.
