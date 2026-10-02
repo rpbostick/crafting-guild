@@ -1,6 +1,6 @@
 # Spike: four dice rollers, side by side, with their customization options
 
-A comparison page so the operator can roll each candidate dice roller and try its options before one is added to the character generator. This is a spike: working demos and a short written comparison, not production code. Everything lives in `spikes/dice/`.
+A comparison page for rolling each candidate dice roller and try its options before one is added to the character generator. This is a spike: working demos and a short written comparison, not production code. Everything lives in `spikes/dice/`.
 
 ## The four candidates
 1. **Fantastic Dice / dice-box**: `@3d-dice/dice-box` (MIT; BabylonJS + AmmoJS physics in a web worker). Its assets (worker, wasm, themes) must be copied into the demo's static folder and pointed to with `assetPath`.
