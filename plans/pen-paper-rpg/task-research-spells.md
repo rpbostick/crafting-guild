@@ -1,5 +1,7 @@
 # Research: spell lists and how their power is balanced
 
+**Resume:** an earlier run of this task was cut off before it finished. Start with `git log` and `git status` in the worktree, keep the work already there (committed or not) if it is sound, and continue from it.
+
 Track: light
 
 The rules synthesis (`rules/v1/synthesis.md`, World of Dungeons family, "Remix" heroic power level by default) needs a spell list for Wizards (Wizardry as the careful study of spells). Gather openly licensed spell lists, compare them, and analyse how power is balanced across levels. Write `docs/research/spells.md`.

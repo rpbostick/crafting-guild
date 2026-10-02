@@ -1,5 +1,7 @@
 # Package the dice roller comparison as its own repository
 
+**Resume:** an earlier run of this task was cut off before it finished. Start with `git log` and `git status` in the worktree, keep the work already there (committed or not) if it is sound, and continue from it.
+
 This repository is the dice roller comparison page that used to live in another project's `spikes/dice/` folder (read `README` if any, `COMPARISON.md`, `OWLBEAR-CHANGES.md`, `owlbear/SOURCE.md`, `build.sh`, `scripts/`, `src/`, `tests/`). It compares four browser dice rollers with World of Dungeons rolls: Fantastic Dice (dice-box), dice-box-threejs, a light 2D roller (rpg-dice-roller + CSS dice), and the Owlbear Rodeo dice (GPL-3.0) as a separate page in an iframe. Make it a self-contained repository that anyone can rebuild, serve, and publish on a static site.
 
 ## Behaviour

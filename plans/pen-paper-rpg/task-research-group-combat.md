@@ -1,5 +1,7 @@
 # Research: fast group battle, "counts as a gang", and tier or scale systems
 
+**Resume:** an earlier run of this task was cut off before it finished. Start with `git log` and `git status` in the worktree, keep the work already there (committed or not) if it is sound, and continue from it.
+
 Track: light
 
 A research project for the World of Dungeons-family rules (`rules/v1/synthesis.md`; 2d6 moves, d6 damage, hit dice; Remix heroic power level by default). Write `docs/research/group-combat-and-tiers.md`.

@@ -1,5 +1,7 @@
 # Research: historical prices, wages and costs for the equipment list
 
+**Resume:** an earlier run of this task was cut off before it finished. Start with `git log` and `git status` in the worktree, keep the work already there (committed or not) if it is sound, and continue from it.
+
 Track: light
 
 The rules synthesis's price list (`rules/v1/synthesis.md`, Equipment sections; silver standard, starting money about 60 silver in WoD) should rest on real historical work on the prices of commodities, finished goods, labour and services, instead of the usual fantasy price list. Write `docs/research/prices.md`.

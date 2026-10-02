@@ -1,5 +1,7 @@
 # Rules synthesis, version 2: apply the first review pass
 
+**Resume:** an earlier run of this task was cut off before it finished. Start with `git log` and `git status` in the worktree, keep the work already there (committed or not) if it is sound, and continue from it.
+
 `rules/v1/synthesis.md` is the frozen first merge of *World of Dungeons* 1979 (WoD), *World of Dungeons: Remix* (Remix) and *Advanced World of Dungeons* (AWoD), in the block format described in `rules/v1/README.md` and `scripts/synthesis-format.js` (sections; `::: source <game> p<page>` verbatim blocks; `::: proposal id=…` merged text; `::: discussion id=…` the reasoning). The first review pass is done: `rules/v1/decisions.json` (61 proposals accepted or rejected) and `rules/v1/review-notes.json` (38 notes with instructions, each targeting a proposal id or a source block). Write version 2.
 
 ## Output

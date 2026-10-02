@@ -1,5 +1,7 @@
 # Character generator: animated React Bits backgrounds behind the sheet
 
+**Resume:** an earlier run of this task was cut off before it finished. Start with `git log` and `git status` in the worktree, keep the work already there (committed or not) if it is sound, and continue from it.
+
 The generator in `chargen/` (read `README.md`, `index.html`, `ui.js`, `build.js`, `layout.js` and the tests first) shows the character on the World of Dungeons sheet with a Light/Dark/System theme switch. Add an animated background behind the page, from React Bits, with a color changer that works like the figurewright demo's hero.
 
 Vendored for you in `chargen/backdrop/vendor/` (copied in before dispatch; read it first):
