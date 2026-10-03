@@ -16,3 +16,4 @@
 - 2026-10-02: kit v0.3.0 PUBLIC at github.com/rpbostick/reactbits-kit (one audited commit; Patrick chose a new public repo). Private dev history renamed to rpbostick/reactbits-kit-dev (local origin). Later public releases: audit, then commit the new tree on top of the public branch (`public-release` locally, remote `public`) and tag. Site switching to the kit (`site-uses-kit`); chargen-toybox still pins the dev repo's v0.2.1 and must move to the public v0.3.0.
 - 2026-10-02: steps 3 and 4 done. Site on the public kit (0b2ba24, deployed); chargen-toybox on the public kit v0.3.0 (pen-paper-rpg b6beefa). All three consumers (site, chargen-toybox, toybox library from 0.5.0) use github:rpbostick/reactbits-kit.
 - 2026-10-03: 0.4.0 public (sheet profile ripple/sheet/spin for all ten; toyboxState adapter). chargen-toybox updating (`ppr-toybox-060`).
+- 2026-10-03: future public releases: bump package.json, merge, then `ws --project reactbits-kit release` (ws 2.3.0).

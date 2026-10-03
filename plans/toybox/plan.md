@@ -23,3 +23,4 @@
 - 2026-10-02 (Patrick: yes to 1-4): running `toybox-momentum-build` (task-momentum-and-build.md: kit modules for drag dynamics on every background; dist/ becomes a build product; 0.5.0). Then release audit, public repo (one audited commit, dev history private as with reactbits-kit), /toybox/ on the site.
 - 2026-10-03: 0.6.0 public (windows for drawer and toys; release zip; /toybox/ updated). Public branch has 2 commits.
 - 2026-10-03: 0.6.1 public (playable twisty cube: click input via cubing.js PG3D, buttons, keys, undo, counter, timer, help); /toybox/ and /chargen-toybox/ updated (site a6dc7f8). Release steps repeated three times now: turn them into a `ws release` command (clean tree, public-release commit identical to main, tag, clean-clone build, gh release).
+- 2026-10-03: future public releases: bump package.json, merge, then `ws --project toybox release` (ws 2.3.0).
