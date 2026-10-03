@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.3.0 (2026-10-03)
+
+- **`ws release`** publishes a project's main branch as a release of its public repository while the private history stays private: it refuses a dirty checkout or an existing tag, audits every line added since the last public release (home paths, the user name, e-mail addresses, keys and tokens, attribution), commits exactly main's tree onto the local `public-release` branch with plumbing (no checkout), tags `vX.Y.Z`, pushes to the `public` remote, then builds `scripts/release.sh` from a clean clone of the tag and attaches `release/*.zip` to a GitHub release. `--dry-run` stops after the audit. Done by hand three times for toybox and reactbits-kit, one of which tagged the old commit after a failed checkout. The selftest covers first and later releases, the audit, an existing tag and a dirty checkout.
+
 ## 2.2.11 (2026-10-02)
 
 - **`MERGE_NPM_FLAGS` in a project's conf** sets the flags for `ws merge`'s dependency install (default `--ignore-scripts`). A git dependency that compiles itself in `prepare` (reactbits-kit) arrives unbuilt with install scripts off; such a project sets `MERGE_NPM_FLAGS=""`.

@@ -25,6 +25,8 @@ ws audit [days]                 what builders keep doing by hand, from the run l
 ws stop <name>                  stop a running builder
 ws serve <name|main> [port]     start the project's preview server from a worktree (or the main checkout)
 ws serve stop [name|main]       stop it;  ws serve list
+ws release [--dry-run] [--notes T] [--no-asset]   publish main as a release of the public repo (remote 'public'):
+                                audit, one commit with main's tree, tag vX.Y.Z, clean-clone build, GitHub release
 ws version                      print the workspace version (see CHANGELOG.md)
 USAGE
 }
@@ -85,6 +87,7 @@ case "$cmd" in
   dispatch) "$WS/scripts/dispatch.sh" ${proj:+--project "$proj"} "$@" ;;
   review) "$WS/scripts/review.sh" ${proj:+--project "$proj"} "$@" ;;
   merge) "$WS/scripts/merge.sh" ${proj:+--project "$proj"} "$@" ;;
+  release) "$WS/scripts/release.sh" ${proj:+--project "$proj"} "$@" ;;
   check) "$WS/scripts/check-result.sh" ${proj:+--project "$proj"} "$@" ;;
   chain)
     # The chain runs detached in its own systemd scope (as builders do), so closing the session that started it
