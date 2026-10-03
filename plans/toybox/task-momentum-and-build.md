@@ -1,5 +1,7 @@
 # Toybox: momentum, ripple, sheet glide and spin for the backgrounds; a reproducible build
 
+**Resume:** an earlier run of this task was cut off before it finished. Start with `git log` and `git status` in the worktree, keep the work already there (committed or not) if it is sound, and continue from it.
+
 Read `README.md`, `NOTES.md`, `src/background/`, `scripts/`, `build.sh`, `tests/`.
 
 ## 1. Drag dynamics for every background (from reactbits-kit)
