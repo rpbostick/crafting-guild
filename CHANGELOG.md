@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.2.11 (2026-10-02)
+
+- **`MERGE_NPM_FLAGS` in a project's conf** sets the flags for `ws merge`'s dependency install (default `--ignore-scripts`). A git dependency that compiles itself in `prepare` (reactbits-kit) arrives unbuilt with install scripts off; such a project sets `MERGE_NPM_FLAGS=""`.
+
 ## 2.2.10 (2026-10-02)
 
 - **`ws merge` installs changed dependencies before its test run.** When the merged branch changed a `package-lock.json`, it runs `npm ci --ignore-scripts` in that folder of the main checkout first; builders install packages only in their worktree, so three merges in a row needed a hand install.
