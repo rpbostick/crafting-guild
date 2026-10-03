@@ -1,6 +1,6 @@
 # reactbits-kit: plan
 
-**In flight right now** (2026-10-02): `rbk-foundation` (task-foundation.md): our modules (momentum, rippleField, clothFollow, pointerFeed, colorDrive), codemod transforms for Waves/Aurora/Iridescence, the `rbx` CLI, tests.
+**In flight right now** (2026-10-02): step 1 merged (rbk-foundation: our modules, 12 transforms for Waves/Aurora/Iridescence, rbx CLI, 81 tests). Next: step 2, the other seven components.
 
 ## Requirements (Patrick, 2026-10-02)
 - One tool to deploy all our React Bits customizations everywhere; its own repo; never package React Bits itself.
