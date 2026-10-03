@@ -12,3 +12,4 @@
 3. Move rpbostick.github.io (figurewright/skywright/colorwright) onto `rbx`; `rbx check` in its build.
 4. Move pen-paper-rpg chargen-toybox's React Bits plug-in onto `rbx`.
 5. GitHub private repo; later public after the release audit.
+- 2026-10-02: kit 0.2.1 (compiled JS) on GitHub; chargen-toybox uses it (merged d7abce6). Figurewright shipped with ripple/swirl, sheet glide and ball spin 0.1 (site dc26805). Running: `rbk-site-sync` (site profile catches up with the live Waves, sphereSpin module). Then step 3: the site switches to rbx. Then the toybox library's backgrounds get momentum/ripple via the kit's modules.
