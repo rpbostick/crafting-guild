@@ -9,17 +9,13 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 - He checks visual changes himself on a preview server before the merge. Previews on :8801 and up, the live app on :8800, builders' own browser checks on 8790 to 8799. Pages made for him to look at (comparisons, review pages) are served the same way from the scratchpad (`python3 -m http.server 88xx --directory …`), not published as claude.ai artifacts (2026-10-01); a tool he uses from several computers with saved state is the exception (private artifact with `db`). Every preview: ask with AskUserQuestion whether to open it in his browser, and on yes run `firefox --new-tab <url>` (Patrick, 2026-10-01).
 - Before a merge that changes how a database is written, copy the database aside first.
 - A test-count claim cites the log it came from.
-
 - Nothing goes public without `release-audit.md` passing and Patrick seeing the findings. colorwright's static build shipped dated comments quoting him to the public site (2026-09-28).
-- Automate what repeats (Patrick, 2026-10-01): when a builder or I would do something a second time, it becomes a test, a committed script the suite runs, or a `ws` command. Run `ws audit` when cold-start says it is due and turn its top finding into the next tool fix or light task. Sequential steps go in a queue for `ws chain`, not hand-driven.
 
 ## Running builders
 - Parallel builders share the CPU, not only the plan. Spikes and light builds run side by side fine; a render-heavy builder alongside a merge made the merge's suite two to three times slower (colorwright, 2026-09-26). The usage limit stopped no run in 42 hours. Merge when nothing heavy is running, and every dispatch gets a budget.
 - A missing grant stalls a builder silently. Name every command the task needs and pass extras with `--allow`. Tell the task to use one command per Bash call.
 - A builder cannot copy a file in from another repo: `cp` from outside its worktree is denied even with `--allow "Bash(cp *)"` (site-fw rounds 2 and 3, 2026-09-28). Copy cross-repo assets into the worktree yourself before dispatch, or after it finishes. Flags go before the builder name; dispatch refuses them after it.
 - When a run stops on the usage limit, `ws chain` waits for the reset and resumes it (2.2.4). Outside a chain, re-dispatch after the reset with a task that says to resume.
-- Do not edit files an open branch also touches. Put the edit in that branch's task.
-- Never `cd` in a Bash call. It moves this session's working directory.
 - Two sessions, two projects: `state/current` is one file, so the second `ws <slug>` moves it under the first. Sessions are pinned by `WS_PROJECT` since 2.1.2, but a session started any other way is not; when cold-start prints `CONFLICT` or `not pinned`, use `--project` on every command (found 2026-09-27 testing 2.1.0 from a terminal).
 - Review once per branch, before merge. A fix round is for a real defect or something he would see; suggestions carry forward in the next task on that code.
 - `ws merge` needs the project's main checkout free of modified tracked files; untracked files are fine. v1's hooks used to append to `reviews/checklist-proposals.md` behind your back; check `git status -uno` first.

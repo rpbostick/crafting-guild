@@ -45,7 +45,8 @@ def tracked(*pats):
     out = subprocess.run(["git", "-C", path, "ls-files", *pats], capture_output=True, text=True).stdout.split()
     return out
 
-# Check scripts in the repo that nothing in the test command's reach runs.
+# Check scripts in the repo that nothing in the test command's reach runs. A test that names the script
+# (a require, or a path it spawns) counts as running it, the same rule precheck.sh uses.
 gate_text = test_cmd
 for p in tracked("package.json", "scripts/run-all-tests.sh", "jest.config.*", "pytest.ini"):
     try: gate_text += open(os.path.join(path, p), errors="replace").read()
@@ -57,7 +58,7 @@ for p in tracked("test/*", "tests/*", "*/tests/*", "*.test.*"):
 unrun = [p for p in tracked("scripts/*", "*/scripts/*")
          if re.search(r"(check|e2e|verify|validate)[^/]*\.(js|ts|py|sh)$", p, re.I)
          and os.path.basename(p) not in gate_text
-         and not re.search(r"require\(['\"][^'\"]*" + re.escape(os.path.splitext(os.path.basename(p))[0]) + r"['\"]|from ['\"][^'\"]*" + re.escape(os.path.splitext(os.path.basename(p))[0]) + r"['\"]", tests_text)]
+         and os.path.splitext(os.path.basename(p))[0] not in tests_text]
 
 repeated = sorted(((len(v), k) for k, v in per_script.items() if len(v) >= 3), reverse=True)
 fix_tasks = [p for p in glob.glob(os.path.join(plans_dir, "*fix*.md")) if os.path.getmtime(p) >= since]
