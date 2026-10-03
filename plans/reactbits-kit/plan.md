@@ -1,6 +1,6 @@
 # reactbits-kit: plan
 
-**In flight right now** (2026-10-02): step 1 merged (rbk-foundation: our modules, 12 transforms for Waves/Aurora/Iridescence, rbx CLI, 81 tests). Step 2 merged (rbk-seven: all ten components, sheet and site profiles, React adapter, 114 tests). Next: step 3, move rpbostick.github.io onto rbx (after the figurewright inside-the-ball round merges, since it changes Waves), then step 4 (chargen-toybox plug-in).
+**In flight right now** (2026-10-02): step 1 merged (rbk-foundation: our modules, 12 transforms for Waves/Aurora/Iridescence, rbx CLI, 81 tests). Step 2 merged (rbk-seven: all ten components, sheet and site profiles, React adapter, 114 tests). Next: step 3, move rpbostick.github.io onto rbx (after the figurewright inside-the-ball round merges, since it changes Waves), step 4 (chargen-toybox plug-in) running as `ppr-toybox-rbx`. Kit on GitHub private, tag v0.2.0.
 
 ## Requirements (Patrick, 2026-10-02)
 - One tool to deploy all our React Bits customizations everywhere; its own repo; never package React Bits itself.
