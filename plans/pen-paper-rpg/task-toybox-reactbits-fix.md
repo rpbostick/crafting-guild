@@ -1,5 +1,7 @@
 # chargen-toybox: the React Bits backgrounds stopped working after the switch to the library
 
+**Resume:** an earlier run of this task was cut off before it finished. Start with `git log` and `git status` in the worktree, keep the work already there (committed or not) if it is sound, and continue from it.
+
 Track: light
 
 `chargen-toybox/` now runs on the vendored toybox library (`vendor/toybox/`, README there) and registers the ten React Bits backgrounds through `registerBackground` in `chargen-toybox/plugins/react-bits/`. Reported after trying it: **a bunch of the React Bits backgrounds don't work anymore; clicking the background name button to reach them turns the background off** (nothing shows). The library's own backgrounds and the colour wheel work.

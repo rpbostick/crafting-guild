@@ -1,5 +1,7 @@
 # Toybox: the Draw button can be moved, or placed in any corner
 
+**Resume:** an earlier run of this task was cut off before it finished. Start with `git log` and `git status` in the worktree, keep the work already there (committed or not) if it is sound, and continue from it.
+
 Track: light
 
 `<draw-layer>` shows a small Draw toggle (which grows into the tool bar while drawing) fixed in the window's lower left corner (read `src/draw/`, `README.md`, `tests/draw-*.test.js`). Users want to choose where it sits.
