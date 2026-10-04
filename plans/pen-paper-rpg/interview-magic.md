@@ -126,3 +126,13 @@ Answered under magic question 6: Chaos becomes a Sorcery branch with the Warp as
 
 Interview complete 2026-10-03 20:55 MDT.
 
+
+## After the interview: Final Fantasy style mages, the Summoner, the Bard (2026-10-03, from 23:58 MDT)
+
+Patrick asked for a Final Fantasy style White Mage and Black Mage on the Sorcery rules, and whether any summoner calls creatures. Suggested in chat: named spell lines (Fire, Fira, Firaga; Cure, Cura, Curaga) whose size is the number of casting dice. His answers by prompt:
+
+- **Gaining spell lines, typed:** "start with two, buy or find the rest. have to buy to get the next level in the line, each new level in the line adds its own dice maybe? there should be extra power with new levels in the line, but there should also be reason to cast them at the lower levels if full power is not needed or energy is running low."
+- **Placement, typed:** "1 and maybe 2": on the main class list, and maybe an optional module as well (the suggested "Crystal" module with Ether).
+- **Summoner:** the Spirit Caller is the Final Fantasy summoner (a bound spirit called as an action is the one-deed summon). Typed: "we probably call the Spirit Caller the Summoner as well". No manifest step and no creature class chosen. He points to Final Fantasy IV (the one with Cecil and Rosa) as the source of the Summoner.
+- **Black Mage's attribute:** INT.
+- **Bard:** he asks what our Bard would look like flavoured after Edward from Final Fantasy IV (the frail bard). Suggestion given in chat; answers to follow.
