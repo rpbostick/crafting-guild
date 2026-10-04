@@ -136,3 +136,7 @@ Patrick asked for a Final Fantasy style White Mage and Black Mage on the Sorcery
 - **Summoner:** the Spirit Caller is the Final Fantasy summoner (a bound spirit called as an action is the one-deed summon). Typed: "we probably call the Spirit Caller the Summoner as well". No manifest step and no creature class chosen. He points to Final Fantasy IV (the one with Cecil and Rosa) as the source of the Summoner.
 - **Black Mage's attribute:** INT.
 - **Bard:** he asks what our Bard would look like flavoured after Edward from Final Fantasy IV (the frail bard). Suggestion given in chat; answers to follow.
+- **Bard (00:05, 2026-10-04), all four ticked:** Song with a partly random result (roll +CHA; the player chooses the affliction on a 10+, the GM on a 7-9; Pacify folds into it); Hide, Salve and Far Song as the choices, replacing Turn and Tinker on the Bard's list; the harp as a ranged weapon whose hit can be traded for a Song result; Sickly as an optional flaw for anyone (3 + CON hit points per level in exchange for one extra ability).
+- **Rename:** the Spirit Caller becomes the Summoner; the engine stays "spirit magic"; the sample spirits gain a few great ones.
+- **Timing:** now, as additions to version 5 (open proposals), then republish the review page; round 3 waits for that.
+- **Tier shape:** he asked for each of the three options to be expanded before choosing.
