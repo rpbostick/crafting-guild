@@ -22,6 +22,9 @@ Write version 6 in `rules/v6/`: `synthesis.md`, `CHANGES.md`, `README.md`, `CHEC
 - Replace every provisional number with the value `rules/v5/BALANCE.md` recommends, cite the finding in the discussion, and drop the words "provisional, awaiting the balance pass" there. Copy tables verbatim from `node scripts/balance/v5.js`; do not invent a number. Where the report says a mechanic is broken or cannot meet its target, write the report's fix as the proposal and keep it open.
 - `magic-spell-lines`: state the shape the report finds meets the targets, with its numbers, and keep the four shapes as options; the choice is still the reviewer's.
 - Anything the report did not cover stays provisional and is listed in the README.
+- The report's Sorcery price (1 HP a die) assumes five-round fights; with three-round fights 2 HP a die fits. Use the recommended value and give the fight-length assumption and the alternative in the discussion, so the reviewer can choose.
+- The report's one cap for every engine (no casting adds more than half your Hit Dice, rounded up, in dice beyond its base) is written once, as its own open proposal, and referred to from each engine.
+- `docs/research/round3-analysis.md` marks some of its own numbers provisional (the workshop's prices, the monthly scavenging limit, the healing song): they stay marked provisional and are listed in the README.
 
 ## Pass 3: the consistency check
 Read the whole document as one rulebook and make it agree with itself. Fix what has one right answer; where there is a real choice, write an open proposal. Record every finding in `CHECKS.md` (what, where, fixed or opened). At least:
