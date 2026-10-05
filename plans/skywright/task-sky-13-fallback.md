@@ -20,7 +20,7 @@ With stub providers: first answers; first fails with each falling-back kind and 
 Generic retry and fallback helpers exist (`cockatiel`, MIT, has a fallback policy; `p-any`). Not added: the rule for which errors move on is specific to `WeatherError`, the wrapper is about forty lines, and skywright has no runtime dependencies.
 
 ## Commands
-One command per Bash call, each check through the evidence runner: `npx jest <files>`, `npx tsc --noEmit`, `npm run demo:typecheck`, `node`. Do not run `npm install`. Run the whole suite (`npx jest`) once at the end.
+One command per Bash call, each check through the evidence runner: `npx jest <files>`, `npx tsc --noEmit`, `npm run demo:typecheck`, `node`. Do not run `npm install`. Run the whole suite once at the end with `npx jest --runInBand` (parallel workers are killed at the memory cap).
 
 ## Done when
 `fallbackProvider` is exported, the tests, the whole suite and both typechecks pass, and the README shows the example.

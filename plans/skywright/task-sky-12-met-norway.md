@@ -28,7 +28,7 @@ The URL and header sent; Houston and Bergen parse to the hourly counts the fixtu
 - MET's own documentation is the reference for the symbol codes (the weathericon legend) and the terms (identification, caching by `Expires`, at most four decimals in coordinates). You cannot fetch it; map the codes the fixtures contain plus the base names `clearsky`, `fair`, `partlycloudy`, `cloudy`, `fog`, and the `light`/`heavy` forms of `rain`, `rainshowers`, `sleet`, `sleetshowers`, `snow`, `snowshowers`, each with and without `andthunder`, and list in your result any code you were unsure of.
 
 ## Commands
-One command per Bash call, each check through the evidence runner: `npx jest <files>`, `npx tsc --noEmit`, `npm run demo:typecheck`, `node`. Do not run `npm install`. Run the whole suite (`npx jest`) once at the end.
+One command per Bash call, each check through the evidence runner: `npx jest <files>`, `npx tsc --noEmit`, `npm run demo:typecheck`, `node`. Do not run `npm install`. Run the whole suite once at the end with `npx jest --runInBand` (parallel workers are killed at the memory cap).
 
 ## Done when
 The provider is exported and returns a `Forecast` in the model's units and step convention from the recorded responses; the tests, the whole suite and both typechecks pass; the README describes it. The demo app is unchanged.
