@@ -1,0 +1,4 @@
+# skywright, up to speed for Bike Weather's core loop. Run by `bin/ws --project skywright chain plans/skywright/core-loop.queue`.
+# <name> <task> [gate] [dispatch flags]. gate = the operator sees it before the merge.
+sky-minutely   plans/skywright/task-sky-8-minutely.md
+sky-dry-window plans/skywright/task-sky-9-dry-window.md

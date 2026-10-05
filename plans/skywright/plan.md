@@ -1,7 +1,7 @@
 # skywright: plan
 
 **In flight right now**
-Nothing. Step 6 (`sky-release`) merged 2026-09-28 as 647e120: cache, README, publish-ready 0.1.0. Steps 1-6 are done. Step 7 (publish) waits until Bike Weather uses skywright. Privacy audit 2026-10-01: `sky-coarse-location` merged as f376705 (forecast requests carry coordinates rounded to 0.01°; one `roundedCoordinate` in `src/coords.ts` for the cache and the URL). Carry into the next task on this code: rename the fixture-query test (it now checks rounded coordinates), say 'the Open-Meteo request' in the `src/coords.ts` docstring (a wrapped custom provider still gets exact coordinates), and move the test coordinate off the 40.015 rounding boundary.
+**Running (2026-10-04 20:52 MDT): `ws chain plans/skywright/core-loop.queue`** (Opus builders, Fable reviews, no gates): `sky-minutely` (`task-sky-8-minutely.md`) then `sky-dry-window` (`task-sky-9-dry-window.md`). After a restart: `bin/ws --project skywright chain-wait` under run_in_background. Patrick (2026-10-04): bring skywright up to the 2026-10-01 Dark Sky decisions (steps 8–13 below). Fixtures with rain in the 15-minute block committed 7fec7d5 (Houston, Munich; URLs beside them). Steps 1–6 merged (`sky-release` 647e120, `sky-coarse-location` f376705; its three carried suggestions are in step 8's task). Step 7 (publish) still waits until Bike Weather uses skywright.
 
 ## Requirements (Patrick, 2026-09-27; see `plans/bike-weather/product.md`)
 - An open-source (MIT) weather library in TypeScript, usable from React Native/Expo and Node (only `fetch`, no Node-only APIs in `src/`), plus a small Expo demo app released with it.
@@ -19,6 +19,15 @@ Guesses (tell Patrick if one turns out wrong): metric internally with unit helpe
 5. **Demo app** (after 4): `example/`, an Expo app: place search, current conditions, hourly, and a ride-window picker showing feels-like at speed. The orchestrator installs Expo in `example/` first; preview through Expo web on :8801.
 6. **Cache and release prep** (after 5): a response cache with injectable storage; README with the API and examples; package.json ready to publish (`private` off, `dist` build). Patrick decides when to publish.
 7. **Publish** (after Bike Weather's core loop uses skywright; Patrick, 2026-09-28): fold in the API changes Bike Weather needed, then run `release-audit.md` on the source and `dist/`, show Patrick the findings, create a fresh single-commit public repo (the private one keeps its history), fix `repository`/`homepage` in package.json, and `npm publish` after he approves (he runs `npm login`). The name `skywright` was free on npm on 2026-09-28.
+
+## Steps for Bike Weather's core loop (2026-10-04; from `bike-weather/docs/research/dark-sky.md`, closing, and the 2026-10-01 decisions in `plans/bike-weather/product.md`)
+8. **15-minute precipitation layer** (`task-sky-8-minutely.md`, `sky-minutely`): optional, source-neutral `Forecast.subHourly`; Open-Meteo `minutely_15` fills it (checked live 2026-10-04: 24 steps with `forecast_minutely_15=24`; real only in North America and Central/Western Europe). The minute-nowcast source is undecided, so nothing may require the layer.
+9. **Dry-window finder and "leave by"** (`task-sky-9-dry-window.md`, `sky-dry-window`, after 8): `src/dryWindow.ts`, pure functions over sub-hourly then hourly steps.
+10. **Headwind between two places** (light, independent): bearing between two coordinates and the along-track and cross-track wind for a leg, on top of `relativeWindKmh`; "headwind to work, tailwind home".
+11. **MET Norway provider** (independent): keyless Locationforecast 2.0 as the no-server fallback (CC BY, an identifying User-Agent; check how a browser or React Native client must identify itself and the 6-hourly steps after ~60 h with a live call before writing the task; record fixtures first; coordinates rounded to 0.01°).
+12. **Fallback provider** (after 11, light): `fallbackProvider([primary, secondary])` tries the next provider on a network or HTTP error; `Forecast.provider` says which answered, so the app can say which mode it is in. The proxy is `createOpenMeteoProvider({ baseUrl })`, already there.
+13. **Demo app shows 8–12** (gate): the next six hours in 15-minute bars, the dry windows for a ride length, headwind between two searched places, and the provider that answered.
+- Open, to ask Patrick before planning: whether the plain-language summaries in Dark Sky's voice ("light rain starting in 12 min") live in skywright (open source, English only at first) or in Bike Weather.
 
 ## Done when (satisfactory for Bike Weather)
 Bike Weather can import skywright, fetch a forecast for any searched place, and get a ride-window summary; the demo app shows the same; the suite passes.
