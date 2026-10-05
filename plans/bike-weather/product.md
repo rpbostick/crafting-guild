@@ -1,7 +1,7 @@
 # Bike Weather: product plan
 
 **In flight right now**
-Nothing for Bike Weather's code yet: figurewright first (Patrick, 2026-09-29). Research merged 2026-10-01: `docs/research/weather-providers.md` 755f1ae and `docs/research/dark-sky.md` 47c1b7d; decisions in the 2026-10-01 table below (Dark Sky core loop, no-server fallbacks, iOS + Android, serverless proxy, minute-rain source later, BYO key and ~$1/month minute tier). **Release gate:** skywright is published to npm only after Bike Weather's core loop uses it (skywright plan step 7).
+Nothing for Bike Weather's code yet: figurewright first (Patrick, 2026-09-29). Research merged 2026-10-01: `docs/research/weather-providers.md` 755f1ae and `docs/research/dark-sky.md` 47c1b7d; decisions in the 2026-10-01 table below (Dark Sky core loop, no-server fallbacks, iOS + Android, serverless proxy, minute-rain source later, BYO key and ~$1/month minute tier). **skywright is up to the 2026-10-01 decisions (2026-10-04, steps 8–13 of its plan):** optional 15-minute precipitation layer, dry-window finder and leave-by, headwind between two places, MET Norway keyless provider, fallback provider that says which source answered, all in its demo. **Release gate:** skywright is published to npm only after Bike Weather's core loop uses it (skywright plan step 7).
 
 ## Requirements (operator, 2026-09-27)
 - A closed-source, paid app for the iOS and Android app stores. Working title "Bike Weather".
