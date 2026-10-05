@@ -1,7 +1,7 @@
 # build-notes: plan
 
 **In flight right now**
-Nothing running. Repo created 2026-10-05 (private, github.com/rpbostick/build-notes): the first interview, a backlog of five lessons (`lessons.md`), a video plan template. Waiting on Patrick: which lesson to film first; then write `videos/01-…/plan.md` from the template (the point, the shots, the words) and list what to capture from the workspace (renders, terminal, files).
+Nothing running. Repo created 2026-10-05 (private, github.com/rpbostick/build-notes): the first interview, a backlog of five lessons (`lessons.md`), a video plan template. Patrick (2026-10-05): the agentic workspace first, starting with "the AI forgets" (lesson 4). `videos/01-the-ai-forgets/plan.md` written: five shots with the words, a capture list, the checklist. Waiting on Patrick: his read of the plan and which project to show on screen (skywright suggested: short block, nothing unreleased).
 
 ## Requirements (Patrick, 2026-10-05)
 - Several short videos, 60–90 seconds each, each teaching a beginner one thing he learned from building the agentic workspace and Bike Weather with its components.
