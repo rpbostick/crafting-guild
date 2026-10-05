@@ -7,4 +7,4 @@ fw-import-layering plans/figurewright/task-fw-31-import-layering.md gate
 fw-shoulder-options plans/figurewright/task-fw-34-shoulder-options.md gate --timeout 150m
 fw-shoulder-armpit plans/figurewright/task-fw-35-shoulder-armpit.md gate --timeout 180m
 fw-shoulders-build plans/figurewright/task-fw-36-shoulders-build-5.md gate --timeout 180m --allow "Bash(npm run renders:*)"
-fw-found-art       plans/figurewright/task-fw-32-found-art.md gate --timeout 180m
+fw-found-art       plans/figurewright/task-fw-32-found-art.md gate --timeout 180m --budget 30 --allow "Bash(npm run renders:*)"
