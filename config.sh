@@ -1,7 +1,7 @@
 # agentic-workspace v2 settings. Sourced by every script. Edit freely; nothing else reads these.
 WS_TZ=""                        # calendar for dates written into plans ("America/Denver"); empty = this machine's local time
 WS_DEFAULT_BUDGET="10"          # dollars, --max-budget-usd for a builder run
-WS_REVIEW_BUDGET="3"            # dollars, for a review run
+WS_REVIEW_BUDGET="8"            # dollars, for a review run
 WS_DEFAULT_TIMEOUT="120m"       # wall-clock cap for a builder run (timeout(1) form)
 WS_LIGHT_TIMEOUT="45m"          # cap for a task marked 'Track: light'
 WS_BUILDER_MEM="4G"             # memory cap for a builder and everything it runs (systemd MemoryMax); empty = no cap
