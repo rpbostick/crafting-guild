@@ -24,3 +24,13 @@ One command per Bash call, each check through the evidence runner: `npx jest <fi
 
 ## Done when
 `fallbackProvider` is exported, the tests, the whole suite and both typechecks pass, and the README shows the example.
+
+## Carried from the sky-met-norway review (suggestions; do them where the code is yours to touch)
+- `src/providers/metNorway.ts:405`: `days` counts from the local date of the first entry, which is usually a partial day that `daily` drops. With a timezone, `days: 1` can return an empty `daily` and only a couple of hourly points (the test shows `days: 2` giving one daily point). The README's ForecastOptions line does not say this; either count from the first full day or document it there.
+- `README.md:310`: The cache key omits `Location.timezone`, so a cached forecast can come back with another caller's `timezone` and local times while `location` is overwritten with the current caller's. This is documented, but it is a trap for a fallback provider; consider adding the zone to the key in src/cache.ts (line 208) in a follow-up.
+- `test/metNorway.test.ts:323`: The 'both attributions' test only restates two constants and can hardly catch a regression; drop it or assert something structural, such as every Attribution field being a non-empty https URL or string (rule 2, weak test, not blocking).
+- `test/metNorway.test.ts:100`: No test covers an aborted request, although the provider has a dedicated path that rethrows the signal's reason instead of wrapping it as a 'network' WeatherError. Add one, with and without `cachedProvider`.
+- `test/metNorway.test.ts:262`: The first-day threshold `MET_NORWAY_MIN_DAY_HOURS` is exercised only at 2, 12 and 21 hours; a case at exactly 17 and 18 hours, by trimming fixture entries, would pin the boundary.
+- `src/providers/metNorway.ts:187`: `value.details ?? {}` turns a step with no `details` into one with unknown precipitation and no error. That is defensible because the fields are optional, but a short comment giving the reason would settle the rule 1 question.
+- `src/zoneClock.ts:58`: The docstring 'The local calendar date, YYYY-MM-DD' on `dateAt` restates the name (rule 8), and `offsetSecondsAt` next to it has none; drop it or say something non-obvious.
+- `src/providers/metNorway.ts:36`: `MAX_DAYS = 10` while its comment says the service serves about nine days, and the README says '1 to 10'. Line the constant, the comment and the README up on one number.
