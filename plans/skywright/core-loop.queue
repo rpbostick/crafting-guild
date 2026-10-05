@@ -2,3 +2,7 @@
 # <name> <task> [gate] [dispatch flags]. gate = the operator sees it before the merge.
 sky-minutely   plans/skywright/task-sky-8-minutely.md
 sky-dry-window plans/skywright/task-sky-9-dry-window.md
+sky-interval   plans/skywright/task-sky-10-interval.md
+sky-headwind   plans/skywright/task-sky-11-headwind.md
+sky-met-norway plans/skywright/task-sky-12-met-norway.md
+sky-fallback   plans/skywright/task-sky-13-fallback.md
