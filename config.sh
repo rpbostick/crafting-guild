@@ -7,8 +7,8 @@ WS_LIGHT_TIMEOUT="45m"          # cap for a task marked 'Track: light'
 WS_BUILDER_MEM="4G"             # memory cap for a builder and everything it runs (systemd MemoryMax); empty = no cap
 WS_SUITE_WARN_S="300"           # ws merge warns when the project's suite takes longer than this many seconds
 WS_CHAIN_FIX_ROUNDS="1"          # ws chain: automatic fix rounds per step before it stops for the orchestrator
-WS_MODEL=""                     # builder model alias ("sonnet", "opus", ...); empty = Claude Code's default
-WS_REVIEW_MODEL=""              # reviewer model alias; empty = default
+WS_MODEL="opus"                   # builder model alias ("sonnet", "opus", ...); empty = Claude Code's default
+WS_REVIEW_MODEL="fable"         # reviewer model alias; empty = default
 WS_EFFORT=""                    # builder effort (low|medium|high|xhigh|max); empty = default
 WS_LESSONS_CAP="40"             # cold-start warns when a lessons/ file passes this many lines
 # Words that attribute work to people or to this process. ws merge refuses a branch that adds a line
