@@ -1,3 +1,4 @@
 # figurewright hybrid body (the library's widths and outline into the 2D body), run by `bin/ws --project figurewright chain plans/figurewright/hybrid.queue`.
 # <name> <task> [gate] [dispatch flags]. gate = the operator sees it before the merge.
 fw-hybrid-widths   plans/figurewright/task-fw-50-hybrid-widths.md gate --timeout 150m --budget 25 --allow "Bash(npm run *)"
+fw-far-arm-neck    plans/figurewright/task-fw-51-far-arm-neck.md gate --timeout 150m --budget 25 --allow "Bash(npm run *)"
