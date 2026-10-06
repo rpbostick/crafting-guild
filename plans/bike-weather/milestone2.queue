@@ -1,0 +1,3 @@
+# Bike Weather milestone 2, run by `bin/ws --project bike-weather chain plans/bike-weather/milestone2.queue`.
+# <name> <task> [gate] [dispatch flags]. gate = the operator sees it before the merge.
+bw-templates   plans/bike-weather/task-bw-7-templates-catalog.md gate --budget 15
