@@ -38,3 +38,6 @@ One command per Bash call. `anny-python <script> [args]`, `npx tsx <file>.ts [ar
 
 ## Done when
 `npx jest test/body-library --runInBand` and `npx tsc --noEmit` pass; `tools/body3d/` and `assets/bodies/` are committed with the README section; `npm run bodies:check` passes on a fresh regeneration; the sheet is in `.ws-evidence/`; and the result states: the library's size, the time to generate, the scorecard fault counts per pose, the render-diff numbers against round 2's sheet, and the number of tests with the log they come from. Safe to re-run from scratch.
+
+## Time box
+This run has 60 minutes and may be stopped at that point. Work in the order of the numbered items and commit after each one, so that whatever is committed is whole. The gitignored `spike/3d-source/data/round2/unruled/` folder is not in a fresh checkout: the generator must not depend on it. If time runs short, stop after a commit and report `partial` with what is left.
