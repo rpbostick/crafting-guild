@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.3.3 (2026-10-06)
+
+- **A builder that dies with its wrapper still gets a result.** At a usage limit both the run and the subshell that writes `result.txt` can die, leaving the `.pid` file behind, so `ws wait` and a chain waited out the full timeout. `ws wait` now notices a dead pid, writes the result with `check-result.sh` (dispatch records the start commit as `since=` in `task.txt`) and returns it. `check-result.sh` takes the reset time as the next such clock time after the run stopped, not after the check, so a result rebuilt after the reset no longer lands a day late.
+
 ## 2.3.2 (2026-10-06)
 
 - **Builders can tidy and restore files without a denied call.** The first `ws audit` of bike-weather counted 19 denied commands in 18 runs, each costing a turn: deleting a scratch test, restoring a file from a commit, `git merge main --no-edit`, `git ls-tree`, `stat`. Dispatch now grants `git restore *`, `git clean -f -- *`, `git merge <branch> --no-edit`, `git ls-tree*` and `stat *`, and the builder prompt names the command for each case. Plain `rm` and `mv`, `git stash` and `git reset` stay ungranted.

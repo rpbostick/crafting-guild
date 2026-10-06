@@ -132,7 +132,7 @@ fi
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 for ext in jsonl result.txt task.txt; do [ -e "$RUNS/$name.$ext" ] && mv "$RUNS/$name.$ext" "$RUNS/$name.$stamp.$ext"; done
 { echo "task=$(cd "$(dirname "$task")" && pwd)/$(basename "$task")"; echo "started=$(now_local)"; echo "budget=$budget"; echo "timeout=$tmo"; echo "worktree=$wt"; } > "$RUNS/$name.task.txt"
-start_sha=$(git -C "$wt" rev-parse HEAD)
+start_sha=$(git -C "$wt" rev-parse HEAD); echo "since=$start_sha" >> "$RUNS/$name.task.txt"
 # Memory cap: the run gets its own systemd scope, so a runaway script is killed alone (OOMPolicy=continue
 # keeps the builder alive to see it) instead of the kernel taking out the editor the session runs in.
 cap=() mem="uncapped"
