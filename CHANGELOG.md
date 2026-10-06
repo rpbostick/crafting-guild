@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.3.2 (2026-10-06)
+
+- **Builders can tidy and restore files without a denied call.** The first `ws audit` of bike-weather counted 19 denied commands in 18 runs, each costing a turn: deleting a scratch test, restoring a file from a commit, `git merge main --no-edit`, `git ls-tree`, `stat`. Dispatch now grants `git restore *`, `git clean -f -- *`, `git merge <branch> --no-edit`, `git ls-tree*` and `stat *`, and the builder prompt names the command for each case. Plain `rm` and `mv`, `git stash` and `git reset` stay ungranted.
+
 ## 2.3.1 (2026-10-03)
 
 - **`ws audit` counts a check script as run when a test names it**, the rule `precheck.sh` already used. It only recognised `require(...)`, so scripts a test spawns by path (pen-paper-rpg's three browser and coverage checks) were reported as never run.
