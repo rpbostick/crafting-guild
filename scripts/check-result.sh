@@ -35,6 +35,8 @@ for c in $(printf '%s' "$so" | jq -r '.commits[]?'); do
 done
 if [ "$(printf '%s' "$so" | jq -r '.tests == null')" = "false" ]; then
   lp=$(printf '%s' "$so" | jq -r '.tests.log_path'); t=$(printf '%s' "$so" | jq -r '"\(.tests.passed) passed, \(.tests.failed) failed (\(.tests.command))"')
+  # Builders sometimes follow the path with prose ("runs.tsv (logs: a.log, b.log)"): the path is the first word.
+  [ -n "$lp" ] && [ ! -f "$wt/$lp" ] && [ -f "$wt/${lp%% *}" ] && lp="${lp%% *}"
   if [ -n "$lp" ] && [ -f "$wt/$lp" ]; then ok "tests $t, log at $lp"; else flag "tests claimed ($t) but no log at ${lp:-<none>}"; fi
 else echo "note  no tests run"; fi
 nd=$(printf '%s' "$res" | jq '.permission_denials | length'); nr=$(printf '%s' "$so" | jq '.denied | length')
