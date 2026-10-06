@@ -2,3 +2,4 @@
 # <name> <task> [gate] [dispatch flags]. gate = the operator sees it before the merge.
 bw-templates   plans/bike-weather/task-bw-7-templates-catalog.md gate --budget 15
 bw-rating-effort plans/bike-weather/task-bw-8-rating-effort-names.md --budget 15
+bw-today        plans/bike-weather/task-bw-11-today-screen.md gate --budget 20

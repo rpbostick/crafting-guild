@@ -1,0 +1,33 @@
+# Bike Weather: the Today screen shows what to wear and takes a rating
+
+The Today screen shows a place search and the forecast. `src/suggest/` already works out what to wear for an outing (`suggestToday`) and stores a comfort rating (`rateOutfit`), and nothing shows either. This task makes the Today screen the app's main loop: choose the outing, see what to wear and carry and why, rate how it went, save an outfit worth keeping.
+
+Read first: `README.md`; all of `src/suggest/` and its tests (every state `suggestToday` returns, the heat field, the suggested name, saved outfits' titles and verdicts, what `rateOutfit` takes including carried garments); `src/screens/TodayScreen.tsx` and its test; `src/screens/wardrobe/` (how screens here are built, themed and tested: `SegmentedChoice`, `ActionButton`, swatches, `useThemeColors`); `src/wardrobe/WardrobeProvider.tsx`; `src/app/`; `docs/research/dark-sky.md`'s closing section on the core loop; `docs/research/heat-estimate.md`'s sentences.
+
+## What to build
+1. **The outing.** Under the place: Ride or Everyday. For a ride: effort (easy, moderate, hard; moderate to start), when (now, or a later hour today), and how long (a few fixed choices around the default hour). For everyday: when and how long only. Each change re-runs the suggestion; a request overtaken by a newer one is abandoned and can never overwrite the newer answer, with a test that would fail if it did (the forecast request has this untested today).
+2. **Every state, drawn as itself**, in the view-model's own words: no place chosen; loading; forecast unavailable (with a way to try again, and the saved outfits still listed); forecast unreadable; an outing past the end of the forecast; an empty wardrobe (offer the starter wardrobe in one press, which adds it through the store and shows the suggestion; and a way to the Wardrobe tab); and ready.
+3. **Ready.** In reading order: the conditions sentence; heat, when there is any, given weight by its level (a quiet note, a caution, a clear warning that cannot be missed at the higher levels), the estimated number always with its caveat; **what to wear**, in dressing order, each garment with its colour swatch, name and reason; **what to carry**, apart from what to wear, each with when it would go on; the gaps as sentences; the notes; the learned offset sentence when there is one; then the saved outfits for the mode, ranked, each with its title and verdict, and any that needs attention saying so. The forecast hours and the provider and attribution lines the screen has now stay, below all of this.
+4. **The wear and carry part is one view among several to come.** Build it as a component behind a small interface (the ready suggestion in, a view out) with a registry holding the one view built here, so more views of the same data can be added and chosen later without touching the screen. Show no switcher while there is one view.
+5. **Rating.** One press rates the outing: five levels from too cold to too warm, in plain words. That alone stores a rating. After it, a quiet "add detail" opens: for each carried garment, whether it was put on or stayed packed; the garments actually worn, adjustable (a rider who wore the rain jacket over the gilet can say so); and the effort, if it differed. Saving the detail replaces nothing: say in the result how the one-press rating and its detail are stored so that the outing counts once in learning. A second outing rated later is a new rating.
+6. **Saving an outfit.** "Save this outfit" on the suggestion, with a name field pre-filled with the suggested name, editable or clearable; saved through the store; it then appears in the ranked list.
+7. **One store.** The screen reads the wardrobe through `WardrobeProvider`, so a garment added on the Wardrobe tab changes the suggestion without a restart.
+8. **Both appearances and screen readers.** Light and dark through `useThemeColors`; every control has a role and a label; the heat warning is announced; nothing is told by colour alone.
+9. **README**: the screens section describes the Today screen.
+
+## Leave alone
+The method (`src/recommend/`), the model's stored shapes, the wardrobe screens, and what `suggestToday` returns: if the screen needs something the view-model lacks, add it in `src/suggest/` with a test rather than computing it in the screen, and list it in the result. No place, coordinates or outing history is stored.
+
+## Tests
+With React Native Testing Library, the fake weather service, the in-memory store and an injected clock: each state in 2 renders its own text and controls; changing mode, effort, start and length changes the outing passed on; a superseded request cannot win; the starter wardrobe press leads to a suggestion; ready shows wear and carry apart, with reasons; each heat level renders with its caveat; one press stores a rating with the outing's effort and conditions and no place; the detail records carried garments put on or packed; saving an outfit stores the name shown and lists it; a garment added to the store updates the suggestion; dark appearance uses the theme's colours on every new element.
+
+## Prior art
+- The components and patterns of `src/screens/wardrobe/` and `src/ui/` are reused: no second button, segmented control, swatch or theme.
+- No new dependency is expected. If a control is missing (a time choice, say), build it from the existing pieces before adding a package; if a package is truly needed, name it, its licence and its size in the result and install it with `npx expo install`.
+- The wording comes from `src/suggest/words.ts` and `src/recommend/reasons.ts`; the screen writes no sentence about the weather or clothing itself.
+
+## Commands
+One command per Bash call, each check you cite through the evidence runner: `npx jest --runInBand <paths>`, `npm test`, `npm run typecheck`, `npx tsc --noEmit`, `npx expo export --platform web` (do not commit its output), `git status`, `git diff`, `git log`, `git add`, `git commit`, `git mv`, `git rm`, `git restore --source=<ref> -- <path>`, `git clean -f -- <path>`, `grep`, `ls`, `cat`, `mkdir`. No plain `rm` or `mv`.
+
+## Done when
+`npm test && npm run typecheck` pass and the web export builds; the Today screen does 1 to 8 with the tests above; the README matches; and the result states the number of tests with the log it comes from (the whole suite), anything added to `src/suggest/`, how a one-press rating and its detail are stored, and the text of the ready state for one cool showery ride exactly as the screen shows it, top to bottom. A person looks at the screen in a browser before the merge. Safe to re-run from scratch. Commit after each numbered item.
