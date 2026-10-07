@@ -29,3 +29,9 @@ As in `task-fw-52-hybrid-pelvis.md`: one command per Bash call through the evide
 
 ## Done when
 The test commands of the pelvis step pass; the elbow measure is on the scorecard for all three poses, fails on main's easing arms and passes here; the two new rigs draw every body bare and dressed in the tee and long pants on their sheets; no other measure worse on any body; the page is laid out as above with every image under `page/` and loading; the README matches; the result states the candidate chosen with the deciding numbers, the elbow values before and after per body, the sheets and baselines re-approved, the largest render-diff displacement outside the arms, which garments draw in the new poses, and the number of tests with the log each count comes from. Commit after each numbered item; stop after a commit and report `partial` if time runs short.
+
+## Carried from the pelvis review (do as part of the item that touches each file, no separate commit needed)
+- `test/figure/scorecard.baseline.json`: the named builds' thighs over hips (0.852 to 0.903, ok:false) and hip and thigh turn (28.2°) are still the tube's scores while the join scores them 0.955 to 0.967 and 13 to 19°; re-approve those two measures so the ratchet guards the join's values, with the reason.
+- `scripts/drawn-widths.ts`: the thigh station is the literal 0.14 while `src/body/skeleton.ts` says it reads `THIGH_AT`; import `THIGH_AT` so the two cannot drift.
+- `scripts/figure-bands.ts` and the README's "The measure" bullet: the library's join outline moves "under 0.13 cm" under its style transforms, but pear's records 0.132; say "about 0.13".
+- README regeneration note: with the importer on `importedOnSkeleton` and `renderFigure` on the join, `scripts/make-garment-sheet.ts` writes a sheet whose skin layer disagrees with its guide layer; say so beside the regen instructions until the importer's leg pieces move to the join.
