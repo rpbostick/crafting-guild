@@ -1,2 +1,3 @@
 # Bike Weather, 2026-10-07 daytime, run by `bin/ws --project bike-weather chain plans/bike-weather/day.queue`.
-bw-carried-shelves  plans/bike-weather/task-bw-15-carried-shelves.md gate --budget 15
+# bw-carried-shelves merged 07932b2 at 10:04 MDT (gate passed on Patrick's look).
+bw-shelves-followups  plans/bike-weather/task-bw-16-shelves-followups.md --budget 5
