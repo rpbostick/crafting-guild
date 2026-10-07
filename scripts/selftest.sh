@@ -4,12 +4,13 @@ set -euo pipefail
 WS="$(cd "$(dirname "$0")/.." && pwd)"
 for f in "$WS"/bin/ws "$WS"/scripts/*.sh; do bash -n "$f" && echo "syntax ok  ${f#"$WS"/}"; done
 command -v shellcheck >/dev/null && shellcheck -S warning "$WS"/bin/ws "$WS"/scripts/*.sh && echo "shellcheck ok"
-T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+T=$(mktemp -d); slug=$(basename "$T" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')
+# Cleanup runs on every exit (a failed check, a kill, a crash), so the scratch project never outlives the test.
+trap 'rm -rf "$T" "$WS/plans/$slug" "$WS/runs/$slug"; rm -f "$WS/projects/$slug.conf"' EXIT
 git -C "$T" init -q -b main; echo hi > "$T/a.txt"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm init
 printf '#!/bin/sh\nexit 0\n' > "$T/t.sh"; chmod +x "$T/t.sh"
 printf 'n\n' | "$WS/bin/ws" init "$T" --tests "sh t.sh" >/dev/null && echo "init ok (non-interactive path)"
 grep -q 'EXTRA_TOOLS=' "$WS/projects/$(basename "$T" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//').conf" && echo "conf ok"
-slug=$(basename "$T" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')
 printf '# demo task\nAdd a file.\n' > "$T/task.md"
 out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>&1); grep -q "budget:" <<< "$out" && echo "dry-run ok"
 [ -d "$T/.worktrees/demo" ] && echo "worktree ok"
@@ -75,5 +76,4 @@ echo "fine" > "$T/b.txt"; git -C "$T" -c user.name=t -c user.email=t@t commit -q
 rel | grep -q 'published v1.0.1' && [ "$(git --git-dir="$T/public.git" rev-list --count main)" = 2 ] && echo "release on top ok"
 [ "$(git -C "$T" rev-parse 'main^{tree}')" = "$(git --git-dir="$T/public.git" rev-parse 'main^{tree}')" ] && echo "release tree equals main ok"
 echo dirty >> "$T/a.txt"; sed -i 's/1.0.1/1.0.2/' "$T/package.json"; grep -q 'modified tracked files' <<< "$(rel)" && echo "release refuses a dirty checkout ok" || { echo "release dirty FAILED"; exit 1; }; git -C "$T" checkout -q -- .
-rm -f "$WS/projects/$slug.conf"; rm -rf "$WS/plans/$slug" "$WS/runs/$slug"
 echo "selftest passed"
