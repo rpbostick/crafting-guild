@@ -2,3 +2,4 @@
 # bw-carried-shelves merged 07932b2 at 10:04 MDT (gate passed on Patrick's look).
 # bw-shelves-followups merged afc8bcd at 10:16 MDT.
 # bw-shelves-followups  plans/bike-weather/task-bw-16-shelves-followups.md --budget 5
+bw-timeline-views  plans/bike-weather/task-bw-17-timeline-views.md gate --budget 15
