@@ -89,12 +89,14 @@ TOOLS=(Read Grep Glob "Edit(./**)"
 # Every backticked command in the task's "## Commands" section is granted by its first word (first two for
 # npx, npm, node, python3, git), so a task never names a command the builder cannot run (bw-export-screen ended
 # partial on an ungranted `npx expo install`, 2026-10-07). Destructive forms stay denied below.
-cmds=$(awk '/^## Commands/{f=1; next} /^## /{f=0} f' "$task" | grep -o '`[^`]*`' | tr -d '`' | sed 's/^ *//' || true)
+# A forbidden command ("No `pip`", "no plain `rm` or `mv`", "never `git stash`") is dropped before the backticks are
+# read, or the prohibition itself would grant it (fw-hybrid-pelvis was granted pip and npm install, 2026-10-07).
+cmds=$(awk '/^## Commands/{f=1; next} /^## /{f=0} f' "$task" | sed -E 's/\b([Nn]o|[Nn]ever|[Nn]ot)( plain| a bare| any)? `[^`]*`(,? (or|and|nor) `[^`]*`)*//g' | grep -o '`[^`]*`' | tr -d '`' | sed 's/^ *//' || true)
 derived=()
 while IFS= read -r c; do
   [ -n "$c" ] || continue
   set -- $c; w1="${1:-}"; w2="${2:-}"
-  case "$w1" in ''|'<'*|'#'*|'$'*|'-'*) continue ;; rm|mv|sudo|su|dd|mkfs|shutdown|reboot|kill|pkill|killall) continue ;; esac
+  case "$w1" in ''|'<'*|'#'*|'$'*|'-'*|'.'*|*/) continue ;; rm|mv|sudo|su|dd|mkfs|shutdown|reboot|kill|pkill|killall) continue ;; esac
   case "$w1" in npx|npm|node|python3|python|git) [ -n "$w2" ] && [ "${w2#<}" = "$w2" ] && [ "${w2#-}" = "$w2" ] && g="$w1 $w2" || g="$w1" ;; *) g="$w1" ;; esac
   case "$g" in "git push"|"git config"|"git reset"|"git rebase"|"git worktree"|"git stash"|"git checkout") continue ;; esac
   pat="Bash($g*)"; printf '%s\n' "${TOOLS[@]}" "${derived[@]}" | grep -qxF "$pat" || derived+=("$pat")
