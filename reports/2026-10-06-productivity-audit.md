@@ -91,6 +91,22 @@ Today's reviews on their own: four fix-first out of about nine (bw-name-check, b
 
 **Process regressions he pointed out this week.** 10-03 20:58: "you used to give me prompts with checkboxes and suggestions. i would like that again" (Fable's first day; the lesson was re-seeded). 10-05 19:00: "progress has felt really slow today" (figurewright's dependent line, answered with the parallel plan). 10-06 10:23: questions were skipped and had to be asked again. 10-06 23:07: a preview that showed Expo's placeholder instead of the app (a shared Metro cache; fixed in the preview command).
 
+## Usage limits: what a stop costs
+
+Measured over the week from the orchestrator transcripts and the run results (Patrick's estimate: "5 to 10 % of our tokens for a window to recover").
+
+| | Value |
+|---|---|
+| Limit stops in the week | 10 (six of them on 10-05 and 10-06) |
+| Builder resume runs after a kill | 6, about $15 in all |
+| Orchestrator input volume in the 30 minutes after a reset | 1.6 to 2.9 times its normal half-hour (one reset at 0.6) |
+| Share of the week's orchestrator input spent in those ten half-hours | 13 %, for 8.5 % of active time |
+| Dead wall-clock in the last 36 hours | about 8 hours |
+
+So the builders recover cheaply, because every task commits after each numbered item and the chain resumes from the worktree; the cost sits in the orchestrator re-reading state after each reset, about 5 % of the window, and above all in the hours when nothing can run. A limit that lands mid-run also kills the review or the merge in flight, which until 2.3.4 stopped the chain for the rest of the day.
+
+What can be done about it is in the next section once the facts on Claude Code's own facilities are checked.
+
 ## What to change
 
 1. `ws chain`: a review that fails on the usage limit waits for the reset and retries, like a builder (tool fix, light, before tonight).
