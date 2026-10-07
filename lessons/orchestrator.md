@@ -5,7 +5,7 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 ## Working with Patrick
 - Present decisions with the AskUserQuestion prompt: recommended option first and labelled, at most four per call, in rounds. He usually answers "all recommended". Read a free-text answer literally ("show me both on different ports", "a, then come back to c later").
 - Ask before any infrastructure change (replacing a layer, adding a service, changing how builders are launched). He wants to be in the loop.
-- Every date and time you write comes from `TZ=$WS_TZ date` run in the same step. After 18:00 local, the UTC date is already tomorrow.
+- Every date and time you write comes from `date` run in the same step (`TZ=$WS_TZ date` only when `config.sh` sets `WS_TZ`). After 18:00 local, the UTC date is already tomorrow.
 - He checks visual changes himself on a preview server before the merge. Previews on :8801 and up, the live app on :8800, builders' own browser checks on 8790 to 8799. Pages made for him to look at (comparisons, review pages) are served the same way from the scratchpad (`python3 -m http.server 88xx --directory …`), not published as claude.ai artifacts (2026-10-01); a tool he uses from several computers with saved state is the exception (private artifact with `db`). Every preview: ask with AskUserQuestion whether to open it in his browser, and on yes run `firefox --new-tab <url>` (Patrick, 2026-10-01).
 - Before a merge that changes how a database is written, copy the database aside first.
 - A test-count claim cites the log it came from.

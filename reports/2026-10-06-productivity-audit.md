@@ -163,6 +163,42 @@ Methods, ranked by expected saving:
 5. **Fewer partial runs.** The switch-course rule above: change the task after the second partial, not the budget. Resumes are cheap in dollars but each re-reads the task and the worktree.
 6. **Builders by track.** A smaller model for research and document tasks marked light, measured on a few before it becomes the default.
 
+## Rules we got wrong and built on
+
+Patrick's second addition (2026-10-06 23:50): "sometimes we get the rules wrong and build wrong on top of them." From the git history of CLAUDE.md, the lessons, the checklist, the agent sheets, the changelog, the plans and the v1 workspace's pilot findings.
+
+**Rules that were wrong, with what was built while they held.**
+
+| Rule as first written | When | Built on it | Corrected | Cost |
+|---|---|---|---|---|
+| One builder at a time; parallel builders only reach the limit sooner | 09-25 | colorwright v1.0 one run at a time | 09-27: parallel is fine, "no run stopped on the limit in 42 hours"; then 10-05: parallel is the norm | the merge suite two to three times slower beside a render builder |
+| "The usage limit stopped no run in 42 hours" | 09-27 | four builders overnight 10-05 | 10-06: the limit kills every builder at once, sometimes with the wrapper that writes the result | 8 of 36 hours; three tool fixes in six days (2.2.4, 2.3.3, 2.3.4) |
+| Evidence hygiene blocks a review | 09-25 | three colorwright reviews blocked in one day | 09-26: formatting never blocks; the merge refuses home paths instead | a `--no-review` override; "a two-outfit colour split took an hour of process" |
+| Review limit 30 minutes | 09-23 (v1) | the hook port | measured the same evening: median review 88 s; a 180-second silence rule | a reviewer that finished then hung was re-queued, duplicating proposals |
+| Append to a cost log each session | 09-15 (v1) | a script and its test | 09-22: 0 of 33 entries ever filled in; removed | a script built and deleted |
+| `--allow "Bash(cp *)"` lets a builder copy from another repo | 09-28 | site-fw round 3 | same day: denied regardless; copy assets in by hand | two rounds, a missing splash image |
+| figurewright before Bike Weather | 09-29 | the I-series and shoulders | 10-05: both in parallel | plan rewrites only |
+| Found-art registers by the drawn rig; then by the fitted joints | 10-05 | two partial runs | the builder's measured option | $43 |
+| Shoulders from "option E" widths | 10-01 | eight runs | 10-05: chest out, shoulders in; the switch-course lesson | $84 + $29 |
+| Review budget $3 on the default model | 09-25 | reviews at about $1 | 10-04: reviewer on Fable, budget $8 | $3.50 to $4.30 a review; no file records the quality gained |
+
+**Rules builders got wrong because of how they were written.** Task files carried "Patrick, 2026-09-29" and "the operator: ..." as requirements, and builders copied them into about 800 comment lines (scrubbed 09-29 in three rounds; dispatch and merge refuse attribution since). The attribution rule then matched generated bundles and a novelist's surname, needing an exemption list. A UTC date typed on the evening of 09-24 went into colorwright's comments as the next day. A `file:../skywright` link in the skeleton task resolves one level wrong from a worktree, so Metro and the preview broke. The jest config at the repo root made the merge gate collect the worktrees' copies of every test. "Open-Meteo times shift at DST", written as a fix task's premise without a check, had a builder build a per-hour offset resolver that was itself the bug. "Follow the checklist" was in the sheet before the checklist was in the prompt. "Read the docs" without the web tools granted produced a comment written from memory. The common thread: a requirement stated from reasoning, or from a convention, that one measurement or one live call would have corrected before the run.
+
+**Tool rules that misfired, and whether the fix held.** The usage-limit class took three fixes in six days (the chain after a 429, the result written by `ws wait`, now the review retry) and had a v1 ancestor; held so far, the last landed tonight. `--timeout 180` read as seconds killed two runs; held. A `grep -q` under `pipefail` bit twice (dispatch and the chain's merged-step check), the second re-dispatching a merged step. Dispatch grants needed seven fixes in twelve days and 259 result files record denials; this is the most recurrent class. `ws merge` needed four rounds on dependencies. The forked background orchestrator (09-28, again 10-01) is still an open investigation with no detection.
+
+**Counts stated and then corrected by a review:** "a few thousand combinations" (59,904), "all eight sliders additive" (five), "44 faults against 45" (all tie), the suite count 887 (882). Each cost a fix round of $1.50 to $6. Arithmetic by a tool, not by the model, was Patrick's rule on 09-22; it is in CLAUDE.md and still slips in prose.
+
+**Rules in force that look at risk** (the cheap ones fixed tonight are marked):
+- checklist.md says nineteen rules and holds twenty; rules 12, 13 and 16 are cited one to two times in 181 reviews, rule 15 170 times. The "cost real time twice" bar is not applied on the way in. *Header fixed; the pruning is a daytime decision.*
+- agents/builder.md still says "never `npm install` in the worktree, the environments are shared symlinks", against the 2.2.10 behaviour and four confs that grant it. *Fixed.*
+- The builder sheet's "the full suite is the merge's job" against the lesson that builders run a whole suite with `--runInBand` when a task asks. *Reconciled: a builder runs the suite only when its task says so, and then in band.*
+- `TZ=$WS_TZ date` cited in the lessons and rule 17 while `WS_TZ` is empty. *Lessons and the rule now say what CLAUDE.md says: `date`, or `TZ=$WS_TZ date` only when config sets one.*
+- CLAUDE.md step 3 omits the `timeout` a wait over 30 minutes needs. *Added.*
+- The attribution regex matches "the operator" and surnames; the reviewer sheet itself contains "(the operator's rule, 2026-09-26)". *Sheet line reworded; the regex is a decision.*
+- The reviewer on Fable at $8: no file records what the extra $3 a review buys. A decision for Patrick, with the audit's numbers.
+- Lesson 35 (a reused step name is skipped as merged) and lesson 38 (the `.worktrees/<sibling>` symlink) are hand steps that belong in `ws chain` and `ws init`. Tool work, queued.
+- "Two orchestrators at once" cites CLI 2.1.286; the machine runs 2.1.292. Open.
+
 ## What to change
 
 1. `ws chain`: a review that fails on the usage limit waits for the reset and retries, like a builder (tool fix, light, before tonight).

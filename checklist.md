@@ -1,6 +1,6 @@
 # Review checklist
 
-Nineteen rules. Adding one means removing one. A rule earns its place by having cost real time twice; the origin of each is in the v1 checklists (agentic-workspace 101 rules, colorwright 46), distilled 2026-09-25.
+Twenty rules. Adding one means removing one. A rule earns its place by having cost real time twice; the origin of each is in the v1 checklists (agentic-workspace 101 rules, colorwright 46), distilled 2026-09-25.
 
 1. No silent fallbacks where missing or invalid data should fail loud (`.get(x, 0)`, bare `except: pass`, default branches that hide a bad state).
 2. A test proves it can fail and tests the real thing: the branch shows a failing run before the fix, or the task log does, and the test exercises the production code path, not a copy or a fixture alone.
@@ -18,7 +18,7 @@ Nineteen rules. Adding one means removing one. A rule earns its place by having 
 14. Broad staging (`git add -A`, `git commit -a`) does not sweep in logs, databases, scratch files or unrelated edits.
 15. A check worth running twice is code that re-runs itself. An e2e script, probe, render comparison or approved render the branch relies on is a test, or a committed script the project's test command runs; a one-off check stays in `.ws-evidence/`. Evidence runs go through `ws-run`, which records each command's exit code (a count cannot tell a clean run from one that aborted).
 16. A commit that answers a review finding fixes the finding; it does not reword the claim the finding was about.
-17. Dates written into docs are the author's calendar date (see `config.sh`, `WS_TZ`), never the UTC date after 18:00 local.
+17. Dates written into docs are the author's local calendar date from `date` (`TZ=$WS_TZ date` when `config.sh` sets `WS_TZ`), never the UTC date after 18:00 local.
 18. No secrets, credentials, absolute home-directory paths or personal identifiers in tracked files.
 19. Tracked files state reasons, never who asked, decided or approved, or when: no names outside intended credits, no "the operator", no dated decisions or quotes. A fixed choice reads "Deliberate: <reason>".
 20. New code does not reimplement what a maintained open-source library already does (a diff, a Markdown or date parser, a CSV reader, an HTTP client, a UI widget) unless the task's `## Prior art` section says why. A hand-written replacement without that reason is a finding; name the library and its licence.
