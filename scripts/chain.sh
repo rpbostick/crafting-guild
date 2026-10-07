@@ -27,7 +27,7 @@ stop() { status stopped "$1: $2"; log "STOP at $1: $2"; exit "${3:-1}"; }
 # (or its mtime if untracked). A reused name with a new task is a new step (sky-demo was skipped as merged, 2026-10-04).
 merged() {
   local mt tt
-  mt=$(git -C "$PROJECT_PATH" log "$PROJECT_BRANCH" --merges --format='%ct %s' | grep -E " Merge agent/$1([: ]|$)" | head -1 | cut -d' ' -f1)
+  mt=$(git -C "$PROJECT_PATH" log "$PROJECT_BRANCH" --merges --format='%ct %s' | grep -E " Merge agent/$1([: ]|$)" | head -1 | cut -d' ' -f1 || true)
   [ -n "$mt" ] || return 1
   tt=$(git -C "$WS" log --diff-filter=A --format=%ct -- "$2" 2>/dev/null | tail -1); [ -n "$tt" ] || tt=$(stat -c %Y "$2" 2>/dev/null || echo 0)
   [ "$mt" -gt "$tt" ]

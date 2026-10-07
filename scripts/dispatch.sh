@@ -89,7 +89,7 @@ TOOLS=(Read Grep Glob "Edit(./**)"
 # Every backticked command in the task's "## Commands" section is granted by its first word (first two for
 # npx, npm, node, python3, git), so a task never names a command the builder cannot run (bw-export-screen ended
 # partial on an ungranted `npx expo install`, 2026-10-07). Destructive forms stay denied below.
-cmds=$(awk '/^## Commands/{f=1; next} /^## /{f=0} f' "$task" | grep -o '`[^`]*`' | tr -d '`' | sed 's/^ *//')
+cmds=$(awk '/^## Commands/{f=1; next} /^## /{f=0} f' "$task" | grep -o '`[^`]*`' | tr -d '`' | sed 's/^ *//' || true)
 derived=()
 while IFS= read -r c; do
   [ -n "$c" ] || continue
