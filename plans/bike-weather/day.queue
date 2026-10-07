@@ -6,4 +6,5 @@
 # bw-timeline-views  plans/bike-weather/task-bw-17-timeline-views.md gate --budget 15
 # bw-timeline-followups merged c312e28.
 # bw-timeline-followups  plans/bike-weather/task-bw-18-timeline-followups.md --budget 5
-bw-timeline-temperature  plans/bike-weather/task-bw-19-timeline-temperature.md gate --budget 8
+# bw-timeline-temperature merged ac48309.
+# bw-timeline-temperature  plans/bike-weather/task-bw-19-timeline-temperature.md gate --budget 8
