@@ -26,3 +26,7 @@ One command per Bash call, each check you cite through the evidence runner: `npx
 
 ## Done when
 `npm test && npm run typecheck` pass and the web export builds; the section does 1 to 4 with the tests above; the README matches; the result states the number of tests with the log it comes from (the whole suite), the packages added with licence and size, and the text of the back-up description for the starter wardrobe exactly as the screen shows it. A person looks at the screen in a browser before the merge. Commit after each numbered item. Safe to re-run from scratch.
+
+## Carried from the bw-recommend-carried review (suggestions; do them where the code is yours to touch)
+- `src/recommend/recommend.ts:28`: Rule 3/8: the SavedCandidate.clashes docstring says the outfit is "shown as needing attention", but rankedSaved in src/suggest/suggestion.ts:332 builds RankedSavedOutfit without the flag, so no screen shows it at this commit. Either carry clashes into RankedSavedOutfit or reword to what the README says: ranked but never suggested.
+- `src/suggest/suggestion.ts:263`: Rule 15: the saved evidence runs only src/recommend and src/suggest; the full `npm test` (screens included) was not run on the branch although heatAdvisoryText's signature and the everyday advisory text changed. tsc passes and TodayScreen.test.tsx only matches the level words, so the risk is low, but the full suite should run once before merge.
