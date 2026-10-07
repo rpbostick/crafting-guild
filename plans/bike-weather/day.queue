@@ -4,4 +4,5 @@
 # bw-shelves-followups  plans/bike-weather/task-bw-16-shelves-followups.md --budget 5
 # bw-timeline-views merged 2069095 (both layouts kept).
 # bw-timeline-views  plans/bike-weather/task-bw-17-timeline-views.md gate --budget 15
-bw-timeline-followups  plans/bike-weather/task-bw-18-timeline-followups.md --budget 5
+# bw-timeline-followups merged c312e28.
+# bw-timeline-followups  plans/bike-weather/task-bw-18-timeline-followups.md --budget 5
