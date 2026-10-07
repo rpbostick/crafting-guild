@@ -2,6 +2,12 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.3.4 (2026-10-06)
+
+- **A review that dies on the usage limit no longer stops the chain.** On 2026-10-06 12:57 the limit killed `bw-today`'s second review and the chain stopped with "the review failed"; nothing ran until the next session ten hours later. `ws chain` now reads the 429 from the review's raw output, waits for the reset as it does for a builder, and runs the review again (up to three times).
+- **Bike Weather's preview clears Metro's cache.** A worktree whose `node_modules` is a symlink to the main checkout shares Metro's transform cache with every other worktree; `ws serve bw-today` served expo-router's "Welcome to Expo" because the cached entry pointed at the removed `bw-templates` worktree. `PREVIEW_CMD` passes `--clear`.
+- `reports/`: the productivity audit of 2026-10-06.
+
 ## 2.3.3 (2026-10-06)
 
 - **A builder that dies with its wrapper still gets a result.** At a usage limit both the run and the subshell that writes `result.txt` can die, leaving the `.pid` file behind, so `ws wait` and a chain waited out the full timeout. `ws wait` now notices a dead pid, writes the result with `check-result.sh` (dispatch records the start commit as `since=` in `task.txt`) and returns it. `check-result.sh` takes the reset time as the next such clock time after the run stopped, not after the check, so a result rebuilt after the reset no longer lands a day late.

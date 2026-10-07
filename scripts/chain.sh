@@ -68,7 +68,22 @@ for i in "${!steps[@]}"; do
     tip=$(git -C "$wt" rev-parse HEAD)
     rv="$RUNS/$name.review.json"
     if [ -f "$rv" ] && [ "$(jq -r .reviewed_sha "$rv")" = "$tip" ]; then log "$name: review on record for $(short "$tip")"
-    else ws review "$name" >> "$logf" 2>&1; [ -f "$rv" ] && [ "$(jq -r .reviewed_sha "$rv")" = "$tip" ] || stop "$name" "the review failed (see $logf)"; fi
+    else
+      # A review that dies on the usage limit waits for the reset and runs again, like a builder (up to 3 times).
+      rlimits=0
+      while :; do
+        ws review "$name" >> "$logf" 2>&1; [ -f "$rv" ] && [ "$(jq -r .reviewed_sha "$rv")" = "$tip" ] && break
+        if [ "$(jq -r '.api_error_status // empty' "$rv.raw" 2>/dev/null)" = 429 ]; then
+          msg=$(jq -r '.result // ""' "$rv.raw"); when=$(printf '%s' "$msg" | sed -nE 's/.*resets ([0-9]{1,2}(:[0-9]{2})? ?[ap]m).*/\1/p'); tz=$(printf '%s' "$msg" | sed -nE 's/.*resets [^(]*\(([^)]+)\).*/\1/p')
+          ep=""; [ -n "$when" ] && ep=$(TZ="${tz:-${WS_TZ:-}}" date -d "$when" +%s 2>/dev/null); [ -n "$ep" ] && [ "$ep" -le "$(date +%s)" ] && ep=$((ep + 86400))
+          case "$ep" in ''|*[!0-9]*) stop "$name" "the review hit the usage limit, reset time unknown: $msg" ;; esac
+          rlimits=$((rlimits+1)); [ "$rlimits" -le 3 ] || stop "$name" "the review hit the usage limit 3 times"
+          wake=$((ep + 120)); status waiting "$name: review hit the usage limit, retrying at $(date -d "@$wake" '+%H:%M')"; log "$name: review hit the usage limit; retrying at $(date -d "@$wake" '+%H:%M')"
+          while [ "$(date +%s)" -lt "$wake" ]; do sleep 60; done; continue
+        fi
+        stop "$name" "the review failed (see $logf)"
+      done
+    fi
     verdict=$(jq -r .verdict "$rv"); log "$name: review at $(short "$tip"): $verdict"
     [ "$verdict" = merge ] && break
     [ "$verdict" = do-not-merge ] && stop "$name" "review says do-not-merge: $(jq -r .summary "$rv" | cut -c1-300)"
