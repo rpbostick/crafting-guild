@@ -107,6 +107,21 @@ So the builders recover cheaply, because every task commits after each numbered 
 
 What can be done about it is in the next section once the facts on Claude Code's own facilities are checked.
 
+## Getting the same work done for fewer tokens
+
+Patrick's reframing (23:50): wall-clock lost to a limit does not matter unless it is his; what matters is work per token, so the windows go further. The facts on Claude Code's own facilities (checked against its docs on 2026-10-06): the status line's JSON input carries `rate_limits.five_hour.used_percentage` and `resets_at` (and the seven-day pair); the terminal warns at 85 % and 90 %; `claude -p` has `--max-budget-usd`; there is no hook, setting or flag that warns earlier, waits for a reset, or reads usage from a script, and no Anthropic-endorsed pacing plugin. Extra usage at pay-as-you-go rates can be switched on at claude.ai, which removes the stops at a price.
+
+Where the week's tokens went: builders and reviews about $980 ($173 of it reviews, four times dearer per review since the reviewer moved to Fable on 10-04); the orchestrator 4.3 M output tokens against 1.42 billion input and cache-read tokens. Every turn re-sends the whole context, so the orchestrator's standing context is the multiplier on all of its work; cold-start printed 32 KB because the plans had stacked twelve in-flight blocks, and the overnight heartbeat re-read them every 30 minutes.
+
+Methods, ranked by expected saving:
+
+1. **A lean orchestrator context.** One in-flight block per plan (older blocks archived to `in-flight-history.md`, done 2026-10-06 23:55), research delegated to subagents whose reading never enters the orchestrator's context, fewer and larger tool calls, and the cold-start kept short.
+2. **No polling.** Chains and waits already wake the orchestrator when they finish or stop; the heartbeat is only a fallback, hourly, and reads a few lines when nothing has changed.
+3. **Reviewer by track.** Opus for `Track: light` branches, Fable for visible or complex ones: about $1 against $4 a review, 108 reviews a week. The operator's call.
+4. **Do not start what the window cannot finish.** The status line script writes the five-hour percentage and reset time to a file; `ws chain` holds a new dispatch above a threshold until the reset instead of having a run killed at 95 % and re-read on resume. A small tool change.
+5. **Fewer partial runs.** The switch-course rule above: change the task after the second partial, not the budget. Resumes are cheap in dollars but each re-reads the task and the worktree.
+6. **Builders by track.** A smaller model for research and document tasks marked light, measured on a few before it becomes the default.
+
 ## What to change
 
 1. `ws chain`: a review that fails on the usage limit waits for the reset and retries, like a builder (tool fix, light, before tonight).
