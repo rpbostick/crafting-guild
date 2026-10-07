@@ -1,0 +1,5 @@
+# Bike Weather, night of 2026-10-06 to 07, run by `bin/ws --project bike-weather chain plans/bike-weather/tonight.queue`.
+# <name> <task> [gate] [dispatch flags]. gate = the operator sees it before the merge.
+bw-today-followups   plans/bike-weather/task-bw-12-today-followups.md --budget 8
+bw-recommend-carried plans/bike-weather/task-bw-13-recommend-carried.md --budget 8
+bw-export-screen     plans/bike-weather/task-bw-14-export-screen.md gate --budget 15 --allow "Bash(npm install *)"
