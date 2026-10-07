@@ -2,6 +2,12 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.3.6 (2026-10-07)
+
+- **Builders are granted every command a task names.** `ws dispatch` reads the backticked commands in the task's `## Commands` section and grants each by its first word (first two for npx, npm, node, python3 and git), so a task can no longer name a command the builder cannot run; `rm`, `mv`, `sudo`, `git push` and the other destructive forms stay out. The audit of 2026-10-06 found grants the most recurrent defect (seven fixes in twelve days), and bw-export-screen ended partial on an ungranted `npx expo install` hours later.
+- **A reused step name is a new step.** `ws chain` skips a step as merged only when the merge of `agent/<name>` is newer than the task file's first commit (sky-demo was skipped as merged on 2026-10-04).
+- **`file:../<sibling>` dependencies work in worktrees.** On creating a worktree, dispatch links each sibling named that way in `package.json` into `.worktrees/`, which was a hand step since 2026-10-06.
+
 ## 2.3.5 (2026-10-07)
 
 - **Light-track branches review on the cheaper model.** `WS_REVIEW_MODEL_LIGHT` (default `opus`) is used when the branch's task is marked `Track: light` and no `--model` is given; visible and engine work stays on `WS_REVIEW_MODEL`. The audit of 2026-10-06 put a review at about $4 on Fable against $1 on Opus over 108 reviews a week.

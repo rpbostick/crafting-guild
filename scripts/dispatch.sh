@@ -63,6 +63,12 @@ if [ ! -d "$wt" ]; then
       [ -e "$PROJECT_PATH/$rel" ] && [ ! -e "$wt/$rel" ] && { mkdir -p "$(dirname "$wt/$rel")"; ln -s "$PROJECT_PATH/$rel" "$wt/$rel"; }
     done < "$PROJECT_PATH/.worktree-links"
   fi
+  # A package.json dependency "file:../<sibling>" resolves one level wrong from .worktrees/; link the sibling in.
+  if [ -f "$PROJECT_PATH/package.json" ]; then
+    for sib in $(grep -o '"file:\.\./[^"/]*"' "$PROJECT_PATH/package.json" | sed 's/"file:\.\.\///;s/"//'); do
+      [ -d "$PROJECT_PATH/../$sib" ] && [ ! -e "$WT_ROOT/$sib" ] && ln -s "$(cd "$PROJECT_PATH/.." && pwd)/$sib" "$WT_ROOT/$sib" && note "linked sibling $sib into $WT_ROOT"
+    done
+  fi
   note "worktree $wt on $br"
 else
   note "reusing worktree $wt ($(git -C "$wt" status --short | wc -l) uncommitted files)"
@@ -80,6 +86,20 @@ TOOLS=(Read Grep Glob "Edit(./**)"
 # Per-project extras from projects/<slug>.conf (EXTRA_TOOLS), then this dispatch's --allow flags.
 [ ${#EXTRA_TOOLS[@]} -gt 0 ] && TOOLS+=("${EXTRA_TOOLS[@]}")
 [ ${#extra[@]} -gt 0 ] && TOOLS+=("${extra[@]}")
+# Every backticked command in the task's "## Commands" section is granted by its first word (first two for
+# npx, npm, node, python3, git), so a task never names a command the builder cannot run (bw-export-screen ended
+# partial on an ungranted `npx expo install`, 2026-10-07). Destructive forms stay denied below.
+cmds=$(awk '/^## Commands/{f=1; next} /^## /{f=0} f' "$task" | grep -o '`[^`]*`' | tr -d '`' | sed 's/^ *//')
+derived=()
+while IFS= read -r c; do
+  [ -n "$c" ] || continue
+  set -- $c; w1="${1:-}"; w2="${2:-}"
+  case "$w1" in ''|'<'*|'#'*|'$'*|'-'*) continue ;; rm|mv|sudo|su|dd|mkfs|shutdown|reboot|kill|pkill|killall) continue ;; esac
+  case "$w1" in npx|npm|node|python3|python|git) [ -n "$w2" ] && [ "${w2#<}" = "$w2" ] && [ "${w2#-}" = "$w2" ] && g="$w1 $w2" || g="$w1" ;; *) g="$w1" ;; esac
+  case "$g" in "git push"|"git config"|"git reset"|"git rebase"|"git worktree"|"git stash"|"git checkout") continue ;; esac
+  pat="Bash($g*)"; printf '%s\n' "${TOOLS[@]}" "${derived[@]}" | grep -qxF "$pat" || derived+=("$pat")
+done <<< "$cmds"
+[ ${#derived[@]} -gt 0 ] && { TOOLS+=("${derived[@]}"); note "grants from ## Commands: ${derived[*]}"; }
 # A task that names WebSearch or WebFetch (research) gets them; without a grant they are denied silently.
 # "WebSearch", "web search" and "web-search" all count (research tasks are written in prose).
 grep -qiE '\bweb[ -]?search\b' "$task" && TOOLS+=("WebSearch")

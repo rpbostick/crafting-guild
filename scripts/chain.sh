@@ -23,7 +23,15 @@ status() { echo "$1 $(now_local) $2" > "$statf"; }
 stop() { status stopped "$1: $2"; log "STOP at $1: $2"; exit "${3:-1}"; }
 # grep -c, not grep -q: -q exits at the first match, git dies of SIGPIPE, and pipefail turns a match into a failure
 # (on a long history only; it re-dispatched a merged step, 2026-10-01).
-merged() { [ "$(git -C "$PROJECT_PATH" log "$PROJECT_BRANCH" --merges --format=%s | grep -cE "^Merge agent/$1([: ]|$)")" -gt 0 ]; }
+# merged <name> <task>: the newest merge of agent/<name> is newer than the task file's first commit in this workspace
+# (or its mtime if untracked). A reused name with a new task is a new step (sky-demo was skipped as merged, 2026-10-04).
+merged() {
+  local mt tt
+  mt=$(git -C "$PROJECT_PATH" log "$PROJECT_BRANCH" --merges --format='%ct %s' | grep -E " Merge agent/$1([: ]|$)" | head -1 | cut -d' ' -f1)
+  [ -n "$mt" ] || return 1
+  tt=$(git -C "$WS" log --diff-filter=A --format=%ct -- "$2" 2>/dev/null | tail -1); [ -n "$tt" ] || tt=$(stat -c %Y "$2" 2>/dev/null || echo 0)
+  [ "$mt" -gt "$tt" ]
+}
 running() { [ -f "$RUNS/$1.pid" ] && kill -0 "$(cat "$RUNS/$1.pid")" 2>/dev/null; }
 max_fix="${WS_CHAIN_FIX_ROUNDS:-1}"
 
@@ -39,7 +47,7 @@ for i in "${!steps[@]}"; do
   set -f; eval "f=( ${steps[$i]} )"; set +f; name="${f[0]}"; task="${f[1]:-}"; gate=false; flags=()
   for x in "${f[@]:2}"; do [ "$x" = gate ] && gate=true || flags+=("$x"); done
   [ -f "$task" ] || stop "$name" "no task file $task"
-  if merged "$name"; then log "$name: already merged, skipping"; continue; fi
+  if merged "$name" "$task"; then log "$name: already merged, skipping"; continue; fi
   status running "$name"
   wt="$(worktree_dir "$name")"
   if running "$name"; then log "$name: a run is going; waiting for it"
