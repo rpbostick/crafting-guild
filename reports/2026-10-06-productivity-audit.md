@@ -82,6 +82,27 @@ Window totals: 90 merges; v1 67 runs for $197, v2 105 runs for $484 (reviews not
 
 **Rework in that window.** Nineteen names ran three times or more. The costly ones: hats across four days (10 runs, about $88, a spike, two partials, a limit stop and a pause; the beanie enlarged on 09-25 and put back to source size on 09-27); cw-p20-2b (partial, partial, timed out, finished: $31, 10 hours); cw-fh-spike (six runs, $27, including merge-master and split-log rounds that were the tool's doing); cw-hair2 ($23, limit stop, resume, fix); cw-prosthesis (three fix rounds after the preview, $21); fw-dress (reviewed twice by two orchestrators, $20). Two review-fix rounds on a single report (cw-outline-repro, four runs) and three rounds on a checklist wording (cw-p16-rule) are the process being heavier than the work. No reverts; figurewright's posed-garments render was re-rendered three times. Over four hours from first dispatch to merge: sky-demo (18 h, waiting on the preview), fw-dress (16 h, overnight), cw-p20-2b (10 h), cw-hats (7 h), cw-testspeed (7 h), site-backdrops (5 h).
 
+**The orchestrator in that window** (from 732 transcript files, 20 of them interactive sessions, deduplicated against the forked session of 09-28). Sonnet 5 ran the orchestrator on 09-15 and 09-22, Opus 5.5 from 09-23 to 10-03 midday; Fable appears before 10-03 only in the research session that designed v2 (09-25) and a comparison session (09-27). Opus wrote 5.9 M output tokens over seven working days, 2.2 M of them on 09-23 alone. Only two reset notices exist for the window (09-24 and 09-25); the 09-24 limit cost 6062 s and was the pilot audit's largest lever.
+
+**Things asked for more than once**, from the typed messages and the answers to prompts:
+
+| Ask | Times | Dates |
+|---|---|---|
+| "Are you actually using the workspace's rules, memory and agents?" | 11 | 09-15 (three times), 09-22 (twice), 09-23, 09-24, 09-25 (twice), 09-26, 09-29 |
+| "This is taking a very long time" / is something hung? | 7 | 09-23 (twice), 09-25 (four times, ending in the pause for a code audit and the v2 rebuild), 09-26 |
+| Clickable prompts with the recommended option first | 5 | 09-24, 09-28, 09-29, then 10-03 and 10-06 |
+| The beanie's fit and where it is listed | 5 | 09-25 to 09-27 |
+| Heads, hair and hats separated | 4 | 09-24 to 09-26 |
+| His name out of code and comments | 3 | 09-28, 09-29 (twice) |
+| Robot-dance head position, prosthesis colours, two skin pickers, hair colour | 2 to 3 each | 09-24 to 09-26 |
+| Preview ports (rule adopted 09-24 22:42, broken 09-25 10:16) | 2 | |
+
+The first row is the finding: for two weeks the operator's most frequent message was a check that the tool was being used at all. v2's cold-start hook and pinned sessions (09-25 to 09-27) ended it; it has not been asked since 09-29.
+
+**Directions reversed within days.** The cost log removed on 09-22 and kept on 09-23; "we won't go back to colorwright for a while" (09-22) and colorwright resumed 09-23; Hermes dropped 09-23 and studied again 09-25; "get back to bike-weather" then "finish figurewright first" within 13 minutes on 09-29, and that order overruled on 10-05 for the Bike Weather skeleton with his OK. None of these cost runs; they cost plan rewrites.
+
+**Premises the orchestrator stated as fact and then withdrew:** that a session needed a restart for a Matrix fix (09-15, wrong within two minutes); that no note existed on the sudo popup (09-15, the note existed; the popup had been killed by a 3-second timeout); that a 30-minute review timeout was the only signal (09-23; measured the same evening at ten times the longest review, replaced by a 180-second silence rule); that port 8792 could stay the live site (09-24; inside the range reserved for agents); that the second `ws bike-weather` session was another orchestrator on the workspace (09-28; it was a daemon fork, then the VS Code extension). The pattern: a confident diagnosis before a measurement, each corrected after Patrick pushed back. The lesson "check a provider's real behaviour before writing a fix task" (09-27) and "measure before choosing" (10-05) are the same lesson written twice.
+
 **What the window changed about the tool.** The merge gate growing from 6 to 28 minutes and 188,000 lines of evidence against 8,800 of code in colorwright led to 2.1.0 (builders run only their own tests, the gate runs the suite, evidence trimmed); the OOM kill to the memory cap; the second session moving `state/current` to pinned sessions; the leak to `release-audit.md`, the fresh history and the attribution refusal.
 
 ## Rework, error rates and time to done
