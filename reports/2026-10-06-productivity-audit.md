@@ -4,6 +4,9 @@ Written 2026-10-06 23:20 MDT by the orchestrator at Patrick's request ("a $5 aud
 
 ## Headline
 
+Three questions were asked: the last 36 hours against the week, Fable against Opus as orchestrator, and the two directions from 10-05. Two were added while it was written: the weekend's paper RPG projects in their own right, and rework, error rates and time to done.
+
+
 Output over the last 36 hours matched the week's pace by count and cost about 20 percent more per merge, on the hardest work of the week, with 8 of the 36 hours lost to usage limits.
 
 | | Last 36 h | Week | Share |
@@ -45,9 +48,53 @@ Workspace commits per day (plans, lessons, tool): 69, 55, 23, 23, 40, 38.
 
 **The gap.** At 12:57 today the limit killed a *review* inside the chain, and the chain stopped with "the review failed" instead of waiting for the reset as it does for a builder. Nothing ran from 12:57 until this session at 22:57 (the wind-down at 15:32 took the rest of the afternoon anyway). Tonight's run needs that fixed in `scripts/chain.sh` first.
 
+## The weekend's paper RPG work (10-01 to 10-04)
+
+The pen-paper-rpg cluster (pen-paper-rpg, toybox, reactbits-kit, the GitHub Pages site, the dice comparison) was most of the week: 88 of 158 runs, 64 of 107 merges, $446 of $806 in builds. Under Opus from 10-01 to midday 10-03, then Fable.
+
+| Project | Runs | Merges | Build $ | $ per merge | Not-done runs | Fix tasks |
+|---|---|---|---|---|---|---|
+| pen-paper-rpg | 63 | 47 | 316 | 6.7 | 4 | 9 |
+| toybox | 8 | 7 | 71 | 10.1 | 1 | 0 |
+| reactbits-kit | 5 | 5 | 39 | 7.8 | 0 | 0 |
+| rpbostick.github.io | 11 | 3 | 20 | 6.5 | 0 | 0 |
+| dice-roller-comparison | 1 | 1 | 1 | 0.7 | 0 | 0 |
+
+What it produced: the rules synthesis through six versions with three review tools and two review pages; the character generator (groundwork, editable attributes, public build, flavour names, the sheet, the toybox edition); five research reports (licences, community hacks, drawing tools, web toys, prices, group combat, spells, magic); the toybox as its own library (drawer, windows, dice tray, drawing, twisty cube, backgrounds) and reactbits-kit as a package the site and chargen both install. Median time from first run to merge was under an hour; the longest was the chargen sheet at 10 hours.
+
+This is the cheapest work of the week per merge and the fastest. It is also where most of the operator-driven iteration happened (next section).
+
+## Rework, error rates and time to done
+
+**Error rates by project (week).**
+
+| Project | Runs not done (partial, blocked, killed) | Branches needing a fix round | Typical failure |
+|---|---|---|---|
+| figurewright | 12 of 34 (35 %) | 2 of 20 | the run ends partial at its budget or timeout; resumed |
+| bike-weather | 2 of 24 (8 %) | 9 of 13 (69 %) | the review says fix-first; a $0.20 to $2 fix round follows |
+| pen-paper-rpg | 4 of 63 (6 %) | 9 of 48 (19 %) | the operator asks for another pass after looking |
+| skywright, reactbits-kit, dice | 0 | 0 | |
+| toybox, site | 1 of 19 | 0 | |
+
+Today's reviews on their own: four fix-first out of about nine (bw-name-check, bw-wardrobe-screen, fw-hybrid-widths, bw-today). The reviewer on Fable finds more; each fix round so far was a real defect or a false claim in the result, and none has needed a second round.
+
+**Things redone over and over.** Ranked by cost, with when the course should have changed.
+
+1. **figurewright shoulders: 8 runs, 4 days, $84, then $29 more.** Patrick said on 10-01 12:53 that the wide builds' shoulders "hang way away from the body" and at 12:58 gave the rule: shoulder width follows chest width. fw-shoulders-build then ran three partials in the next 2.5 hours and five more runs through 10-05. On 10-05 15:45 he had to state the same rule again ("bring the chest out and the shoulders in"), which became fw-shoulders-chest and fw-shoulders-in that evening. The rule given on 10-01 was never written into a task as the acceptance test; the tasks chased widths instead. **Switch point missed:** three partial runs on one name in one afternoon. The rule now: after the second partial on a name, stop and change the task (measure first, split, or state the acceptance rule), not the budget.
+2. **fw-found-art: 3 runs, $43, 2.5 hours.** Two runs on registrations chosen by reasoning; the builder's measured third option was right. Lesson recorded 10-05; the measure-first rule in fw-far-arm-neck's task comes from it.
+3. **site-waves-momentum: 9 runs, 5 hours, $17.** Four rounds of feel ("more local ripple", "the sheet doesn't spring back", "like the inside of a ball"), each a builder round of 20 to 60 minutes for a few parameters. **Switch point missed:** after round three the right move was a page with the parameters as sliders for Patrick to tune live, then one builder round to commit the values. This is the automation rule applied to feel-tuning.
+4. **ppr-chargen-sheet: 8 runs, 5 hours, $42, four fix tasks.** Mostly new asks per round (numbered weapon lines, the printer-friendly toggle, colour printing, printing the scribbles), so less rework than it looks; one true redo (the lines had to be fixed height after the first pass). Rounds with screenshots are how this work goes; the cost is fine, the wall-clock is the builder's turnaround.
+5. **Rules synthesis v1 to v6: 6 versions in 3 days, about $100 with the review tools.** Iterative by design: Patrick reads, sends a review pass, a new version is built. Not rework.
+6. **The 3D route: two spike rounds, $17, then the hybrid.** The course changed on the analysis's evidence within a night. This is the switch working as it should.
+
+**How long against how long it should have taken.** Median first run to merge is under an hour everywhere except figurewright, where the median is also short but the tail is four days (shoulders) and the hybrid line is now three runs deep with a gate each. The pattern in the tail is the same each time: a visible fault Patrick named in one sentence, a task that did not carry that sentence as its pass or fail, and a run budget raised instead of the task changed.
+
+**Process regressions he pointed out this week.** 10-03 20:58: "you used to give me prompts with checkboxes and suggestions. i would like that again" (Fable's first day; the lesson was re-seeded). 10-05 19:00: "progress has felt really slow today" (figurewright's dependent line, answered with the parallel plan). 10-06 10:23: questions were skipped and had to be asked again. 10-06 23:07: a preview that showed Expo's placeholder instead of the app (a shared Metro cache; fixed in the preview command).
+
 ## What to change
 
 1. `ws chain`: a review that fails on the usage limit waits for the reset and retries, like a builder (tool fix, light, before tonight).
 2. Three builders at once is the practical cap: beyond that the account limit stops everything, and a stop costs more than the parallelism gains.
 3. The reviewer on Fable costs four times Opus. Keep it for visible or complex branches and consider Opus for `Track: light` tasks.
 4. Keep measuring before choosing (the found-art lesson): it is the one orchestration error in the window that cost real money.
+5. Switch course on the second partial run of one name, and on the third feel-tuning round of one page: change the task (acceptance sentence, measure first, a slider page), not the budget. Patrick's one-sentence faults go into the task as its done-when, verbatim.
