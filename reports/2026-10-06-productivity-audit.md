@@ -64,6 +64,26 @@ What it produced: the rules synthesis through six versions with three review too
 
 This is the cheapest work of the week per merge and the fastest. It is also where most of the operator-driven iteration happened (next section).
 
+## Two weeks earlier: 09-15 to 09-29
+
+Added at Patrick's request on 2026-10-06 23:50, from every repo's git log, the v1 workspace's dispatch logs and plans, and v2's runs and changelog. Nothing was dispatched between 09-15 and 09-22: the only activity was housekeeping in the v1 workspace (the cost log, a checklist sweep, then the cost log's retirement). The working window was 09-23 to 09-29.
+
+| Day | Projects | Merges | Builder runs, $ | Notes |
+|---|---|---|---|---|
+| 09-23 | colorwright (v1 workspace) | 2 | 7, $6 | paper-doll-workshop mothballed |
+| 09-24 | colorwright | 14 | 44, $139 | usage limit 17:23 to 19:04 (6062 s), the largest lever in the v1 pilot findings |
+| 09-25 | colorwright; v2 workspace starts 18:00 | 6 | v1 16, $53; v2 7, $23 | limit ~13:35; Patrick paused at 16:45 for a code audit; v1 retired 18:01 |
+| 09-26 | colorwright | 9 | 20, $164 | |
+| 09-27 | colorwright v1.0 tagged 11:34; figurewright and skywright start 18:55; bike-weather's first commit | 20 | 27, $116 | OOM kill ~21:45: a 7.6 GB probe took down VS Code, the orchestrator and both builders; memory cap in 2.1.3 |
+| 09-28 | colorwright, figurewright, skywright, the site | 20 | 24, $94 | the site's history rewritten after a leak audit; two orchestrators ran side by side from 16:42 to 08:52 |
+| 09-29 | the same four | 19 | 27, $88 | attribution scrub, about 800 comment lines; dispatch and merge refuse attribution since |
+
+Window totals: 90 merges; v1 67 runs for $197, v2 105 runs for $484 (reviews not totalled). Per project: colorwright 46 merges (the slots, hair, hats, heads, prosthesis colours, the pipeline tests cut from 27 minutes to 130 seconds, the v1.0 wrap-up, the static build and leak check), figurewright 28 merges in three days ($170: body model, ink renderer, garment engine, the easing pose, the dressed body), skywright 9 ($17), the site 7 ($20, six of them rewritten away).
+
+**Rework in that window.** Nineteen names ran three times or more. The costly ones: hats across four days (10 runs, about $88, a spike, two partials, a limit stop and a pause; the beanie enlarged on 09-25 and put back to source size on 09-27); cw-p20-2b (partial, partial, timed out, finished: $31, 10 hours); cw-fh-spike (six runs, $27, including merge-master and split-log rounds that were the tool's doing); cw-hair2 ($23, limit stop, resume, fix); cw-prosthesis (three fix rounds after the preview, $21); fw-dress (reviewed twice by two orchestrators, $20). Two review-fix rounds on a single report (cw-outline-repro, four runs) and three rounds on a checklist wording (cw-p16-rule) are the process being heavier than the work. No reverts; figurewright's posed-garments render was re-rendered three times. Over four hours from first dispatch to merge: sky-demo (18 h, waiting on the preview), fw-dress (16 h, overnight), cw-p20-2b (10 h), cw-hats (7 h), cw-testspeed (7 h), site-backdrops (5 h).
+
+**What the window changed about the tool.** The merge gate growing from 6 to 28 minutes and 188,000 lines of evidence against 8,800 of code in colorwright led to 2.1.0 (builders run only their own tests, the gate runs the suite, evidence trimmed); the OOM kill to the memory cap; the second session moving `state/current` to pinned sessions; the leak to `release-audit.md`, the fresh history and the attribution refusal.
+
 ## Rework, error rates and time to done
 
 **Error rates by project (week).**
