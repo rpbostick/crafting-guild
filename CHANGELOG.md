@@ -2,6 +2,12 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.3.5 (2026-10-07)
+
+- **Light-track branches review on the cheaper model.** `WS_REVIEW_MODEL_LIGHT` (default `opus`) is used when the branch's task is marked `Track: light` and no `--model` is given; visible and engine work stays on `WS_REVIEW_MODEL`. The audit of 2026-10-06 put a review at about $4 on Fable against $1 on Opus over 108 reviews a week.
+- **Attribution refusal matches names only, as whole words.** `WS_ATTRIBUTION_RE` no longer matches "the operator" or "orchestrator", which hit generated bundles and ordinary prose; roles stay the reviewer's rule 19. Exemption lists per project are unchanged.
+- `checklist.md`: a rule is removed when wrong and fine-tuned when imprecise, never folded to make room.
+
 ## 2.3.4 (2026-10-06)
 
 - **A review that dies on the usage limit no longer stops the chain.** On 2026-10-06 12:57 the limit killed `bw-today`'s second review and the chain stopped with "the review failed"; nothing ran until the next session ten hours later. `ws chain` now reads the 429 from the review's raw output, waits for the reset as it does for a builder, and runs the review again (up to three times).

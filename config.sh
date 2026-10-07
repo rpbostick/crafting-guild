@@ -9,10 +9,11 @@ WS_SUITE_WARN_S="300"           # ws merge warns when the project's suite takes 
 WS_CHAIN_FIX_ROUNDS="1"          # ws chain: automatic fix rounds per step before it stops for the orchestrator
 WS_MODEL="opus"                   # builder model alias ("sonnet", "opus", ...); empty = Claude Code's default
 WS_REVIEW_MODEL="fable"         # reviewer model alias; empty = default
+WS_REVIEW_MODEL_LIGHT="opus"    # reviewer for a branch whose task is marked `Track: light`; empty = WS_REVIEW_MODEL
 WS_EFFORT=""                    # builder effort (low|medium|high|xhigh|max); empty = default
 WS_LESSONS_CAP="40"             # cold-start warns when a lessons/ file passes this many lines
 # Words that attribute work to people or to this process. ws merge refuses a branch that adds a line
 # matching them (case-insensitive ERE), and ws dispatch refuses a task file that contains them: repos
 # state reasons, the workspace's plans keep who and when. Exempt: LICENSE*, package manifests, license
 # lists, and each project's CREDIT_PATHS. Empty = no check.
-WS_ATTRIBUTION_RE="\\bpatrick\\b|\\bbostick\\b|the operator|operator's|orchestrator"
+WS_ATTRIBUTION_RE="\\bpatrick\\b|\\bbostick\\b|\\brpbostick\\b"   # names only, whole words; roles ("the operator") are the reviewer's rule 19, not a refusal

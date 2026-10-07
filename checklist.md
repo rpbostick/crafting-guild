@@ -1,6 +1,6 @@
 # Review checklist
 
-Twenty rules. Adding one means removing one. A rule earns its place by having cost real time twice; the origin of each is in the v1 checklists (agentic-workspace 101 rules, colorwright 46), distilled 2026-09-25.
+Twenty rules. A rule is removed when it proves wrong and fine-tuned when it proves imprecise; rules are not folded into one another to make room. A rule earns its place by having cost real time twice; the origin of each is in the v1 checklists (agentic-workspace 101 rules, colorwright 46), distilled 2026-09-25.
 
 1. No silent fallbacks where missing or invalid data should fail loud (`.get(x, 0)`, bare `except: pass`, default branches that hide a bad state).
 2. A test proves it can fail and tests the real thing: the branch shows a failing run before the fix, or the task log does, and the test exercises the production code path, not a copy or a fixture alone.
