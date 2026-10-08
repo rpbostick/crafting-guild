@@ -1,0 +1,23 @@
+# figurewright: arms fix round 1: hands on hips, and the far shoulder in easing
+
+Fix round on `agent/fw-hybrid-arms` (tip 12a158e) in the same worktree, from the gate look. The review passed; three things a person sees did not. Each is stated as the fault seen; measure before changing.
+
+## The faults
+1. **Hands on hips narrows the shoulders.** On the average build in the hands-on-hips pose the shoulders are narrower than in the standing pose of the same body. The shoulders are the same width in every pose: a raised elbow turns the arm, it does not pull the shoulder in. Measure the shoulder width (the outline's widest point across the deltoids) on every named build in base, easing and hands on hips, before and after; after, the three agree within 0.2 cm per build.
+2. **The inner sleeves cover the chest in hands on hips.** The tee's sleeves draw their inner edge over the chest, with a serrated edge, instead of ending at the armhole where the body's chest line runs. The sleeve's inner edge stops at the armhole; the chest line runs up to the shoulder unbroken. Show it on average, round and slim in the tee, 3×, before and after.
+3. **The far shoulder in easing is matched to a dropped reference.** The library close-up for round in easing shows the reference body's far shoulder about a head lower than its near one, and the far arm was matched to it. Find out where the drop comes from: the 3D pose data of the library's easing pose (`assets/bodies/`, the far shoulder joint against the near one across the nine bodies), its projection to the front view, or the registration that places the library outline against the drawn build. Report the far-to-near shoulder height difference for every library body in base, easing and hands on hips in cm. If the drop is an artefact of projection or registration, correct it there and re-match the far arm's direction to the corrected reference; if the 3D pose really drops the far shoulder (a shoulder rotated back in a three-quarter stance), say so with the numbers and leave the far arm as matched, but draw the drawn build's far shoulder no lower than its near one minus what a turn of the torso accounts for, with the reason. Either way the drawn far shoulder in easing sits level with the near one within the amount the torso's turn gives.
+
+## Evidence
+`.ws-evidence/page/index.html` rebuilt as a **short guided page**: one section per fault, each with the fault in one sentence, the measure's numbers before and after, and at most four pictures (before, after, and a 3× close-up each), the average build first; a final section with a link to a second page, `.ws-evidence/page/all.html`, carrying everything the previous page had. Every image under `page/`, paths relative to the file.
+
+## Leave alone
+The elbow directions and the pose rigs this branch added (they stay as matched, apart from fault 3), the sliders, arm and hand lengths (the next step measures them), the importer and `assets/garments` (the tee's armhole zigzag on the far sleeve is the step after), `spike/` except `spike/easing-shoulders/transforms.json` if a pin needs it, the head art.
+
+## Commands
+One command per Bash call, each check you cite through the evidence runner. `npx tsx <file>.ts [args]`, `npx jest <paths> --runInBand`, `npx tsc --noEmit`, `node`, `npm run <script>` (`scorecard`, `scorecard:approve`, `renders:sheets`, `renders:approve`, `renders:diff`, `bodies:measurements`, `bodies:approve`), `git status`, `git diff`, `git log`, `git add`, `git commit`, `git mv`, `git rm`, `git restore --source=<ref> -- <path>`, `git clean -f -- <path>`, `cp`, `mkdir`, `ls`, `cat`, `grep`. Scratch under `.ws-evidence/scratch/`. Run `test/body` and `test/garments` in parts so no call passes 10 minutes; never a whole suite with parallel workers. Render every "before" image first.
+
+## Prior art
+As in `task-fw-53-hybrid-arms.md`; nothing new is built.
+
+## Done when
+`npx jest test/body test/figure test/body-library test/easing test/renders test/garments test/garment-import --runInBand` (in parts) and `npx tsc --noEmit` pass; the shoulder width agrees across the three poses within 0.2 cm on every named build, with a test; the tee's sleeves end at the armhole in hands on hips with the chest line unbroken, as the close-ups show, and the goldens that changed are listed with the reason; the far shoulder's drop is explained with the per-body numbers and the drawn far shoulder in easing sits level as stated; the guided page is as above; the result states the three measures before and after, where the drop came from, and the number of tests with the log each count comes from. Commit after each fault. Safe to re-run from scratch.

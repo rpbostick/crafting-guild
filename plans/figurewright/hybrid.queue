@@ -4,3 +4,5 @@ fw-hybrid-widths   plans/figurewright/task-fw-50-hybrid-widths.md gate --timeout
 fw-far-arm-neck    plans/figurewright/task-fw-51-far-arm-neck.md gate --timeout 150m --budget 25 --allow "Bash(npm run *)"
 fw-hybrid-pelvis   plans/figurewright/task-fw-52-hybrid-pelvis.md gate --timeout 150m --budget 25 --allow "Bash(npm run *)"
 fw-hybrid-arms     plans/figurewright/task-fw-53-hybrid-arms.md gate --timeout 150m --budget 25 --allow "Bash(npm run *)"
+fw-arm-length-hands plans/figurewright/task-fw-54-arm-length-hands.md gate --timeout 150m --budget 25 --allow "Bash(npm run *)"
+fw-tee-armhole      plans/figurewright/task-fw-55-tee-armhole.md gate --timeout 120m --budget 15 --allow "Bash(npm run *)"
