@@ -37,7 +37,13 @@ if [ "$(printf '%s' "$so" | jq -r '.tests == null')" = "false" ]; then
   lp=$(printf '%s' "$so" | jq -r '.tests.log_path'); t=$(printf '%s' "$so" | jq -r '"\(.tests.passed) passed, \(.tests.failed) failed (\(.tests.command))"')
   # Builders sometimes follow the path with prose ("runs.tsv (logs: a.log, b.log)"): the path is the first word.
   [ -n "$lp" ] && [ ! -f "$wt/$lp" ] && [ -f "$wt/${lp%% *}" ] && lp="${lp%% *}"
-  if [ -n "$lp" ] && [ -f "$wt/$lp" ]; then ok "tests $t, log at $lp"; else flag "tests claimed ($t) but no log at ${lp:-<none>}"; fi
+  # A suite run in parts names several logs ("a.log, b.log, c.log"): every one must exist (fw-hybrid-arms, 2026-10-07,
+  # was flagged for a list whose first word carried a trailing comma).
+  if [ -n "$lp" ] && [ ! -f "$wt/$lp" ]; then
+    missing=$(printf '%s' "$lp" | tr ',' '\n' | sed 's/^ *//;s/ *$//;s/[`)]*$//' | awk 'NF' | while read -r one; do [ -f "$wt/$one" ] || echo "$one"; done | paste -sd' ')
+    [ -z "$missing" ] && lp="$(printf '%s' "$lp" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | awk 'NF' | head -1) (and the rest of the list)"
+  fi
+  if [ -n "$lp" ] && { [ -f "$wt/$lp" ] || [ -f "$wt/${lp%% *}" ]; }; then ok "tests $t, log at $lp"; else flag "tests claimed ($t) but no log at ${lp:-<none>}"; fi
 else echo "note  no tests run"; fi
 nd=$(printf '%s' "$res" | jq '.permission_denials | length'); nr=$(printf '%s' "$so" | jq '.denied | length')
 if [ "$nd" -gt 0 ]; then echo "note  $nd denied call(s) (agent listed $nr): $(printf '%s' "$res" | jq -c '[.permission_denials[] | (.tool_input.command // .tool_name)][:5]')"; else ok "no denied calls"; fi
