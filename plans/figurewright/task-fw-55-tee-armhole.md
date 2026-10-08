@@ -1,6 +1,6 @@
 # figurewright: the imported tee's armhole over the far sleeve
 
-In easing, the imported tee draws a serrated edge on the inside of the far arm where the chest's line should run up unbroken to the shoulder: the tee's body piece draws its own armhole edge from the shoulder's outer corner to the armpit over the far sleeve. Listed as open since the far-arm step. Visible: a person looks at a guided page before the merge.
+Three sleeve faults in one step. First, in easing, the imported tee draws a serrated edge on the inside of the far arm where the chest's line should run up unbroken to the shoulder: the tee's body piece draws its own armhole edge from the shoulder's outer corner to the armpit over the far sleeve. Listed as open since the far-arm step. Visible: a person looks at a guided page before the merge.
 
 Read first: `README.md` (the importer, the far arm, the open items); `scripts/import-garments.ts`, `scripts/garment-import/` (the body piece's armhole edge, the sleeve pieces, `importedOnSkeleton`), `src/garments/` (how an imported garment's pieces are layered with the far arm behind the chest), `assets/garments/` (the tee, the zip jacket), `test/garment-import/`, `test/garments/`.
 
@@ -12,6 +12,10 @@ Read first: `README.md` (the importer, the far arm, the open items); `scripts/im
 3. Re-import what changes (`scripts/import-garments.ts`, `scripts/make-garment-sheet.ts`, the found-art batch) with the seam-leak count reported before and after; the leak count does not rise. If the re-import runs into the open item of the leg pieces under the pelvis join (easing-2's trousers inside the hips' sides), keep the pants as they are and say so.
 4. Goldens and sheets re-approved only where the tee or jacket shows on a posed figure, each listed with its reason; render-diff per body against main confined to the far armhole.
 5. README: the armhole rule, the open item closed.
+
+## Also in this step: the sleeve's own edges
+- **The wedge.** In base, average's right sleeve shows a small black wedge on its inner edge near the armpit, from the sleeve's own edge ink (seen at the arms gate). Find which ink and remove it; check every named build in base and hands on hips for the same.
+- **The sleeve's inner line follows the inner arm.** The inner part of the sleeve goes in line with the inner arm: the sleeve is a tube on the arm, and its inner edge runs along the arm's inner edge from the armpit down, offset by the cloth's thickness, in every pose, both arms. Measure the sleeve's inner edge against the arm's inner edge at three heights on average, round and slim before and after; a test holds the offset within the cloth's thickness plus 0.1 cm.
 
 ## Evidence
 A short guided page, `.ws-evidence/page/index.html`: the fault in one sentence, then average and round in the tee in easing before and after with 3× close-ups of the far armhole, the same in the zip jacket, the seam-leak numbers; a link to `all.html` with everything else.
