@@ -1,6 +1,6 @@
 # figurewright: arm length and hand size from the references
 
-The drawn builds' arms read as too short and their hands as too small against the anatomical references and the 3D library bodies. This step measures, then corrects. Visible: a person looks at a guided page before the merge.
+The drawn builds' arms read as too short and their hands as too small against the anatomical references and the 3D library bodies. This step measures, then corrects, **by measurement only: no search re-fit of the rig or the medium** (`scripts/easing-search.ts` is not run; three search re-fits in a row left arms that read wrong as whole figures). Visible: a person looks at a guided page that opens with the nine builds whole, before and after, before the merge.
 
 Read first: `README.md` (the body, the sliders, the measurements); `src/body/measurements.ts` (`AVERAGE_BODY`: `armLength`, the hand's size wherever it is set), `src/body/sliders.ts`, `src/body/skeleton.ts` (where the hand is drawn and sized), `src/body/library.ts` and `scripts/body-library.ts` (the nine 3D bodies' joint positions: shoulder, elbow, wrist, and the hand's extent if the outline gives it), `spike/body-refs*/` (the photo references and what was measured from them), `scripts/figure-measures.ts`, `figure-bands.ts`.
 
@@ -9,12 +9,12 @@ Read first: `README.md` (the body, the sliders, the measurements); `src/body/mea
 2. State the gap: by how much the drawn arm is shorter than the library's and the references' for the same height, and the hand smaller. If the references and the library disagree, say by how much and which the step follows (the library, unless the references agree with each other against it).
 
 ## What to build
-3. Set the medium's `armLength` and the hand's size to the measured share of height, and the sliders' ends with them so every build keeps its proportion; the library bodies read their own. Add two scorecard measures, `armOverHeight` and `handOverHeight`, banded from the library (and the references where they agree), failing on today's named builds and passing after. The easing overlay bounds for the arms are not loosened: if the longer arm moves the medium's dressed overlay outside a bound, stop after a commit and report the table.
+3. Set the medium's `armLength` and the hand's size to the measured share of height, and the sliders' ends with them so every build keeps its proportion; the library bodies read their own. Add two scorecard measures, `armOverHeight` and `handOverHeight`, banded from the library (and the references where they agree), failing on today's named builds and passing after. The easing overlay bounds for the arms are not loosened: if the longer arm moves the medium's dressed overlay outside a bound, report the table and the whole-figure sheets and continue; the bound question is decided at the gate from the whole figures, not by a search.
 4. Garments follow: the tee's and jacket's sleeves end where the arm's length puts the wrist; the gloves, if any, fit the hand. Goldens and sheets re-approved only where arms or hands show, each listed with its reason; the scorecard per body before and after; render-diff per body against main confined to the arms and hands.
 5. README: the measured proportions, their sources, the two measures.
 
 ## Evidence
-A short guided page, `.ws-evidence/page/index.html`: the table from item 1 first; then, for average, round and slim, before and after beside the library body of the same name at the same scale, with the arm and hand lengths written on them; 3× close-ups of a hand before and after; a link to `all.html` with everything else.
+A short guided page, `.ws-evidence/page/index.html`: **first the nine named builds in easing, bare and dressed, whole figures, main beside this branch (the `posed-builds` and `posed-garments` sheets)**, then the table from item 1; then, for average, round and slim, before and after beside the library body of the same name at the same scale, with the arm and hand lengths written on them; 3× close-ups of a hand before and after; a link to `all.html` with everything else.
 
 ## Leave alone
 The elbow directions and the pose rigs, the pelvis join, the importer and `assets/garments` except sleeve ends that follow the wrist, `spike/` except `spike/easing-shoulders/transforms.json` if a pin needs it, the head art.

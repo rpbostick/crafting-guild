@@ -12,3 +12,4 @@ Appended to every builder prompt. Keep under 25 lines.
 - Files under `.claude/` in the project cannot be edited headlessly (Claude Code treats them as sensitive). Do not retry; report the exact change as an open question.
 - Logs are never committed; they go under `.ws-evidence/`. Anything you do commit (a README line, a render) must not contain the worktree path, the home directory or the username; `ws merge` refuses a branch that adds them. End every saved log with the command's `exit N`.
 - Commands longer than 10 minutes can't finish in one foreground call, and a backgrounded one dies when your run ends. Split long test or render runs into parts.
+- An evidence page for a visible change opens with the whole subject (every build, every pose it touches, main beside the branch) before any close-up: a close-up shows a measure improving while the whole reads wrong (figurewright arms, 2026-10-07).
