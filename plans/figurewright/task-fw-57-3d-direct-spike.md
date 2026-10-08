@@ -1,0 +1,39 @@
+# figurewright spike: can we reproduce Open Peeps' figures, and should we draw from the 3D library directly?
+
+Research spike, no product change: everything it writes goes under `spike/3d-direct/` and `.ws-evidence/`. Two questions, each answered with whole-figure sheets and numbers, and a report with a recommendation. It runs unattended overnight; a person reads the page in the morning.
+
+**Why.** The parametric 2D body has been fitted part by part to the 3D library's outlines and to the easing-2 drawing by numeric searches, and the whole figures read wrong while the measures improved. Two checks are overdue: (1) whether our sliders and rig can reproduce the Open Peeps figures we take as references at all, which is the test the body should have had from the start; (2) whether drawing straight from the 3D library's traced outlines, with the flat Open Peeps look done in ink and shading, would be simpler and better than fitting a parametric body to them.
+
+Read first: `README.md`; `spike/easing/` (`easing-art.ts`, `posed-fit.ts`, `render-rig.ts`, `REPORT.md`: how easing-2 was traced and the rig fitted), `scripts/easing-search.ts` and `scripts/easing-overlay.ts`; `spike/cast.ts` and `spike/3d-source/` (round 2's raster, trace, ink and style code: `mesh.ts`, `r2-ink.ts`, `r2-figure.ts`, `r2-style.ts`); `tools/body3d/` (the generator, `trace.ts`, the poses) and `assets/bodies/` (the traced outlines, part edges, joints and style groups per build and pose); `src/body/library.ts`; `src/garments/` (how the tee and long pants are fitted on chains); `src/body/sliders.ts`; the Open Peeps source art the project holds (find it: `grep -ril "open peeps" --include=*.ts --include=*.md .`; the head parts came through colorwright) and its licence note.
+
+## Part 1: the reproduction test
+1. Pick five Open Peeps figures with whole bodies visible: easing-2 and pointing finger first, then three others the project's art holds or can trace the same way easing-2 was. Trace each as easing-2 was traced (outline by region, joints read off the drawing).
+2. For each, find our best reproduction: the sliders and rig joints that bring the dressed (or bare, where the drawing shows skin) outline closest to the drawing, by the existing search where it applies and by hand where it does not, with a time cap of 500 s of search per figure. Record the per-region mean and largest distance, and the slider values and joint positions used.
+3. A sheet per figure, whole figures at the same scale: the original | our reproduction | the overlay with distances written per region. One summary sheet with all five rows. Say for each figure which regions cannot be matched and what limits them (a slider's range, a rule such as shoulders-from-chest, the rig's joint set, the garment's shape).
+4. Propose the scorecard measure: `reproduction` per reference figure, mean and largest distance, with the bound the current medium meets on easing-2 as the starting band, and where it would live (`scripts/figure-measures.ts`, `figure-bands.ts`, a test under `test/figure/`). Do not add it to the product in this spike; write what the task would be.
+
+## Part 2: drawing from the 3D library directly
+5. Draw the nine library bodies straight from `assets/bodies/`: the silhouette and the part edges the tracer already gives, inked as round 2 inked them (`r2-ink.ts`), in all three poses, with the head art attached at the neck as the figure attaches it, bare. Then dressed: the tee and long pants fitted onto the library outline (the simplest way that works: the garment's torso and leg pieces mapped onto the outline's torso and legs the way `toPosed` maps them onto chains, or an offset of the outline where that fails; say which). Whole-figure sheets: for each build, the 3D-direct figure | the parametric figure of the same build and pose | easing-2 or pointing finger where the pose matches, same scale, bare and dressed.
+6. Sliders: a figure between two library bodies. Blend the traced outlines of average and round point-wise at 0.25, 0.5 and 0.75 (match parts and resample to equal point counts), draw the three, and say whether it reads as a body between them. State what continuous sliders would need in this design: blending between the nine, more generated bodies (how many, and the package size: today `assets/bodies/` is 780 KB for nine bodies in three poses), or running Anny on the device (and why not).
+7. The look: with the bare 3D-direct figure beside easing-2, say what ink and shading would make it read as Open Peeps (line weight, the inner lines, flat fill, where the drawing simplifies the anatomy) and try one of them on average in easing.
+8. The reproduction test from Part 1 applied to the 3D-direct figures: for easing-2 and pointing finger, the nearest library body or blend, with the same per-region table. Which pipeline comes closer, by how much, and where.
+
+## Report
+`spike/3d-direct/REPORT.md`: the question, what was done, the tables, and a recommendation among three ways forward with a line each on sliders, garments, package size, the Open Peeps look and the work to get there: (a) the parametric body as now, fitted to the library by measurement; (b) 3D-direct outlines with blended sliders; (c) a hybrid where the torso and legs come from the library's outlines and the arms, hands and head stay parametric. Say which you recommend and what the first task of it would be. Attribute nothing to a person; state reasons.
+
+## Evidence
+`.ws-evidence/page/index.html` opens with the Part 2 whole-figure sheets (every build, every pose, 3D-direct beside parametric beside the original), then the Part 1 summary sheet, then the five per-figure sheets, then the blends, then the tables. Every image under `page/`, paths relative to the file. Hold one raster at a time; a sheet is drawn in rows, each row one raster.
+
+## Leave alone
+`src/`, `assets/`, `scripts/`, `tools/`, `test/`, `docs/`: nothing in the product changes. Everything new is under `spike/3d-direct/` and `.ws-evidence/`. Commit the spike's scripts and report, not its rasters beyond the page.
+
+## Commands
+One command per Bash call, each check you cite through the evidence runner. `npx tsx <file>.ts [args]`, `node`, `anny-python tools/body3d/generate.py --out <dir>` (only to generate extra bodies into scratch, never over `assets/bodies/`), `npx tsc --noEmit`, `git status`, `git diff`, `git log`, `git show`, `git add`, `git commit`, `git restore --source=<ref> -- <path>`, `git clean -f -- <path>`, `cp`, `mkdir`, `ls`, `cat`, `grep`, `find`. Scratch under `.ws-evidence/scratch/`. Long jobs in the foreground, split so no call passes 10 minutes. Memory: one raster at a time; the generator builds the model once per run.
+
+## Prior art
+- The project's own round-2 3D tracing and ink (`spike/3d-source/`), its easing fit (`spike/easing/`, `scripts/easing-search.ts`) and the library generator; the spike reuses them rather than writing new tracing.
+- Open Peeps (CC0) is the reference art; its figures are traced, not copied into the product.
+- Toon or flat shading of a mesh is standard (any NPR renderer does outline extraction and flat fill); the spike's question is what it takes in this project's ink, not whether it exists.
+
+## Done when
+The page opens with the Part 2 sheets and every image loads; the five reproduction sheets and the summary exist with the per-region tables; the blends are drawn and judged; the report answers every question above with numbers and gives a recommendation with the first task; `git status` shows nothing changed outside `spike/3d-direct/`; the result states, for each of the five figures, our best gap in cm (mean and largest) and the limiting part, and which pipeline came closer on easing-2 and pointing finger. Commit the spike's scripts and report as you go; if time runs short, stop after a commit with the report's findings so far and report `partial`.
