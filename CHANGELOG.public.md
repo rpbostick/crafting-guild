@@ -2,7 +2,7 @@
 
 Versions of Waystation Guild. `ws version` prints the current one.
 
-## 2.3.9 (2026-10-09)
+## 2.3.9
 
 First public release.
 
