@@ -9,7 +9,7 @@ slug="${1:-}"
 [ -z "$slug" ] && [ -f "$WS/state/current" ] && slug="$(head -n1 "$WS/state/current")"
 echo "=== ws cold-start $(now_local) (v$(cat "$WS/VERSION" 2>/dev/null || echo ?)) ==="
 if [ -z "$slug" ] || [ ! -f "$WS/projects/$slug.conf" ]; then
-  echo "no project selected. Registered: $(ls "$WS/projects"/*.conf 2>/dev/null | xargs -rn1 basename | sed 's/\.conf$//' | paste -sd' ' | grep . || echo none)"
+  echo "no project selected. Registered: $(find "$WS/projects" -maxdepth 1 -name '*.conf' -printf '%f\n' 2>/dev/null | sort | sed 's/\.conf$//' | paste -sd' ' | grep . || echo none)"
   echo "start one with: bin/ws <slug>   (register: bin/ws init <path>)"
   exit 0
 fi
@@ -19,7 +19,7 @@ echo "project: $SLUG at $PROJECT_PATH (branch $PROJECT_BRANCH; tests: ${TEST_CMD
 if [ -n "${WS_PROJECT:-}" ]; then echo "selected: $WS_PROJECT, pinned to this session (WS_PROJECT)"; else echo "selected: $SLUG via state/current (not pinned: a terminal, or a session not started with ws <slug>)"; fi
 cur=$(head -n1 "$WS/state/current" 2>/dev/null || true)
 [ -n "${WS_PROJECT:-}" ] && [ -n "$cur" ] && [ "$cur" != "$WS_PROJECT" ] && echo "CONFLICT: state/current names '$cur' (another ws <slug> session is open). This session stays on $WS_PROJECT; terminal commands without --project will act on $cur."
-others=$(ls "$WS/projects"/*.conf 2>/dev/null | xargs -rn1 basename | sed 's/\.conf$//' | grep -vx "$SLUG" | paste -sd' ')
+others=$(find "$WS/projects" -maxdepth 1 -name '*.conf' -printf '%f\n' 2>/dev/null | sort | sed 's/\.conf$//' | grep -vx "$SLUG" | paste -sd' ')
 [ -n "$others" ] && echo "other registered projects: $others (use ws --project <slug> to act on one)"
 echo "workspace: $WS (plans in plans/$SLUG, runs in runs/$SLUG, lessons in lessons/)"
 echo
@@ -83,7 +83,7 @@ for p in "$WS/plans/$SLUG"/*.md; do
   grep -q '^\*\*In flight right now\*\*' "$p" || continue
   echo "  ${p#"$WS/"}:"; awk '/^\*\*In flight right now\*\*/ {on=1; next} on && (/^## / || /^\(Older blocks/) {exit} on && NF {print "    " substr($0, 1, 700) (length($0) > 700 ? " …" : "")}' "$p" | head -12; found=1
 done
-[ "$found" -eq 0 ] && echo "  none. Plans: $(ls "$WS/plans/$SLUG"/*.md 2>/dev/null | xargs -rn1 basename | paste -sd' ' | grep . || echo none)"
+[ "$found" -eq 0 ] && echo "  none. Plans: $(find "$WS/plans/$SLUG" -maxdepth 1 -name '*.md' -printf '%f\n' 2>/dev/null | sort | paste -sd' ' | grep . || echo none)"
 echo
 echo "--- lessons ---"
 # lessons/<role>.local.md holds the operator's own lessons beside the shared ones; the cap applies to each file.

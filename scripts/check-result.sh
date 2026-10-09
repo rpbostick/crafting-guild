@@ -53,7 +53,7 @@ if [ "$(printf '%s' "$so" | jq 'has("done_when")')" = true ]; then
     tf=$(task_file "$name"); if [ -n "$tf" ] && grep -qiE '^#+ *done when|done when:' "$tf" 2>/dev/null; then flag "the task states a done-when but the result reports none"; fi
   fi
   notmet=$(printf '%s' "$so" | jq '[.done_when[] | select(.status != "met")] | length')
-  [ "$(printf '%s' "$so" | jq -r '.status')" = done ] && [ "$notmet" -gt 0 ] && flag "status done, but $notmet done-when item(s) are not met"
+  [ "$(printf '%s' "$so" | jq -r '.status')" = "done" ] && [ "$notmet" -gt 0 ] && flag "status done, but $notmet done-when item(s) are not met"
   while IFS=$'\t' read -r st basis item ev; do
     [ -n "$st" ] || continue
     line="done-when $st ($basis): $(printf '%s' "$item" | head -c 120)"
