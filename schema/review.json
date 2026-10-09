@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "properties": {
+    "verdict": {"type": "string", "enum": ["merge", "fix-first", "do-not-merge"]},
+    "summary": {"type": "string"},
+    "blocking": {
+      "type": "array",
+      "items": {"type": "object", "properties": {
+        "file": {"type": "string"}, "line": {"type": "integer"}, "rule": {"type": "integer"}, "why": {"type": "string"}},
+        "required": ["file", "line", "rule", "why"]}
+    },
+    "suggestions": {
+      "type": "array",
+      "items": {"type": "object", "properties": {
+        "file": {"type": "string"}, "line": {"type": "integer"}, "why": {"type": "string"}},
+        "required": ["file", "line", "why"]}
+    }
+  },
+  "required": ["verdict", "summary", "blocking", "suggestions"]
+}

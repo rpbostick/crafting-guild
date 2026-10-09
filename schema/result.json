@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "description": "Final result a dispatched builder returns. Checked afterwards by scripts/check-result.sh against the branch.",
+  "properties": {
+    "status": {"type": "string", "enum": ["done", "partial", "blocked"]},
+    "summary": {"type": "string", "description": "What was done, in a few sentences."},
+    "files_changed": {"type": "array", "items": {"type": "string"}},
+    "commits": {"type": "array", "items": {"type": "string"}, "description": "SHAs of commits made on the branch."},
+    "tests": {
+      "type": ["object", "null"],
+      "description": "null if no tests were run.",
+      "properties": {
+        "command": {"type": "string"},
+        "passed": {"type": "integer"},
+        "failed": {"type": "integer"},
+        "log_path": {"type": "string", "description": "Repo-relative path of the saved raw test output, or an empty string."}
+      },
+      "required": ["command", "passed", "failed", "log_path"]
+    },
+    "denied": {"type": "array", "items": {"type": "string"}, "description": "Every command or tool call that was denied."},
+    "open_questions": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["status", "summary", "files_changed", "commits", "tests", "denied", "open_questions"]
+}
