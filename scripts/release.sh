@@ -71,7 +71,7 @@ else
 fi
 
 git_ fetch -q public --tags 2>/dev/null || true
-if git_ ls-remote --exit-code --tags public "refs/tags/$tag" >/dev/null 2>&1; then die "$tag already exists on $public_repo; bump the version in package.json first"; fi
+if git_ ls-remote --exit-code --tags public "refs/tags/$tag" >/dev/null 2>&1; then die "$tag already exists on $public_repo; bump the version (package.json or VERSION) first"; fi
 
 prev=""
 git_ rev-parse -q --verify refs/heads/public-release >/dev/null && prev=$(git_ rev-parse refs/heads/public-release)
@@ -118,7 +118,7 @@ git_ tag -a "released-$tag" "$PROJECT_BRANCH" -m "$msg: the private commit publi
   || echo "ws: could not tag or push released-$tag in the private repository" >&2
 if [ "${RELEASE_MAJOR_BRANCHES:-}" = 1 ]; then
   major="v${version%%.*}"
-  git_ push -q public "$commit:refs/heads/$major" && echo "public branch $major now at $tag"
+  { git_ push -q public "$commit:refs/heads/$major" 2>&1 | grep -v "^remote:" || true; }; echo "public branch $major now at $tag"
 fi
 
 # 6. the GitHub release: a page per version with its changelog notes, marked Latest, plus the clean-clone
