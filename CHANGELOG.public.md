@@ -2,6 +2,10 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.5.1
+
+- `ws release`: moving the `v<major>` branch no longer prints GitHub's pull-request hint, and the "version already exists" message names `VERSION` as well as `package.json`.
+
 ## 2.5.0
 
 - **Versions and rollback.** Every `ws release` now creates a GitHub release page (notes from the published changelog, marked Latest), tags the private commit it published (`released-vX.Y.Z`), and with `RELEASE_MAJOR_BRANCHES=1` moves a public branch `v<major>` to the release, so users can install any exact version or the newest of a major version. `ws rollback <version>` puts the published files back to a release as one new commit, leaving everything outside `RELEASE_PATHS` alone; `--dry-run` lists what would change. README: Install a specific version.

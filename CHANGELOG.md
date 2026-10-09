@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.5.1 (2026-10-09)
+
+- `ws release`: moving the `v<major>` branch no longer prints GitHub's pull-request hint, and the "version already exists" message names `VERSION` as well as `package.json`.
+
 ## 2.5.0 (2026-10-09)
 
 Patrick: a stable public version, private work, periodic audited updates, and a way back to the last stable release; users may install any old version or the newest of a major.
