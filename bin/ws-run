@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# The builders' evidence runner. Runs one granted command in the foreground and records it, so no task
+# has to write its own run-and-log wrapper and every log carries the command's real exit code.
+# Usage (from the worktree root): ws-run <label> <command> [args...]
+#   writes .ws-evidence/<label>.log (output, then "exit N") and appends a row to .ws-evidence/runs.tsv:
+#   time, label, exit, seconds, command. The reviewer, the precheck and `ws audit` read runs.tsv.
+# The command must match one of the builder's own Bash grants (dispatch exports WS_RUN_GRANTS, a file
+# outside the worktree), so the runner adds no permission the builder did not already have. It runs the
+# command directly, never through a shell: no pipes, redirects or `&&`.
+set -uo pipefail
+label="${1:-}"; shift || true
+[ -n "$label" ] && [ $# -gt 0 ] || { echo "usage: ws-run <label> <command> [args...]" >&2; exit 2; }
+case "$label" in *[!A-Za-z0-9._-]*) echo "ws-run: label '$label' may use only letters, digits, '.', '_' and '-'" >&2; exit 2 ;; esac
+grants="${WS_RUN_GRANTS:-}"
+[ -n "$grants" ] && [ -f "$grants" ] || { echo "ws-run: no grant list (WS_RUN_GRANTS); it runs only inside a dispatched builder" >&2; exit 2; }
+cmd="$*"; allowed=false
+while IFS= read -r pat; do
+  [ -n "$pat" ] || continue
+  # shellcheck disable=SC2053  # the grant is a glob on purpose, as Claude Code's Bash(...) rules are
+  [[ "$cmd" == $pat ]] && { allowed=true; break; }
+done < "$grants"
+$allowed || { echo "ws-run: '$cmd' matches none of this builder's Bash grants" >&2; exit 2; }
+mkdir -p .ws-evidence
+log=".ws-evidence/$label.log"; t0=$(date +%s)
+{ echo "\$ $cmd"; echo "# started $(date '+%Y-%m-%d %H:%M:%S %Z')"; } > "$log"
+"$@" >> "$log" 2>&1; rc=$?
+secs=$(( $(date +%s) - t0 ))
+echo "exit $rc" >> "$log"
+[ -f .ws-evidence/runs.tsv ] || printf 'time\tlabel\texit\tseconds\tcommand\n' > .ws-evidence/runs.tsv
+printf '%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$label" "$rc" "$secs" "$cmd" >> .ws-evidence/runs.tsv
+tail -n 40 "$log"
+echo "ws-run: $label exit $rc in ${secs}s (log $log)"
+exit "$rc"

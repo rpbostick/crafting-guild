@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# Crafting Guild launcher. Run from anywhere; works on any registered project.
+set -uo pipefail
+WS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+. "$WS/scripts/lib.sh"
+usage() {
+  cat <<USAGE
+ws [--project <slug>] <command> ...   every command below takes the selected project (state/current) unless
+                                       --project names another registered one
+ws <slug>                       open an orchestrator session for a registered project
+ws init <path> [--tests CMD] [--branch B] [--yes]   register a project (and retire v1 hooks if found)
+ws list                         registered projects
+ws status [slug]                cold-start: ground truth in twenty seconds
+ws dispatch [flags] <name> <task-file>   run a builder (see scripts/dispatch.sh for flags)
+ws wait <name> [minutes]        block until the run finishes; exit 0 if its result checks out
+ws tail <name>                  follow a run's log as readable lines
+ws runs [slug]                  runs and their results
+ws review [flags] <name>        review the branch; prints the verdict and the SHA to merge
+ws merge <name> <sha>           merge a reviewed branch, test, push, clean up
+ws chain <queue-file>           run a queue of steps: dispatch, wait, review (one automatic fix round), merge, next;
+                                stops on a failure, a gate or a judgment call (run it under run_in_background)
+ws chain-wait                   wait on the project's running chain (from any session) and print where it stopped
+ws precheck <name>              the checklist rules a script can check (ws review runs it first)
+ws audit [days]                 what builders keep doing by hand, from the run logs (default 30 days)
+ws stop <name>                  stop a running builder
+ws serve <name|main> [port]     start the project's preview server from a worktree (or the main checkout)
+ws serve stop [name|main]       stop it;  ws serve list
+ws release [--dry-run] [--notes T] [--no-asset]   publish main as a release of the public repo (remote 'public'):
+                                audit, one commit with main's tree, tag vX.Y.Z, clean-clone build, GitHub release
+ws site [--dry-run]             copy the project's SITE_SYNC files into its SITE_PROJECT, check they match,
+                                run the site's tests, commit, push, wait until live
+ws version                      print the workspace version (see CHANGELOG.md)
+USAGE
+}
+slugify() { basename "$1" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//'; }
+proj=""; if [ "${1:-}" = "--project" ]; then proj="${2:?ws: --project needs a slug}"; shift 2; fi
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  ""|-h|--help|help) usage ;;
+  version|--version|-v) echo "Crafting Guild Agentic Workspace v$(cat "$WS/VERSION")" ;;
+  list) for f in "$WS"/projects/*.conf; do [ -f "$f" ] || continue; ( . "$f"; printf '%-18s %s (%s)%s\n' "$(basename "$f" .conf)" "$PROJECT_PATH" "$PROJECT_BRANCH" "$( [ "$(head -n1 "$WS/state/current" 2>/dev/null)" = "$(basename "$f" .conf)" ] && echo '  <- current')" ); done ;;
+  init)
+    path="${1:?ws init <path>}"; shift; tests="" branch="" yes=false
+    while [ $# -gt 0 ]; do case "$1" in --tests) tests="$2"; shift 2 ;; --branch) branch="$2"; shift 2 ;; --yes) yes=true; shift ;; *) die "unknown flag $1" ;; esac; done
+    path="$(cd "$path" && pwd -P)"; git -C "$path" rev-parse --git-dir >/dev/null 2>&1 || die "$path is not a git repo"
+    slug="$(slugify "$path")"
+    [ -z "$branch" ] && branch="$(git -C "$path" symbolic-ref --short HEAD 2>/dev/null || echo master)"
+    if [ -z "$tests" ]; then
+      [ -x "$path/scripts/run-all-tests.sh" ] && tests="bash scripts/run-all-tests.sh"
+      [ -z "$tests" ] && [ -f "$path/pytest.ini" ] && tests="pytest"
+      [ -z "$tests" ] && [ -f "$path/package.json" ] && grep -q '"test"' "$path/package.json" && tests="npm test"
+    fi
+    # Tool grants the builders will need beyond git and the test command, guessed from the repo layout.
+    extras=()
+    for v in "$path"/.venv "$path"/*/.venv; do
+      [ -d "$v" ] || continue; rel="${v#"$path"/}"
+      extras+=("\"Bash($rel/bin/python *)\"" "\"Bash($rel/bin/python3 *)\"" "\"Bash($rel/bin/pytest *)\"")
+    done
+    [ -d "$path/node_modules" ] || [ -d "$path"/*/node_modules ] 2>/dev/null && extras+=("\"Bash(node *)\"" "\"Bash(npm test*)\"" "\"Bash(npx *)\"")
+    preview=""; [ -f "$path/backend/app/main.py" ] && preview="cd backend && .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port {port}"
+    {
+      echo "# Registered by ws init on $(date +%Y-%m-%d). Edit by hand; every key is read by scripts/lib.sh."
+      echo "PROJECT_PATH=\"$path\""
+      echo "PROJECT_BRANCH=\"$branch\"          # the branch builders branch from and merges land on"
+      echo "TEST_CMD=\"$tests\"   # run from the repo root; empty = no test gate"
+      echo "# Extra Bash grants for builders (Claude Code permission rules). Builders already get git add/commit/rm/mv,"
+      echo "# ls/cat/grep/head/tail/wc/diff/mkdir/chmod/expr/date, bash -n, git grep and the test command. Add what your tests and tools need."
+      echo "EXTRA_TOOLS=(${extras[*]})"
+      echo "# Command that serves the app for a preview; {port} is replaced. Used by: ws serve <worktree|main> <port>"
+      echo "PREVIEW_CMD=\"$preview\""
+    } > "$WS/projects/$slug.conf"
+    mkdir -p "$WS/plans/$slug" "$WS/runs/$slug"
+    excl="$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/info/exclude"; for e in .worktrees .ws-evidence; do grep -qx "$e" "$excl" 2>/dev/null || echo "$e" >> "$excl"; done
+    echo "registered $slug: $path (branch $branch; tests: ${tests:-none})"
+    # The earlier agentic-workspace (v1) wired per-commit review and post-merge hooks into .git/hooks; this tool
+    # reviews per branch and tests on merge, so those hooks would review twice.
+    hooks="$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/hooks"; found=()
+    for h in post-commit post-merge; do [ -f "$hooks/$h" ] && grep -q 'claude/hooks' "$hooks/$h" && found+=("$h"); done
+    [ -f "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/agentic-workspace-root" ] && found+=("agentic-workspace-root")
+    if [ ${#found[@]} -gt 0 ]; then
+      echo "v1 hooks found in $hooks: ${found[*]}"
+      if ! $yes && [ ! -t 0 ]; then echo "not a terminal; leaving them. Disable later with: ws init $path --yes"; found=(); fi
+      if [ ${#found[@]} -gt 0 ] && { $yes || { read -r -p "disable them (renamed *.v1-disabled)? [y/N] " a; [ "$a" = y ]; }; }; then
+        for h in "${found[@]}"; do
+          if [ "$h" = agentic-workspace-root ]; then mv "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/$h" "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/$h.v1-disabled"; else mv "$hooks/$h" "$hooks/$h.v1-disabled"; fi
+        done; echo "disabled; pre-commit (syntax check) left in place"
+      fi
+    fi ;;
+  status) "$WS/scripts/cold-start.sh" "$@" ${proj:+"$proj"} ;;
+  dispatch) "$WS/scripts/dispatch.sh" ${proj:+--project "$proj"} "$@" ;;
+  review) "$WS/scripts/review.sh" ${proj:+--project "$proj"} "$@" ;;
+  merge) "$WS/scripts/merge.sh" ${proj:+--project "$proj"} "$@" ;;
+  release) "$WS/scripts/release.sh" ${proj:+--project "$proj"} "$@" ;;
+  site) "$WS/scripts/site.sh" ${proj:+--project "$proj"} "$@" ;;
+  check) "$WS/scripts/check-result.sh" ${proj:+--project "$proj"} "$@" ;;
+  chain)
+    # The chain runs detached in its own systemd scope (as builders do), so closing the session that started it
+    # stops only this wait, not the chain. Run `ws chain-wait` from a new session to wait on it again.
+    load_project "$proj"; q="${1:?ws chain <queue-file>}"; [ -f "$q" ] || die "no queue file $q"
+    if [ -f "$RUNS/chain.pid" ] && kill -0 "$(cat "$RUNS/chain.pid")" 2>/dev/null; then die "a chain is already running for $SLUG (pid $(cat "$RUNS/chain.pid")); wait on it with: ws chain-wait"; fi
+    rm -f "$RUNS/chain.status"
+    sc=(); systemd-run --user --scope --quiet true >/dev/null 2>&1 && sc=(systemd-run --user --scope --quiet --unit "ws-$SLUG-chain-$(date -u +%Y%m%dT%H%M%SZ)" --description "ws chain $SLUG")
+    ( "${sc[@]}" setsid "$WS/scripts/chain.sh" --project "$SLUG" "$q" ) < /dev/null >> "$RUNS/chain.log" 2>&1 &
+    for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f "$RUNS/chain.status" ] && break; sleep 1; done
+    echo "chain started for $SLUG on $q (log runs/$SLUG/chain.log)"
+    exec "$WS/bin/ws" --project "$SLUG" chain-wait ;;
+  chain-wait)
+    # Block until the chain stops; print its status and the log's milestones. Exit 0 done, 4 gate, 1 stopped.
+    load_project "$proj"
+    while [ -f "$RUNS/chain.pid" ] && kill -0 "$(cat "$RUNS/chain.pid")" 2>/dev/null; do sleep 15; done
+    grep -E "review at|merged \(|STOP|fix round|carried|chain (start|done)" "$RUNS/chain.log" 2>/dev/null | tail -20
+    st=$(cat "$RUNS/chain.status" 2>/dev/null || echo "no status"); echo "status: $st"
+    case "$st" in done*) exit 0 ;; *gated*) exit 4 ;; *) exit 1 ;; esac ;;
+  precheck) "$WS/scripts/precheck.sh" ${proj:+--project "$proj"} "$@" ;;
+  audit) load_project "$proj"; python3 "$WS/scripts/audit.py" "$SLUG" "$PROJECT_PATH" "$TEST_CMD" "$RUNS" "$WS/plans/$SLUG" "${1:-30}" ;;
+  wait)
+    name="${1:?ws wait <name> [minutes]}"; mins="${2:-150}"; load_project "$proj"
+    for _ in $(seq 1 $((mins*6))); do
+      if [ -f "$RUNS/$name.result.txt" ] && [ ! -f "$RUNS/$name.pid" ]; then cat "$RUNS/$name.result.txt"; grep -q '^FAIL\|^NO RESULT\|^TIMEOUT\|^LIMIT' "$RUNS/$name.result.txt" && exit 1 || exit 0; fi
+      [ -f "$RUNS/$name.pid" ] || [ -f "$RUNS/$name.jsonl" ] || die "no run named $name"
+      # A run whose wrapper died with it (the usage limit can take both) never writes its result: write it here.
+      if [ -f "$RUNS/$name.pid" ] && ! kill -0 "$(cat "$RUNS/$name.pid")" 2>/dev/null; then
+        since=$(sed -n 's/^since=//p' "$RUNS/$name.task.txt" 2>/dev/null)
+        "$WS/scripts/check-result.sh" --project "$SLUG" ${since:+--since "$since"} "$name" > "$RUNS/$name.result.txt" 2>&1 || true
+        rm -f "$RUNS/$name.pid"; continue
+      fi
+      sleep 10
+    done; echo "still running after $mins minutes"; exit 3 ;;
+  tail)
+    name="${1:?ws tail <name>}"; load_project "$proj"
+    tail -n +1 -f "$RUNS/$name.jsonl" | jq -r --unbuffered '
+      if .type=="assistant" then (.message.content[]? | if .type=="text" then "SAY  " + (.text|.[0:160]) elif .type=="tool_use" then "TOOL " + .name + " " + ((.input.command // .input.file_path // .input.pattern // "")|tostring|.[0:120]) else empty end)
+      elif .type=="result" then "DONE cost=$" + ((.total_cost_usd // 0)|tostring) + " " + ((.structured_output.status // .subtype // "")|tostring)
+      elif .type=="system" and .subtype=="permission_denied" then "DENIED " + ((.tool_input.command // .tool_name // "")|tostring|.[0:120])
+      else empty end' 2>/dev/null ;;
+  runs)
+    load_project "${1:-$proj}"; echo "runs for $SLUG:"
+    for f in $(ls -t "$RUNS"/*.result.txt "$RUNS"/*.pid 2>/dev/null); do
+      n=$(basename "$f"); n="${n%.result.txt}"; n="${n%.pid}"
+      case "$f" in *.pid) kill -0 "$(cat "$f")" 2>/dev/null && echo "  $n: RUNNING (pid $(cat "$f"))" ;; *) echo "  $n: $(head -n1 "$f" | cut -c1-100)  [$(tail -n1 "$f" | cut -c1-60)]" ;; esac
+    done ;;
+  serve)
+    load_project "$proj"; [ -n "$PREVIEW_CMD" ] || die "no PREVIEW_CMD in projects/$SLUG.conf"
+    sub="${1:-}"
+    case "$sub" in
+      list) for sf in "$RUNS"/serve-*.pid; do [ -f "$sf" ] || continue; sp=$(cut -d' ' -f1 "$sf"); kill -0 "$sp" 2>/dev/null && echo "$(basename "$sf" .pid | sed s/^serve-//) on :$(cut -d' ' -f2 "$sf") (pid $sp)"; done ;;
+      stop) what="${2:-main}"; sf="$RUNS/serve-$what.pid"; [ -f "$sf" ] || die "nothing serving for $what"; sp=$(cut -d' ' -f1 "$sf")
+            # the server runs in its own process group (setsid below), so npx's grandchildren go too
+            kill -TERM -- "-$sp" 2>/dev/null; pkill -TERM -P "$sp" 2>/dev/null; kill -TERM "$sp" 2>/dev/null; sleep 1
+            kill -KILL -- "-$sp" 2>/dev/null; pkill -KILL -P "$sp" 2>/dev/null; rm -f "$sf"; echo "stopped $what" ;;
+      "") die "usage: ws serve <worktree-name|main> [port] | ws serve stop [name] | ws serve list" ;;
+      *) what="$sub"; port="${2:-}"
+         if [ "$what" = main ]; then dir="$PROJECT_PATH"; [ -z "$port" ] && port="$WS_PREVIEW_PORT_MAIN"; else dir="$(worktree_dir "$what")"; [ -d "$dir" ] || die "no worktree $what"; [ -z "$port" ] && port="$WS_PREVIEW_PORT"; fi
+         sf="$RUNS/serve-$what.pid"; [ -f "$sf" ] && kill -0 "$(cut -d' ' -f1 "$sf")" 2>/dev/null && die "$what is already serving (ws serve stop $what)"
+         cmd="${PREVIEW_CMD//\{port\}/$port}"
+         # A preview runs under WS_SERVE_MEM like a builder under WS_BUILDER_MEM: past it, only the preview
+         # is killed. An uncapped Expo preview starts a Metro worker per core (~700 MB each), and two of them on a
+         # 16-core, 14 GB machine bring the OOM killer to the desktop session.
+         cap=(); [ -n "${WS_SERVE_MEM:-}" ] && systemd-run --user --scope --quiet true >/dev/null 2>&1 &&
+           cap=(systemd-run --user --scope --quiet -p "MemoryMax=$WS_SERVE_MEM" -p MemorySwapMax=0 --unit "ws-$SLUG-serve-$what-$(date -u +%Y%m%dT%H%M%SZ)" --description "ws serve $SLUG/$what")
+         ( cd "$dir" && exec "${cap[@]}" setsid bash -c "$cmd" ) > "$RUNS/serve-$what.log" 2>&1 &
+         echo "$! $port" > "$sf"; sleep 2
+         if kill -0 "$!" 2>/dev/null; then echo "serving $what at http://127.0.0.1:$port/ (memory cap: ${WS_SERVE_MEM:-none}; log: runs/$SLUG/serve-$what.log; stop: ws serve stop $what)"
+           [ -n "${WS_BROWSER_CMD:-}" ] && echo "open it: $WS_BROWSER_CMD http://127.0.0.1:$port/"; true
+         else rm -f "$sf"; tail -n 20 "$RUNS/serve-$what.log"; die "server exited"; fi ;;
+    esac ;;
+  stop)
+    name="${1:?ws stop <name>}"; load_project "$proj"; pf="$RUNS/$name.pid"; [ -f "$pf" ] || die "no running $name"
+    pkill -TERM -P "$(cat "$pf")" 2>/dev/null; sleep 2; pkill -KILL -P "$(cat "$pf")" 2>/dev/null; echo "stopped $name; its worktree is untouched" ;;
+  *)
+    slug="$(resolve_slug "$cmd")"; load_project "$slug"
+    echo "$slug" > "$WS/state/current"
+    cd "$WS" && WS_PROJECT="$slug" exec claude --add-dir "$PROJECT_PATH" --name "ws $slug" "$@" ;;
+esac
