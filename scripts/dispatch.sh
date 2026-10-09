@@ -97,7 +97,8 @@ cmds=$(awk '/^## Commands/{f=1; next} /^## /{f=0} f' "$task" | sed -E 's/\b([Nn]
 derived=()
 while IFS= read -r c; do
   [ -n "$c" ] || continue
-  set -- $c; w1="${1:-}"; w2="${2:-}"; w3="${3:-}"; w4="${4:-}"
+  # No glob expansion: `node *` is a pattern, not this folder's files.
+  set -f; set -- $c; set +f; w1="${1:-}"; w2="${2:-}"; w3="${3:-}"; w4="${4:-}"
   # git with an option first: `git -C <dir> <sub>` is granted as exactly that; any other option form is not
   # granted at all, since the fallback below would be Bash(git*), every git command.
   if [ "$w1" = git ] && [ "${w2#-}" != "$w2" ]; then
@@ -106,7 +107,7 @@ while IFS= read -r c; do
     pat="Bash(git -C $w3 $w4*)"; printf '%s\n' "${TOOLS[@]}" "${derived[@]}" | grep -qxF "$pat" || derived+=("$pat"); continue
   fi
   case "$w1" in ''|'<'*|'#'*|'$'*|'-'*|'.'*|*/) continue ;; rm|mv|sudo|su|dd|mkfs|shutdown|reboot|kill|pkill|killall) continue ;; esac
-  case "$w1" in npx|npm|node|python3|python|git) [ -n "$w2" ] && [ "${w2#<}" = "$w2" ] && [ "${w2#-}" = "$w2" ] && g="$w1 $w2" || g="$w1" ;; *) g="$w1" ;; esac
+  case "$w1" in npx|npm|node|python3|python|git) [ -n "$w2" ] && [ "${w2#<}" = "$w2" ] && [ "${w2#-}" = "$w2" ] && [ "${w2#\*}" = "$w2" ] && g="$w1 $w2" || g="$w1" ;; *) g="$w1" ;; esac
   case "$g" in "git push"|"git config"|"git reset"|"git rebase"|"git worktree"|"git stash"|"git checkout") continue ;; esac
   pat="Bash($g*)"; printf '%s\n' "${TOOLS[@]}" "${derived[@]}" | grep -qxF "$pat" || derived+=("$pat")
 done <<< "$cmds"

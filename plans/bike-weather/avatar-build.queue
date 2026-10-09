@@ -1,0 +1,5 @@
+# Bike Weather avatar build, steps 3 to 5 (avatar-build.md). Needs figurewright 0.1.0 published (steps 1 and 2) first.
+# Run with: NODE_AUTH_TOKEN=$(gh auth token) bin/ws --project bike-weather chain plans/bike-weather/avatar-build.queue   (under run_in_background)
+bw-avatar-render   plans/bike-weather/task-bw-avatar-render.md --budget 8
+bw-avatar-map      plans/bike-weather/task-bw-avatar-map.md --budget 8
+bw-avatar-today    plans/bike-weather/task-bw-avatar-today.md gate --budget 10

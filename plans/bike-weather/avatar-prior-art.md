@@ -2,7 +2,7 @@
 
 **In flight right now**
 
-**DECIDED (2026-10-09, Patrick): 2D layered SVG, covering per sub-region as data, figurewright body resumes, no CozyBuilder licence ask (product.md). Next: step 4, the build plan.**
+**DECIDED (2026-10-09, Patrick): 2D layered SVG, covering per sub-region as data, figurewright body resumes, no CozyBuilder licence ask (product.md). Step 4 done: the build plan is `avatar-build.md` (figurewright as a private GitHub Packages package, react-native-svg, nearest-shape mapping first).**
 
 **SPIKES MERGED (2026-10-09 17:18 MDT):** bw-avatar-cozybuilder aae6820 ($1.17 + review $0.30) and bw-avatar-characterstudio c82d926 ($2.19 + review $0.29), reports in bike-weather docs/research/. CharacterStudio recommends a layered 2D SVG avatar (draw order by layer role) over 3D (pre-alpha expo-gl, no asset licences, a Blender/VRM pipeline). CozyBuilder: one named-part library, hiding rules as data, a test over every outfit; its one-item slots and all-or-nothing masks do not fit. Carry forward: prefix external paths (`CharacterStudio:`), permalinks at the commit read. Next: the decision talk (step 3).
 
