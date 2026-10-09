@@ -2,6 +2,8 @@
 
 **In flight right now**
 
+**DECIDED (2026-10-09 17:55 MDT, Patrick, after the 3D-direct spike talk):** (a) the parametric body; the 3D library stays a measuring reference. The spike branch merged (its code and rigs under `spike/3d-direct/`; report kept). From 10/12, two tasks side by side (no shared files): `task-fw-package.md` (the avatar's package, bike-weather `avatar-build.md` step 1, $8 light) and `task-fw-reproduction-measure.md` (about $10, full). Then, each judged by the reproduction measure on the whole figure: the arm rule yields to a rig's arm angles (hand on hip), ankles off one line (lifted foot, far foot higher), ankles may cross, a wider waist slider range. Then the avatar's garment groups (bike-weather `avatar-build.md` step 6).
+
 **BUDGET (Patrick, 2026-10-07 22:47 MDT):** over 80% of the week's spend, resets 2026-10-12. Tonight's two runs finish, the level-pose gate gets its review and merge, and the spike report is read and talked through. No new figurewright builds until 10/12; the spike's direction becomes the plan for the reset.
 **SPIKE (2026-10-07 23:23 MDT):** `fw-3d-direct-spike` done ($12.26, 58 min), recommends **(a) keep the parametric body**: the search reproduces the five drawings within 0.66–2.01 cm mean; 3D-direct is 1.7–3.6× further off, mostly pose (library poses can't move without regenerating). Real limits: hand on hip, lifted foot, crossed legs, far foot higher (perspective); waist slider hit its range end. Proposed first task: a `reproduction` scorecard measure with regions by the drawing's own rig, ≥30 points a region. Report `spike/3d-direct/REPORT.md` in the worktree; page on :8804. Not reviewed (nothing merges). Talk it through with Patrick; the plan for 10/12 comes from it.
 
