@@ -30,6 +30,7 @@ In about twenty seconds, without running any tests:
 3. **Worktrees and runs:** each builder worktree with its commit and uncommitted counts, any builder still running, the chain's status, preview servers with their ports, and the last few results.
 4. **In flight:** the **In flight right now** block of every plan for the project.
 5. **Lessons:** which file to read before dispatching, any file over its line cap, and whether the automation audit is due.
+6. **Setup:** the failures and warnings from `ws doctor` (tools, Claude Code version, the hook, the project's conf), or that every check passes.
 
 ## The cycle
 

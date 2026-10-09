@@ -22,7 +22,8 @@ if command -v claude >/dev/null; then
 else fail "claude not found" "install Claude Code: https://code.claude.com"; fi
 if systemd-run --user --scope --quiet true >/dev/null 2>&1; then ok "systemd user scopes: builders and previews run under a memory cap; chains run detached"
 else warn "systemd user scopes unavailable: no memory caps (WS_BUILDER_MEM, WS_SERVE_MEM), and a chain ends with the session that started it" "optional; available on most Linux desktops with systemd"; fi
-if command -v gh >/dev/null; then gh auth status >/dev/null 2>&1 && ok "gh, signed in" || warn "gh is not signed in: ws release cannot attach builds" "gh auth login"
+# timeout: gh auth status may reach the network, and cold start runs this at every session start.
+if command -v gh >/dev/null; then timeout 5 gh auth status >/dev/null 2>&1 && ok "gh, signed in" || warn "gh is not signed in: ws release cannot attach builds" "gh auth login"
 else warn "gh not found: ws release cannot attach builds to GitHub releases" "optional: https://cli.github.com"; fi
 command -v rsync >/dev/null && ok "rsync" || warn "rsync not found: ws site needs it" "optional: install rsync"
 command -v shellcheck >/dev/null && ok "shellcheck" || warn "shellcheck not found: the selftest skips its lint step" "optional: install shellcheck"

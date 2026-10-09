@@ -35,6 +35,11 @@ merged() {
 running() { [ -f "$RUNS/$1.pid" ] && kill -0 "$(cat "$RUNS/$1.pid")" 2>/dev/null; }
 max_fix="${WS_CHAIN_FIX_ROUNDS:-1}"
 
+# A broken setup (a missing tool, an old Claude Code, a bad conf) would fail hours in; find out now.
+if ! doc=$("$WS/scripts/doctor.sh" --project "$SLUG" 2>&1); then
+  printf '%s\n' "$doc" | grep -A1 '^FAIL' | tee -a "$tee_to"
+  stop setup "ws doctor found a required check failing; fix it and run the chain again"
+fi
 mapfile -t steps < <(grep -vE '^[[:space:]]*(#|$)' "$queue")
 # Every step's task must pass dispatch's attribution check; find out now, not hours in.
 if [ -n "${WS_ATTRIBUTION_RE:-}" ]; then
