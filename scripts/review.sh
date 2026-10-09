@@ -67,6 +67,14 @@ cmd=(claude -p "$prompt" --restricted --permission-prompts none --json-schema "$
 out="$RUNS/$name.review.json"
 ( cd "$wt" && printf '%s\n' "$diff" | timeout --kill-after=30s 30m "${cmd[@]}" ) > "$out.raw" 2>"$RUNS/$name.review.err" || true
 so=$(jq -c '.structured_output // empty' "$out.raw" 2>/dev/null)
+# A model at its usage limit: review once more on the light-track model rather than stop the review (or a chain).
+fallback="${WS_REVIEW_MODEL_LIGHT:-}"
+if [ -z "$so" ] && [ -n "$fallback" ] && [ "$fallback" != "$model" ] && jq -r '.result // empty' "$out.raw" 2>/dev/null | grep -qiE "reached your .*limit|usage limit"; then
+  note "$model is at its usage limit; reviewing on $fallback"
+  if [ -n "$model" ]; then cmd[${#cmd[@]}-1]="$fallback"; else cmd+=(--model "$fallback"); fi  # --model is added last
+  ( cd "$wt" && printf '%s\n' "$diff" | timeout --kill-after=30s 30m "${cmd[@]}" ) > "$out.raw" 2>"$RUNS/$name.review.err" || true
+  so=$(jq -c '.structured_output // empty' "$out.raw" 2>/dev/null)
+fi
 if [ -z "$so" ] || [ "$so" = "null" ]; then
   echo "review failed: $(jq -r '.result // .subtype // "no output"' "$out.raw" 2>/dev/null | head -c 300)"; tail -n 5 "$RUNS/$name.review.err"; exit 2
 fi

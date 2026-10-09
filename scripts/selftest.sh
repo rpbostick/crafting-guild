@@ -54,6 +54,16 @@ echo w > "$T/.worktrees/demo/w.txt"; git -C "$T/.worktrees/demo" add w.txt; git 
 out=$("$WS/bin/ws" --project "$slug" review --print-prompt demo 2>&1 || true)
 grep -q 'The widget renders.' <<< "$out" && grep -q 'partial (inferred): The widget renders. | evidence: no browser here' <<< "$out" && echo "review prompt done-when ok" || { echo "review prompt done-when FAILED"; echo "$out" | head -40; exit 1; }
 rm -f "$WS/runs/$slug/demo.jsonl"
+# review: a reviewer model at its usage limit is retried once on the light-track model (a stand-in claude on PATH).
+mkdir -p "$T/fakebin"; cat > "$T/fakebin/claude" <<'FAKE'
+#!/bin/bash
+cat >/dev/null
+case " $* " in *" --model zz-limited "*) echo '{"result":"You have reached your zz-limited limit."}' ;;
+  *) echo '{"total_cost_usd":0,"structured_output":{"verdict":"merge","summary":"stand-in","blocking":[],"suggestions":[]}}' ;; esac
+FAKE
+chmod +x "$T/fakebin/claude"
+out=$(PATH="$T/fakebin:$PATH" WS_REVIEW_MODEL_LIGHT=zz-fallback "$WS/bin/ws" --project "$slug" review --model zz-limited demo 2>&1 || true)
+grep -q 'zz-limited is at its usage limit; reviewing on' <<< "$out" && grep -q 'Verdict: merge' <<< "$out" && echo "review limit fallback ok" || { echo "review limit fallback FAILED:"; echo "$out"; exit 1; }
 [ "$("$WS/bin/ws" version)" = "Crafting Guild v$(cat "$WS/VERSION")" ] && echo "version ok" || { echo "version FAILED"; exit 1; }
 "$WS/bin/ws" --project "$slug" runs | grep -q "runs for $slug:" && echo "--project ok"
 { "$WS/bin/ws" --project "$slug" wait nosuchrun 1 || true; } 2>&1 | grep -q 'no run named' && echo "--project wait ok"
