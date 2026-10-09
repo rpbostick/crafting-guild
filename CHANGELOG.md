@@ -2,6 +2,11 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.3.10 (2026-10-09)
+
+- Name (Patrick): **Crafting Guild** in titles, tags and `ws version`; the full product name **Crafting Guild Agentic Workspace** appears in running text (the README's first line, the repository description). Published as github.com/rpbostick/crafting-guild.
+- `ws release`: the commit message names the public repository; the e-mail check skips `git@github.com`; the public tree refuses `*.local.*`.
+
 ## 2.3.9 (2026-10-09)
 
 - `ws release` refuses a public tree holding any private overlay (`*.local.*`), even inside a listed directory.

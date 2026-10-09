@@ -37,7 +37,7 @@ proj=""; if [ "${1:-}" = "--project" ]; then proj="${2:?ws: --project needs a sl
 cmd="${1:-}"; shift || true
 case "$cmd" in
   ""|-h|--help|help) usage ;;
-  version|--version|-v) echo "Crafting Guild Agentic Workspace v$(cat "$WS/VERSION")" ;;
+  version|--version|-v) echo "Crafting Guild v$(cat "$WS/VERSION")" ;;
   list) for f in "$WS"/projects/*.conf; do [ -f "$f" ] || continue; ( . "$f"; printf '%-18s %s (%s)%s\n' "$(basename "$f" .conf)" "$PROJECT_PATH" "$PROJECT_BRANCH" "$( [ "$(head -n1 "$WS/state/current" 2>/dev/null)" = "$(basename "$f" .conf)" ] && echo '  <- current')" ); done ;;
   init)
     path="${1:?ws init <path>}"; shift; tests="" branch="" yes=false
