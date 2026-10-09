@@ -37,6 +37,24 @@ bash ~/crafting-guild/scripts/selftest.sh              # checks the scripts agai
 ws doctor                                              # checks this machine; says what to fix
 ```
 
+### Check a setup: `ws doctor`
+
+`ws doctor` reads, never writes. It checks three things and prints `ok`, `warn` or `FAIL`, with a `fix:` line under each problem. It exits 1 only when something required fails, so a script can run it first.
+
+| Checks | Required | Optional (a `warn` says what you lose without it) |
+|---|---|---|
+| This machine | bash 4+, git, jq, GNU `timeout`, python3, Claude Code at or above the minimum version | systemd user scopes (memory caps, chains that outlive the session), `gh` signed in (release assets), `rsync` (`ws site`), `shellcheck` (the selftest's lint), the `WS_BROWSER_CMD` browser |
+| The workspace | the `SessionStart` hook that runs the cold start | `ws` on your PATH, lessons files under their line cap |
+| The selected project (or `--project <slug>`) | its conf exists, the path is a git repository, the branch exists | a test command (without one, merges are not gated), an `origin` remote (without one, merges stay local), `.worktrees` excluded from the project's git, a preview command |
+
+Run it:
+
+- **After installing**, before the first `ws init`: it finds a missing tool or an old Claude Code before a builder does.
+- **On a new machine, or after an OS or Claude Code update:** a missing `jq` or a macOS `timeout` would otherwise break dispatches midway.
+- **Before an unattended chain or an overnight run:** if systemd scopes are unavailable, the chain ends with the session and builders run without a memory cap. Better to know before you walk away.
+- **When a run fails strangely:** the cold start missing from new sessions, merges that never push, or builders without memory caps each map to one of its lines.
+- **After registering or moving a project:** it confirms the conf's path, branch, test command and remote, which `ws init` guessed.
+
 ## Register a project
 
 ```bash

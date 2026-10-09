@@ -4,6 +4,7 @@ Versions of the workspace itself. `ws version` prints the current one. The produ
 
 ## 2.4.1 (2026-10-09)
 
+- README: "Check a setup: `ws doctor`", what it checks (required and optional, per machine, workspace and project) and when to run it.
 - Documentation brought up to date with 2.4.0: CLAUDE.md (init --dry-run, doctor, the done-when report), COMPARISON.md (done-when checks), MODIFYING.md (check-result, statusline.sh, what the selftest covers), projects/README.md (re-running init), the README's command table (`ws version`).
 
 ## 2.4.0 (2026-10-09)
