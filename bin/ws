@@ -30,6 +30,7 @@ ws release [--dry-run] [--notes T] [--no-asset]   publish main as a release of t
 ws site [--dry-run]             copy the project's SITE_SYNC files into its SITE_PROJECT, check they match,
                                 run the site's tests, commit, push, wait until live
 ws doctor                       check this machine and the selected project; says what to fix
+ws rollback [--dry-run] [vX.Y.Z]   put the published files back to a public release, as a new commit
 ws version                      print the workspace version (see CHANGELOG.md)
 USAGE
 }
@@ -115,6 +116,8 @@ case "$cmd" in
   release) "$WS/scripts/release.sh" ${proj:+--project "$proj"} "$@" ;;
   site) "$WS/scripts/site.sh" ${proj:+--project "$proj"} "$@" ;;
   doctor) "$WS/scripts/doctor.sh" ${proj:+--project "$proj"} "$@" ;;
+  # exec: rolling the workspace back rewrites bin/ws too, and bash reads a running script from disk.
+  rollback) exec "$WS/scripts/rollback.sh" ${proj:+--project "$proj"} "$@" ;;
   check) "$WS/scripts/check-result.sh" ${proj:+--project "$proj"} "$@" ;;
   chain)
     # The chain runs detached in its own systemd scope (as builders do), so closing the session that started it

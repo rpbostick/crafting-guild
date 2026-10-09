@@ -55,6 +55,16 @@ Run it:
 - **When a run fails strangely:** the cold start missing from new sessions, merges that never push, or builders without memory caps each map to one of its lines.
 - **After registering or moving a project:** it confirms the conf's path, branch, test command and remote, which `ws init` guessed.
 
+### Install a specific version
+
+`main` is always the newest release. Every release is tagged (`v2.4.2`) and has a page under Releases with its notes. A branch per major version (`v2`) follows the newest release of that major, so you get its fixes without its breaking changes:
+
+```bash
+git clone --branch v2.4.2 <this repository's URL> ~/crafting-guild   # one exact release
+git clone --branch v2 <this repository's URL> ~/crafting-guild       # the newest 2.x
+git -C ~/crafting-guild fetch --tags && git -C ~/crafting-guild checkout v2.4.1   # switch an existing copy
+```
+
 ## Register a project
 
 ```bash
@@ -108,6 +118,7 @@ Builders never push and never touch the main checkout.
 | `ws chain <queue>`, `ws chain-wait` | run a queue of steps unattended; wait on a running chain |
 | `ws audit [days]` | what builders keep doing by hand, from the run logs |
 | `ws release [--dry-run]` | publish main (or its `RELEASE_PATHS`) as one audited commit on a public repository |
+| `ws rollback [--dry-run] [vX.Y.Z]` | put the published files back to a public release, as one new commit (files outside `RELEASE_PATHS` untouched); without a version, list the releases |
 | `ws site [--dry-run]` | copy a project's published files into a site project, test, push, wait until live |
 | `ws --project <slug> <command> ...` | act on a registered project other than the selected one |
 
