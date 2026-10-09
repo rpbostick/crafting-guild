@@ -5,6 +5,8 @@ Versions of Crafting Guild. `ws version` prints the current one.
 ## 2.5.2
 
 - `ws dispatch`: a task command written `git -C <dir> <sub>` is granted as exactly that. Any other git command starting with an option is no longer granted; before, both became a grant for every git command (`Bash(git*)`).
+- `ws audit`: a check script counts as in the suite when any script the test command runs names it, followed through more than one file (`run-all-tests.sh` calling `run-e2e.sh`), including by name without its extension. Wrapper calls from before `ws-run` existed, and hand runs of scripts the suite already runs, are no longer flagged.
+- The selftest's shellcheck step fails the selftest on a warning. Before, it only skipped printing "shellcheck ok". The scripts are now shellcheck-clean (`.shellcheckrc` covers sourcing config files by a variable path), and `ws init`'s Node detection works in a repo with more than one `*/node_modules`.
 
 ## 2.5.1
 
