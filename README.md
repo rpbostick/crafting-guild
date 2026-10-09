@@ -1,6 +1,6 @@
-# Crafting Guild Agentic Workspace
+# Crafting Guild
 
-Build software with a small team of Claude Code agents from one folder, on projects that live in other folders.
+Crafting Guild Agentic Workspace: build software with a small team of Claude Code agents from one folder, on projects that live in other folders.
 
 You open one Claude Code session here and point it at a project. That session is the orchestrator: it plans, dispatches headless builders into git worktrees of the project, checks what they claim, reviews each branch once, and merges with the project's tests as the gate. Plans live in files that survive context compaction, and a twenty-second cold start runs at every session start and after every compaction, so a resumed session never guesses.
 

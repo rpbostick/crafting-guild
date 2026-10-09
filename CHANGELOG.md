@@ -1,6 +1,11 @@
 # Changelog
 
-Versions of Crafting Guild Agentic Workspace. `ws version` prints the current one.
+Versions of Crafting Guild. `ws version` prints the current one.
+
+## 2.3.10
+
+- The name in titles and `ws version` is Crafting Guild; the full product name, Crafting Guild Agentic Workspace, opens the README.
+- `ws release` names the release commit after the public repository, and its e-mail check skips `git@github.com` (GitHub's SSH host).
 
 ## 2.3.9
 
