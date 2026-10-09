@@ -2,6 +2,10 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.4.1
+
+- Documentation brought up to date with 2.4.0: CLAUDE.md (init --dry-run, doctor, the done-when report), COMPARISON.md (done-when checks), MODIFYING.md (check-result, statusline.sh, what the selftest covers), projects/README.md (re-running init), the README's command table (`ws version`).
+
 ## 2.4.0
 
 - **Done-when, item by item.** Builders report every done-when item as met, partial or open, and whether they ran something to show it (`observed`, with the log or file) or reasoned it (`inferred`), plus what they could not establish (`unknowns`). The result check fails a `done` with an item not met and an observed item whose evidence is missing, and shows items met on inference alone. The reviewer gets the task's done-when and the builder's report, and treats an inference a user would hit as blocking.

@@ -81,7 +81,7 @@ Builders never push and never touch the main checkout.
 | `ws <slug>` | open an orchestrator session for a registered project |
 | `ws init <path> [--tests CMD] [--branch B] [--dry-run] [--force]` | register a project; `--dry-run` shows the conf and changes first; an existing conf is replaced only with `--force`, after a backup, keeping keys init does not write |
 | `ws doctor` | check this machine and the selected project, with a fix for each failure |
-| `ws list`, `ws status [slug]` | registered projects; cold-start by hand |
+| `ws list`, `ws status [slug]`, `ws version` | registered projects; cold-start by hand; the version |
 | `ws dispatch [--budget N] [--timeout T] [--model M] [--effort E] [--allow RULE]... <name> <task-file>` | run a builder (`--dry-run` or `--print-prompt` to see what it would get) |
 | `ws wait <name>`, `ws tail <name>`, `ws runs`, `ws stop <name>` | wait for, watch, list, stop runs |
 | `ws serve <name\|main> [port]`, `ws serve stop [name]` | preview server from a worktree or the main checkout |

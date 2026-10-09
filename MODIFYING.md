@@ -18,7 +18,8 @@ scripts/lib.sh          shared helpers; loads projects/<slug>.conf into variable
 scripts/cold-start.sh   ground truth in ~20 s. Git state, worktrees, running builders, servers, in-flight block.
 scripts/dispatch.sh     creates the worktree, builds the builder prompt and grant, runs claude -p in the background,
                         then runs check-result.sh when it ends.
-scripts/check-result.sh reads the run's final JSON and checks its claims against the branch.
+scripts/check-result.sh reads the run's final JSON and checks its claims against the branch: commits, test logs,
+                        each done-when item (a `done` with an item not met fails; observed evidence must exist).
 scripts/review.sh       diff on stdin to a read-only reviewer; writes runs/<slug>/<name>.review.{json,md}.
 scripts/merge.sh        pinned-SHA merge, test gate, push, cleanup.
 scripts/chain.sh        runs a queue of steps (dispatch, wait, review, one automatic fix round, merge, next); stops on
@@ -28,6 +29,8 @@ scripts/doctor.sh       `ws doctor`: required and optional tools, the SessionSta
 scripts/site.sh         `ws site`: copies a project's SITE_SYNC files (or its GitHub release) into its SITE_PROJECT,
                         checks each copy byte for byte, runs the site's tests, commits, pushes, waits until live.
 scripts/audit.py        `ws audit`: repeated hand work in the run logs. Writes runs/<slug>/audit.last for cold-start.
+scripts/statusline.sh   the Claude Code status line: each running builder (elapsed time, tool calls, seconds since
+                        its last output, budget), then preview servers. No git calls.
 bin/ws-run              the builders' evidence runner: one granted command, its log, its exit code, a row in runs.tsv.
 scripts/selftest.sh     syntax checks plus a dry run against a scratch repo. Run it after any change here.
 agents/*.md             the three roles. Plain prose, pasted into prompts.
@@ -78,6 +81,6 @@ state/current           the last project opened with `ws <slug>`; what a termina
 
 ## Testing a change
 
-`scripts/selftest.sh` checks syntax and exercises init, dispatch (dry run), the resume path and cold-start against a throwaway repo. For a real end-to-end check, register a scratch repo and run a small task with `--model haiku --budget 1`; a full dispatch, review and merge costs under twenty cents.
+`scripts/selftest.sh` checks syntax and exercises, against a throwaway repo: init (including `--dry-run` and `--force`), dispatch (dry run, prompt contents, grants), the resume path, cold-start and its In flight block, the result check's done-when rules, the review prompt, doctor, the chain's merged-step skip, and release (audit, `RELEASE_PATHS`, private-file refusal). For a real end-to-end check, register a scratch repo and run a small task with `--model haiku --budget 1`; a full dispatch, review and merge costs under twenty cents.
 
 - `scripts/release.sh` (`ws release`): with `RELEASE_PATHS` in the project's conf, only those paths (and `source=dest` renames) go public. Publishes main as a release of the project's public repository (remote `public`, local branch `public-release`); audit, plumbing commit of main's tree, tag, clean-clone asset build, GitHub release. Covered by `scripts/selftest.sh`.
