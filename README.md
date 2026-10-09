@@ -4,7 +4,7 @@ Build software with a small team of Claude Code agents from one folder, on proje
 
 You open one Claude Code session here and point it at a project. That session is the orchestrator: it plans, dispatches headless builders into git worktrees of the project, checks what they claim, reviews each branch once, and merges with the project's tests as the gate. Plans live in files that survive context compaction, and a twenty-second cold start runs at every session start and after every compaction, so a resumed session never guesses.
 
-No servers, no Docker, no cron, no MCP: a few hundred lines of shell, one small Python script and a few pages of prose.
+No servers, no Docker, no cron, no MCP: about 1,300 lines of shell, one small Python script and a few pages of prose.
 
 ## Requirements
 
