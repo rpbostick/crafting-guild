@@ -2,7 +2,7 @@
 
 **In flight right now**
 
-**DISPATCHED (2026-10-09 17:11 MDT, Patrick: both now, $8 each):** bw-avatar-cozybuilder and bw-avatar-characterstudio run side by side (light, 45m). Next: read both results, review, merge, then the decision talk.
+**SPIKES MERGED (2026-10-09 17:18 MDT):** bw-avatar-cozybuilder aae6820 ($1.17 + review $0.30) and bw-avatar-characterstudio c82d926 ($2.19 + review $0.29), reports in bike-weather docs/research/. CharacterStudio recommends a layered 2D SVG avatar (draw order by layer role) over 3D (pre-alpha expo-gl, no asset licences, a Blender/VRM pipeline). CozyBuilder: one named-part library, hiding rules as data, a test over every outfit; its one-item slots and all-or-nothing masks do not fit. Carry forward: prefix external paths (`CharacterStudio:`), permalinks at the commit read. Next: the decision talk (step 3).
 
 ## Why
 
