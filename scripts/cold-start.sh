@@ -85,8 +85,11 @@ done
 [ "$found" -eq 0 ] && echo "  none. Plans: $(ls "$WS/plans/$SLUG"/*.md 2>/dev/null | xargs -rn1 basename | paste -sd' ' | grep . || echo none)"
 echo
 echo "--- lessons ---"
-echo "  read lessons/orchestrator.md before dispatching ($(grep -c '^- ' "$WS/lessons/orchestrator.md") lines)"
-for lf in "$WS"/lessons/*.md; do n=$(wc -l < "$lf"); [ "$n" -gt "${WS_LESSONS_CAP:-40}" ] && echo "  ${lf#"$WS"/} is $n lines, over the cap of $WS_LESSONS_CAP: prune it before adding to it"; done
+# lessons/<role>.local.md holds the operator's own lessons beside the shared ones; the cap applies to each file.
+read_line="  read lessons/orchestrator.md ($(grep -c '^- ' "$WS_LESSONS_DIR/orchestrator.md") lines)"
+[ -f "$WS_LESSONS_DIR/orchestrator.local.md" ] && read_line+=" and lessons/orchestrator.local.md ($(grep -c '^- ' "$WS_LESSONS_DIR/orchestrator.local.md") lines)"
+echo "$read_line before dispatching"
+for lf in "$WS_LESSONS_DIR"/*.md; do n=$(wc -l < "$lf"); [ "$n" -gt "${WS_LESSONS_CAP:-40}" ] && echo "  lessons/$(basename "$lf") is $n lines, over the cap of $WS_LESSONS_CAP: prune it before adding to it"; done
 al=$(cat "$RUNS/audit.last" 2>/dev/null || echo never)
 if [ "$al" = never ] || [ $(( ( $(date +%s) - $(date -d "$al" +%s 2>/dev/null || echo 0) ) / 86400 )) -ge 7 ]; then
   echo "  automation audit due (last: $al): run ws audit and turn its top finding into the next tool fix or light task"

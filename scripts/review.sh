@@ -28,7 +28,7 @@ prompt="You are the reviewer for branch $br of project $SLUG, working directory 
 $(cat "$WS/agents/reviewer.md")
 
 # Lessons
-$(cat "$WS/lessons/reviewer.md")
+$(lessons_for reviewer)
 
 # Checklist
 $(cat "$WS/checklist.md")

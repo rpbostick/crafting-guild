@@ -4,15 +4,15 @@
 # Usage: site.sh [--project slug] [--dry-run]
 #
 # The project's conf names the site and what goes where:
-#   SITE_PROJECT="rpbostick-github-io"            # a registered project; its conf sets SITE_URL and SITE_ROOT
+#   SITE_PROJECT="my-site"                        # a registered project; its conf sets SITE_URL and SITE_ROOT
 #   SITE_SYNC=("<source> <dest> [--exclude NAME ...]" ...)
 # <source> is a path in the project (a directory copies its contents, a file copies itself), or
 # `release:` for the project's GitHub release of its package.json version on the remote `public` (the
 # zip's single top folder). <dest> is a path in the site repository. A directory dest is mirrored:
 # files gone from the source are removed.
 # Deliberate: rsync --checksum. Release zips have fixed timestamps (byte-identical builds), so a rebuilt
-# file of the same size looks unchanged to rsync's default size-and-time check; on 2026-10-08 that kept an
-# old toybox.js on the site pointing at chunks that had been removed.
+# file of the same size looks unchanged to rsync's default size-and-time check, which leaves an old
+# entry script on the site pointing at chunks that have been removed.
 . "$(dirname "$0")/lib.sh"
 slug="" dry=false
 while [ $# -gt 0 ]; do case "$1" in --project) slug="$2"; shift 2 ;; --dry-run) dry=true; shift ;; *) die "usage: site.sh [--project slug] [--dry-run]" ;; esac; done

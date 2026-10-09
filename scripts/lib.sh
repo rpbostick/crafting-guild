@@ -3,6 +3,11 @@
 WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=../config.sh
 . "$WS/config.sh"
+# Private overrides (your own names for WS_ATTRIBUTION_RE, a different browser): kept out of a published copy.
+# shellcheck source=/dev/null
+[ -f "$WS/config.local.sh" ] && . "$WS/config.local.sh"
+# The lessons directory; the selftest points it at a scratch copy.
+WS_LESSONS_DIR="${WS_LESSONS_DIR:-$WS/lessons}"
 die() { echo "ws: $*" >&2; exit 1; }
 note() { echo "ws: $*" >&2; }
 now_local() { if [ -n "${WS_TZ:-}" ]; then TZ="$WS_TZ" date "+%Y-%m-%d %H:%M %Z"; else date "+%Y-%m-%d %H:%M %Z"; fi; }
@@ -34,6 +39,12 @@ attribution_exempt() {
   local p; for p in "${CREDIT_PATHS[@]}"; do printf ':!%s\n' "$p"; done
   # Generated files (bundles that inline third-party code) whose sources are checked instead.
   for p in "${ATTRIBUTION_EXEMPT[@]}"; do printf ':!%s\n' "$p"; done
+}
+# A role's lessons as pasted into its prompt: lessons/<role>.md, then lessons/<role>.local.md when it exists
+# (private, operator-specific lessons that a published copy leaves out).
+lessons_for() {
+  cat "$WS_LESSONS_DIR/$1.md"
+  if [ -f "$WS_LESSONS_DIR/$1.local.md" ]; then echo; cat "$WS_LESSONS_DIR/$1.local.md"; fi
 }
 worktree_dir() { echo "$WT_ROOT/$1"; }
 # The task file a run was dispatched with (its runs/<slug>/<name>.task.txt holds the run's metadata,

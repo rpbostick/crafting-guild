@@ -5,7 +5,7 @@
 # and act on the stop; running it again resumes where the queue stands (merged steps are skipped).
 # Usage: chain.sh [--project slug] <queue-file>
 # Queue file, one step per line ('#' comments and blank lines are skipped):
-#   <name> <task-file> [gate] [dispatch flags...]   e.g.  fw-pins plans/figurewright/task-fw-33.md --allow "Bash(npm run renders:*)"
+#   <name> <task-file> [gate] [dispatch flags...]   e.g.  app-pins plans/my-app/task-pins.md --allow "Bash(npm run renders:*)"
 # State: runs/<slug>/chain.{pid,status,log}. A merged step's review suggestions are appended to the next step's task.
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
@@ -22,9 +22,9 @@ log() { echo "$(now_local)  $*" | tee -a "$tee_to"; }
 status() { echo "$1 $(now_local) $2" > "$statf"; }
 stop() { status stopped "$1: $2"; log "STOP at $1: $2"; exit "${3:-1}"; }
 # grep -c, not grep -q: -q exits at the first match, git dies of SIGPIPE, and pipefail turns a match into a failure
-# (on a long history only; it re-dispatched a merged step, 2026-10-01).
+# (on a long history only, where it re-dispatches a merged step).
 # merged <name> <task>: the newest merge of agent/<name> is newer than the task file's first commit in this workspace
-# (or its mtime if untracked). A reused name with a new task is a new step (sky-demo was skipped as merged, 2026-10-04).
+# (or its mtime if untracked). A reused name with a new task is a new step, not one skipped as merged.
 merged() {
   local mt tt
   mt=$(git -C "$PROJECT_PATH" log "$PROJECT_BRANCH" --merges --format='%ct %s' | grep -E " Merge agent/$1([: ]|$)" | head -1 | cut -d' ' -f1 || true)
