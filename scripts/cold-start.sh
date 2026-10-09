@@ -95,6 +95,13 @@ al=$(cat "$RUNS/audit.last" 2>/dev/null || echo never)
 if [ "$al" = never ] || [ $(( ( $(date +%s) - $(date -d "$al" +%s 2>/dev/null || echo 0) ) / 86400 )) -ge 7 ]; then
   echo "  automation audit due (last: $al): run ws audit and turn its top finding into the next tool fix or light task"
 fi
+# ws doctor, quietly: only its failures (with their fix) and warnings are printed.
+echo "--- setup (ws doctor) ---"
+doc=$("$WS/scripts/doctor.sh" --project "$SLUG" 2>&1); dx=$?
+problems=$(printf '%s\n' "$doc" | grep -E '^(FAIL|warn)  ' | sed 's/^/  /')
+fixes=$(printf '%s\n' "$doc" | grep -A1 '^FAIL' | grep '^      fix:' | sed 's/^      /    /')
+if [ -n "$problems" ]; then printf '%s\n' "$problems"; [ -n "$fixes" ] && printf '%s\n' "$fixes"; else echo "  ok: every check passes"; fi
+[ "$dx" -ne 0 ] && echo "  a required check failed: dispatches and chains will fail until it is fixed (ws doctor shows each fix)"
 $brief && exit 0
 echo
 echo "--- workspace ---"
