@@ -44,14 +44,15 @@ wt="$(worktree_dir "$name")"; br="$(branch_of "$name")"
 if [ -f "$RUNS/$name.pid" ] && kill -0 "$(cat "$RUNS/$name.pid")" 2>/dev/null; then die "a run named $name is still going (pid $(cat "$RUNS/$name.pid"))"; fi
 
 # Worktree: create on a fresh branch from the main branch, or reuse an existing one (a resume).
+fresh_wt=false fresh_br=false
 if [ ! -d "$wt" ]; then
-  mkdir -p "$WT_ROOT"
+  fresh_wt=true; mkdir -p "$WT_ROOT"
   excl="$(git -C "$PROJECT_PATH" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
   for e in .worktrees .ws-evidence; do grep -qx "$e" "$excl" 2>/dev/null || echo "$e" >> "$excl"; done
   if git -C "$PROJECT_PATH" show-ref --verify --quiet "refs/heads/$br"; then
     git -C "$PROJECT_PATH" worktree add -q "$wt" "$br"
   else
-    git -C "$PROJECT_PATH" worktree add -q -b "$br" "$wt" "$PROJECT_BRANCH"
+    git -C "$PROJECT_PATH" worktree add -q -b "$br" "$wt" "$PROJECT_BRANCH"; fresh_br=true
   fi
   # Share gitignored environments and data with the main checkout instead of rebuilding them.
   for src in "$PROJECT_PATH"/.venv "$PROJECT_PATH"/node_modules "$PROJECT_PATH"/*/.venv "$PROJECT_PATH"/*/node_modules; do
@@ -160,6 +161,9 @@ if $dry; then
   echo "cwd: $wt"; echo "tools: ${TOOLS[*]}"; echo "deny: ${DENY[*]}"; echo "budget: \$$budget timeout: $tmo model: ${model:-default} memory cap: ${WS_BUILDER_MEM:-none}"
   echo "prompt bytes: ${#prompt}"; echo "evidence: $wt/.ws-evidence"
   if $show_prompt; then echo "--- prompt ---"; printf '%s\n' "$prompt"; fi
+  # A dry run leaves nothing behind: a worktree (and branch) it made goes again, so a later dispatch branches from
+  # the main branch as it is then. One that existed before (a resume) stays.
+  if $fresh_wt; then git -C "$PROJECT_PATH" worktree remove --force "$wt"; $fresh_br && git -C "$PROJECT_PATH" branch -q -D "$br"; fi
   exit 0
 fi
 

@@ -2,6 +2,11 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.5.3
+
+- `ws dispatch`: a glob in a task's `## Commands` is not expanded against the workspace's files. `` `node *` `` is granted as `Bash(node*)`; before, it became `Bash(node agents*)` from the folder listing.
+- `ws dispatch --dry-run` (and `--print-prompt`) leaves nothing behind: a worktree and branch it created for the dry run are removed, so a later dispatch branches from the main branch as it is then. A worktree that already existed (a resume) is kept.
+
 ## 2.5.2
 
 - `ws dispatch`: a task command written `git -C <dir> <sub>` is granted as exactly that. Any other git command starting with an option is no longer granted; before, both became a grant for every git command (`Bash(git*)`).

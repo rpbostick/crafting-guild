@@ -2,7 +2,7 @@
 
 **In flight right now**
 
-**PLANNED (2026-10-09 17:27 MDT), nothing dispatched.** Waits for the budget reset on 2026-10-12. Before step 2, Patrick runs `gh auth refresh -s write:packages,read:packages` once (the token has repo, gist, read:org and workflow, not packages). About $34 in builders plus about $3 in reviews for steps 1 to 5.
+**APPROVED (2026-10-09, Patrick), nothing dispatched.** Waits for the budget reset on 2026-10-12. Before step 2, Patrick runs `gh auth refresh -s write:packages,read:packages` once (the token has repo, gist, read:org and workflow, not packages). About $34 in builders plus about $3 in reviews for steps 1 to 5.
 
 ## Requirements
 - The Today screen shows the suggested outfit on a figurewright body. Garments are drawn in layer-role order (base, mid, outer, shell, accessory), each in the garment's own colour, and lower layers show where upper ones stop (decisions 2026-10-09 in `product.md`).

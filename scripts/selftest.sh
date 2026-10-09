@@ -19,8 +19,10 @@ printf 'n\n' | "$WS/bin/ws" init "$T" --tests "sh t.sh" --force >/dev/null && gr
 rm -f "$cf".bak-*
 printf '# demo task\nAdd a file.\n' > "$T/task.md"
 out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>&1); grep -q "budget:" <<< "$out" && echo "dry-run ok"
-[ -d "$T/.worktrees/demo" ] && echo "worktree ok"
-out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>&1); grep -q "reusing worktree" <<< "$out" && echo "resume path ok"
+[ ! -d "$T/.worktrees/demo" ] && ! git -C "$T" show-ref --quiet refs/heads/agent/demo && echo "dry run leaves no worktree ok" || { echo "dry run left a worktree"; exit 1; }
+# The resume path: a worktree that exists before the dry run is reused and kept.
+git -C "$T" worktree add -q -b agent/demo "$T/.worktrees/demo" main
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>&1); grep -q "reusing worktree" <<< "$out" && [ -d "$T/.worktrees/demo" ] && echo "resume path ok" || { echo "resume path FAILED"; exit 1; }
 grep -qx '.worktrees' "$T/.git/info/exclude" && grep -qx '.ws-evidence' "$T/.git/info/exclude" && echo "exclude ok"
 [ -d "$T/.worktrees/demo/.ws-evidence" ] && echo "evidence dir ok"
 grep -q 'timeout: 120m' <<< "$out" && echo "full-track timeout ok"
