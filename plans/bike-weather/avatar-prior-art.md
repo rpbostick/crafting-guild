@@ -2,7 +2,7 @@
 
 **In flight right now**
 
-**PLANNED (2026-10-09, Patrick asked for it):** not dispatched. Two research spikes, then a decision talk. Waits for the budget reset on 2026-10-12 (about $16 for both spikes plus about $3 for the reviews). Queue: `avatar-prior-art.queue`.
+**DISPATCHED (2026-10-09 17:11 MDT, Patrick: both now, $8 each):** bw-avatar-cozybuilder and bw-avatar-characterstudio run side by side (light, 45m). Next: read both results, review, merge, then the decision talk.
 
 ## Why
 
