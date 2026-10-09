@@ -34,6 +34,7 @@ Nothing is kept in the model. A `SessionStart` hook runs a cold start at every s
 git clone <this repository's URL> ~/crafting-guild
 ln -s ~/crafting-guild/bin/ws ~/.local/bin/ws          # or add bin/ to your PATH
 bash ~/crafting-guild/scripts/selftest.sh              # checks the scripts against a throwaway repo
+ws doctor                                              # checks this machine; says what to fix
 ```
 
 ## Register a project
@@ -63,7 +64,7 @@ agent:  ws merge hats-1 3f2a9c1  -> tests passed, pushed, worktree removed
 
 1. **Plan** in `plans/<slug>/`: small independent steps, each a task file a builder can run cold, each with a done-when.
 2. **Dispatch** one builder per step into its own worktree and branch, with a dollar budget, a wall-clock cap and a grant of exactly the commands it needs.
-3. **Wait**, then read the checked result: claimed commits must exist on the branch, a claimed test log must be where it says, and denied calls are listed whether or not the builder mentions them.
+3. **Wait**, then read the checked result: claimed commits must exist on the branch, a claimed test log must be where it says, and denied calls are listed whether or not the builder mentions them. The builder reports each done-when item as met, partial or open, and whether it ran something to show it (observed) or reasoned it (inferred); a `done` with an item open fails the check, and observed evidence must exist in the worktree.
 4. **Preview** a visible change from the worktree.
 5. **Review** the whole branch once against `checklist.md`, after a mechanical precheck. Blocking findings go back to the builder; suggestions carry forward.
 6. **Merge** the reviewed SHA: the project's tests run on the merged tree, a red suite undoes the merge, a green one pushes.
@@ -78,7 +79,8 @@ Builders never push and never touch the main checkout.
 | Command | What it does |
 |---|---|
 | `ws <slug>` | open an orchestrator session for a registered project |
-| `ws init <path> [--tests CMD] [--branch B]` | register a project |
+| `ws init <path> [--tests CMD] [--branch B] [--dry-run] [--force]` | register a project; `--dry-run` shows the conf and changes first; an existing conf is replaced only with `--force`, after a backup, keeping keys init does not write |
+| `ws doctor` | check this machine and the selected project, with a fix for each failure |
 | `ws list`, `ws status [slug]` | registered projects; cold-start by hand |
 | `ws dispatch [--budget N] [--timeout T] [--model M] [--effort E] [--allow RULE]... <name> <task-file>` | run a builder (`--dry-run` or `--print-prompt` to see what it would get) |
 | `ws wait <name>`, `ws tail <name>`, `ws runs`, `ws stop <name>` | wait for, watch, list, stop runs |

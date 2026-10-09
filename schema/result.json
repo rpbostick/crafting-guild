@@ -2,23 +2,128 @@
   "type": "object",
   "description": "Final result a dispatched builder returns. Checked afterwards by scripts/check-result.sh against the branch.",
   "properties": {
-    "status": {"type": "string", "enum": ["done", "partial", "blocked"]},
-    "summary": {"type": "string", "description": "What was done, in a few sentences."},
-    "files_changed": {"type": "array", "items": {"type": "string"}},
-    "commits": {"type": "array", "items": {"type": "string"}, "description": "SHAs of commits made on the branch."},
+    "status": {
+      "type": "string",
+      "enum": [
+        "done",
+        "partial",
+        "blocked"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "description": "What was done, in a few sentences."
+    },
+    "files_changed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "commits": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "SHAs of commits made on the branch."
+    },
     "tests": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "description": "null if no tests were run.",
       "properties": {
-        "command": {"type": "string"},
-        "passed": {"type": "integer"},
-        "failed": {"type": "integer"},
-        "log_path": {"type": "string", "description": "Repo-relative path of the saved raw test output, or an empty string."}
+        "command": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "integer"
+        },
+        "failed": {
+          "type": "integer"
+        },
+        "log_path": {
+          "type": "string",
+          "description": "Repo-relative path of the saved raw test output, or an empty string."
+        }
       },
-      "required": ["command", "passed", "failed", "log_path"]
+      "required": [
+        "command",
+        "passed",
+        "failed",
+        "log_path"
+      ]
     },
-    "denied": {"type": "array", "items": {"type": "string"}, "description": "Every command or tool call that was denied."},
-    "open_questions": {"type": "array", "items": {"type": "string"}}
+    "denied": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Every command or tool call that was denied."
+    },
+    "done_when": {
+      "type": "array",
+      "description": "One entry per item of the task's done-when (its ## Done when section, or the done-when the task states), in order. Empty only when the task states none.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "item": {
+            "type": "string",
+            "description": "The done-when item, quoted or closely paraphrased."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "met",
+              "partial",
+              "open"
+            ]
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "observed",
+              "inferred"
+            ],
+            "description": "observed: you ran something that shows it (a test, a command, a render) and cite it in evidence. inferred: reasoned from the code without running anything."
+          },
+          "evidence": {
+            "type": "string",
+            "description": "For observed: the log or file path under .ws-evidence/, the test file, or the commit that shows it. For inferred: the reasoning in one sentence."
+          }
+        },
+        "required": [
+          "item",
+          "status",
+          "basis",
+          "evidence"
+        ]
+      }
+    },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What you could not establish and what it would take (an environment, a device, a person's look). Not questions for the operator: those go in open_questions."
+    },
+    "open_questions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
   },
-  "required": ["status", "summary", "files_changed", "commits", "tests", "denied", "open_questions"]
+  "required": [
+    "status",
+    "summary",
+    "files_changed",
+    "commits",
+    "tests",
+    "denied",
+    "done_when",
+    "unknowns",
+    "open_questions"
+  ]
 }

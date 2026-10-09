@@ -29,6 +29,7 @@ ws release [--dry-run] [--notes T] [--no-asset]   publish main as a release of t
                                 audit, one commit with main's tree, tag vX.Y.Z, clean-clone build, GitHub release
 ws site [--dry-run]             copy the project's SITE_SYNC files into its SITE_PROJECT, check they match,
                                 run the site's tests, commit, push, wait until live
+ws doctor                       check this machine and the selected project; says what to fix
 ws version                      print the workspace version (see CHANGELOG.md)
 USAGE
 }
@@ -41,7 +42,8 @@ case "$cmd" in
   list) for f in "$WS"/projects/*.conf; do [ -f "$f" ] || continue; ( . "$f"; printf '%-18s %s (%s)%s\n' "$(basename "$f" .conf)" "$PROJECT_PATH" "$PROJECT_BRANCH" "$( [ "$(head -n1 "$WS/state/current" 2>/dev/null)" = "$(basename "$f" .conf)" ] && echo '  <- current')" ); done ;;
   init)
     path="${1:?ws init <path>}"; shift; tests="" branch="" yes=false
-    while [ $# -gt 0 ]; do case "$1" in --tests) tests="$2"; shift 2 ;; --branch) branch="$2"; shift 2 ;; --yes) yes=true; shift ;; *) die "unknown flag $1" ;; esac; done
+    dry=false force=false
+    while [ $# -gt 0 ]; do case "$1" in --tests) tests="$2"; shift 2 ;; --branch) branch="$2"; shift 2 ;; --yes) yes=true; shift ;; --dry-run) dry=true; shift ;; --force) force=true; shift ;; *) die "unknown flag $1" ;; esac; done
     path="$(cd "$path" && pwd -P)"; git -C "$path" rev-parse --git-dir >/dev/null 2>&1 || die "$path is not a git repo"
     slug="$(slugify "$path")"
     [ -z "$branch" ] && branch="$(git -C "$path" symbolic-ref --short HEAD 2>/dev/null || echo master)"
@@ -58,7 +60,8 @@ case "$cmd" in
     done
     [ -d "$path/node_modules" ] || [ -d "$path"/*/node_modules ] 2>/dev/null && extras+=("\"Bash(node *)\"" "\"Bash(npm test*)\"" "\"Bash(npx *)\"")
     preview=""; [ -f "$path/backend/app/main.py" ] && preview="cd backend && .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port {port}"
-    {
+    conf_file="$WS/projects/$slug.conf"
+    conf=$({
       echo "# Registered by ws init on $(date +%Y-%m-%d). Edit by hand; every key is read by scripts/lib.sh."
       echo "PROJECT_PATH=\"$path\""
       echo "PROJECT_BRANCH=\"$branch\"          # the branch builders branch from and merges land on"
@@ -68,9 +71,28 @@ case "$cmd" in
       echo "EXTRA_TOOLS=(${extras[*]})"
       echo "# Command that serves the app for a preview; {port} is replaced. Used by: ws serve <worktree|main> <port>"
       echo "PREVIEW_CMD=\"$preview\""
-    } > "$WS/projects/$slug.conf"
+    })
+    # An existing conf may hold keys init does not write (release, site, attribution settings) and hand
+    # fixes to the guessed ones: it is replaced only with --force, after a backup, and its other keys are kept.
+    if [ -f "$conf_file" ]; then
+      kept=$(grep -E '^[A-Z_]+=' "$conf_file" | grep -vE '^(PROJECT_PATH|PROJECT_BRANCH|TEST_CMD|EXTRA_TOOLS|PREVIEW_CMD)=' || true)
+      [ -n "$kept" ] && conf+=$'\n'"# Kept from the conf this replaced:"$'\n'"$kept"
+    fi
+    excl="$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+    if $dry; then
+      echo "dry run: would write projects/$slug.conf${conf_file:+$( [ -f "$conf_file" ] && echo " (replacing the existing one, which needs --force; a backup is made first)")}:"
+      printf '%s\n' "$conf" | sed 's/^/  /'
+      [ -f "$conf_file" ] && { echo "changes against the existing conf:"; diff <(cat "$conf_file") <(printf '%s\n' "$conf") | sed 's/^/  /' || true; }
+      echo "would create plans/$slug/ and runs/$slug/, and add .worktrees and .ws-evidence to $excl (if missing)"
+      exit 0
+    fi
+    if [ -f "$conf_file" ]; then
+      $force || die "projects/$slug.conf exists. See what would change with: ws init $path --dry-run; replace it (backed up first, other keys kept) with --force"
+      bak="$conf_file.bak-$(date -u +%Y%m%dT%H%M%SZ)"; cp "$conf_file" "$bak"; echo "backed up the existing conf to projects/$(basename "$bak")"
+    fi
+    printf '%s\n' "$conf" > "$conf_file"
     mkdir -p "$WS/plans/$slug" "$WS/runs/$slug"
-    excl="$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/info/exclude"; for e in .worktrees .ws-evidence; do grep -qx "$e" "$excl" 2>/dev/null || echo "$e" >> "$excl"; done
+    for e in .worktrees .ws-evidence; do grep -qx "$e" "$excl" 2>/dev/null || echo "$e" >> "$excl"; done
     echo "registered $slug: $path (branch $branch; tests: ${tests:-none})"
     # The earlier agentic-workspace (v1) wired per-commit review and post-merge hooks into .git/hooks; this tool
     # reviews per branch and tests on merge, so those hooks would review twice.
@@ -92,6 +114,7 @@ case "$cmd" in
   merge) "$WS/scripts/merge.sh" ${proj:+--project "$proj"} "$@" ;;
   release) "$WS/scripts/release.sh" ${proj:+--project "$proj"} "$@" ;;
   site) "$WS/scripts/site.sh" ${proj:+--project "$proj"} "$@" ;;
+  doctor) "$WS/scripts/doctor.sh" ${proj:+--project "$proj"} "$@" ;;
   check) "$WS/scripts/check-result.sh" ${proj:+--project "$proj"} "$@" ;;
   chain)
     # The chain runs detached in its own systemd scope (as builders do), so closing the session that started it
