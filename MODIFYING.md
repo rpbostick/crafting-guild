@@ -1,4 +1,4 @@
-# Modifying Crafting Guild
+# Modifying Crafting Guild Agentic Workspace
 
 Everything is plain files. There is no daemon, no database, no service. This page says what each file does and where to change what, so you can read the whole tool in an hour and change it in a minute.
 

@@ -1,4 +1,4 @@
-# Crafting Guild
+# Crafting Guild Agentic Workspace
 
 Build software with a small team of Claude Code agents from one folder, on projects that live in other folders.
 

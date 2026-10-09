@@ -1,6 +1,6 @@
 # Changelog
 
-Versions of Crafting Guild. `ws version` prints the current one.
+Versions of Crafting Guild Agentic Workspace. `ws version` prints the current one.
 
 ## 2.3.9
 
