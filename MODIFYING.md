@@ -26,6 +26,8 @@ scripts/chain.sh        runs a queue of steps (dispatch, wait, review, one autom
                         anything that needs a person. State in runs/<slug>/chain.{pid,status,log}.
 scripts/precheck.sh     the checklist rules a script can check; review.sh runs it and puts the result in the prompt.
 scripts/doctor.sh       `ws doctor`: required and optional tools, the SessionStart hook, the selected project's conf.
+scripts/rollback.sh     `ws rollback`: restores the published files to a public release (its `public-vX.Y.Z` tag)
+                        as one commit; RELEASE_PATHS renames map back; other files stay.
 scripts/site.sh         `ws site`: copies a project's SITE_SYNC files (or its GitHub release) into its SITE_PROJECT,
                         checks each copy byte for byte, runs the site's tests, commits, pushes, waits until live.
 scripts/audit.py        `ws audit`: repeated hand work in the run logs. Writes runs/<slug>/audit.last for cold-start.
@@ -83,4 +85,4 @@ state/current           the last project opened with `ws <slug>`; what a termina
 
 `scripts/selftest.sh` checks syntax and exercises, against a throwaway repo: init (including `--dry-run` and `--force`), dispatch (dry run, prompt contents, grants), the resume path, cold-start and its In flight block, the result check's done-when rules, the review prompt, doctor, the chain's merged-step skip, and release (audit, `RELEASE_PATHS`, private-file refusal). For a real end-to-end check, register a scratch repo and run a small task with `--model haiku --budget 1`; a full dispatch, review and merge costs under twenty cents.
 
-- `scripts/release.sh` (`ws release`): with `RELEASE_PATHS` in the project's conf, only those paths (and `source=dest` renames) go public. Publishes main as a release of the project's public repository (remote `public`, local branch `public-release`); audit, plumbing commit of main's tree, tag, clean-clone asset build, GitHub release. Covered by `scripts/selftest.sh`.
+- `scripts/release.sh` (`ws release`): also tags the private commit it published (`released-vX.Y.Z`), creates the GitHub release page (notes from the published CHANGELOG, marked Latest), and with `RELEASE_MAJOR_BRANCHES=1` moves the public branch `v<major>` to the release. with `RELEASE_PATHS` in the project's conf, only those paths (and `source=dest` renames) go public. Publishes main as a release of the project's public repository (remote `public`, local branch `public-release`); audit, plumbing commit of main's tree, tag, clean-clone asset build, GitHub release. Covered by `scripts/selftest.sh`.
