@@ -48,7 +48,8 @@ def tracked(*pats):
 # Check scripts in the repo that nothing in the test command's reach runs. A test that names the script
 # (a require, or a path it spawns) counts as running it, the same rule precheck.sh uses.
 gate_text = test_cmd
-for p in tracked("package.json", "scripts/run-all-tests.sh", "jest.config.*", "pytest.ini"):
+named = [w for w in test_cmd.split() if os.path.isfile(os.path.join(path, w))]  # e.g. bash scripts/selftest.sh
+for p in tracked("package.json", "scripts/run-all-tests.sh", "jest.config.*", "pytest.ini", *named):
     try: gate_text += open(os.path.join(path, p), errors="replace").read()
     except OSError: pass
 tests_text = ""
