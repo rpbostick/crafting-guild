@@ -39,7 +39,7 @@ ws doctor                                              # checks this machine; sa
 
 ### Check a setup: `ws doctor`
 
-`ws doctor` reads, never writes. It checks three things and prints `ok`, `warn` or `FAIL`, with a `fix:` line under each problem. It exits 1 only when something required fails, so a script can run it first.
+`ws doctor` reads, never writes. It also runs on its own: cold start prints its failures and warnings at every session start, and `ws chain` refuses to start while a required check fails. It checks three things and prints `ok`, `warn` or `FAIL`, with a `fix:` line under each problem. It exits 1 only when something required fails, so a script can run it first.
 
 | Checks | Required | Optional (a `warn` says what you lose without it) |
 |---|---|---|

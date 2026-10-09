@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.4.2 (2026-10-09)
+
+- `ws doctor` runs on its own: cold start prints its failures (with their fix) and warnings at every session start, and `ws chain` refuses to start while a required check fails. CLAUDE.md says when to run it by hand. Its `gh` check has a 5-second timeout.
+
 ## 2.4.1 (2026-10-09)
 
 - README: "Check a setup: `ws doctor`", what it checks (required and optional, per machine, workspace and project) and when to run it.
