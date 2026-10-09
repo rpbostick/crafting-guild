@@ -2,6 +2,10 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.3.11
+
+- README: a "Why use it" section: the problem it solves, what it adds over plain Claude Code and what it gives up, and a table comparing Claude Code in a terminal, Claude Code in VS Code, Crafting Guild and the Agent SDK.
+
 ## 2.3.10
 
 - The name in titles and `ws version` is Crafting Guild; the full product name, Crafting Guild Agentic Workspace, opens the README.

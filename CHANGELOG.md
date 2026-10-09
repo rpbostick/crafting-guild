@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.3.11 (2026-10-09)
+
+- README "Why use it", from research reports 13 to 15 (agentic-framework-research): plain Claude Code in a terminal and in VS Code, Crafting Guild and the Agent SDK compared; the evidence is the first app's numbers, anonymised.
+
 ## 2.3.10 (2026-10-09)
 
 - Name (Patrick): **Crafting Guild** in titles, tags and `ws version`; the full product name **Crafting Guild Agentic Workspace** appears in running text (the README's first line, the repository description). Published as github.com/rpbostick/crafting-guild.
