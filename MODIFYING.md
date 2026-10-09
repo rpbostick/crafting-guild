@@ -21,6 +21,8 @@ scripts/merge.sh        pinned-SHA merge, test gate, push, cleanup.
 scripts/chain.sh        runs a queue of steps (dispatch, wait, review, one automatic fix round, merge, next); stops on
                         anything that needs a person. State in runs/<slug>/chain.{pid,status,log}.
 scripts/precheck.sh     the checklist rules a script can check; review.sh runs it and puts the result in the prompt.
+scripts/site.sh         `ws site`: copies a project's SITE_SYNC files (or its GitHub release) into its SITE_PROJECT,
+                        checks each copy byte for byte, runs the site's tests, commits, pushes, waits until live.
 scripts/audit.py        `ws audit`: repeated hand work in the run logs. Writes runs/<slug>/audit.last for cold-start.
 bin/ws-run              the builders' evidence runner: one granted command, its log, its exit code, a row in runs.tsv.
 scripts/selftest.sh     syntax checks plus a dry run against a scratch repo. Run it after any change here.

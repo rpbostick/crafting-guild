@@ -5,6 +5,7 @@ WS_REVIEW_BUDGET="8"            # dollars, for a review run
 WS_DEFAULT_TIMEOUT="120m"       # wall-clock cap for a builder run (timeout(1) form)
 WS_LIGHT_TIMEOUT="45m"          # cap for a task marked 'Track: light'
 WS_BUILDER_MEM="4G"             # memory cap for a builder and everything it runs (systemd MemoryMax); empty = no cap
+WS_SERVE_MEM="3G"               # memory cap for a `ws serve` preview and everything it starts; empty = no cap
 WS_SUITE_WARN_S="300"           # ws merge warns when the project's suite takes longer than this many seconds
 WS_CHAIN_FIX_ROUNDS="1"          # ws chain: automatic fix rounds per step before it stops for the orchestrator
 WS_MODEL="opus"                   # builder model alias ("sonnet", "opus", ...); empty = Claude Code's default

@@ -56,6 +56,13 @@ if [ -n "$TEST_CMD" ]; then
   if ( cd "$PROJECT_PATH" && bash -c "$TEST_CMD" ) > "$log" 2>&1; then
     secs=$(( $(date +%s) - t0 )); echo "--- ws merge: suite ${secs}s ---" >> "$log"
     echo "tests passed in ${secs}s (log: ${log#"$WS/"})"
+    # The checkout had no modified tracked files before the merge, so any now are the test run's own
+    # output (toybox's build rewrote SIZES.md with new chunk hashes, which then blocked `ws release`).
+    mapfile -t touched < <(git -C "$PROJECT_PATH" diff --name-only)
+    if [ ${#touched[@]} -gt 0 ]; then
+      git -C "$PROJECT_PATH" checkout -q -- "${touched[@]}"
+      echo "ws: the test run changed tracked files; restored to the merged commit: ${touched[*]}. A build that rewrites a committed file is not reproducible; worth a light task in the project." >&2
+    fi
     [ "$secs" -gt "${WS_SUITE_WARN_S:-300}" ] && echo "ws: the suite took ${secs}s, over WS_SUITE_WARN_S=${WS_SUITE_WARN_S:-300}. Every merge pays this; a builder task to speed up the slowest test files pays for itself in a few merges (colorwright: 28 min to 2 min for \$3.75)."
   else
     git -C "$PROJECT_PATH" reset --hard ORIG_HEAD -q

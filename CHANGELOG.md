@@ -2,6 +2,13 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.3.8 (2026-10-09)
+
+- **`ws site` copies a project's published files into the site.** A project's conf names `SITE_PROJECT` and `SITE_SYNC` (`release:` for its GitHub release zip, or paths in the project); the command mirrors each with `rsync --checksum`, checks every copy matches, runs the site's tests, commits, pushes and waits until the live site serves a changed file of each. By hand three times on 2026-10-03 and 08; the last hand copy kept an old `toybox.js` (release zips have fixed timestamps, so rsync's size-and-time check skipped it). Set up for toybox and pen-paper-rpg (chargen-toybox).
+- **A merge restores tracked files its test run rewrote.** toybox's build rewrote `SIZES.md` with new chunk hashes, leaving the main checkout dirty and `ws release` refusing to run until it was restored by hand. `ws merge` now restores them after a green run and says which.
+- **Previews run under a memory cap.** `ws serve` starts the preview in a systemd scope with `MemoryMax=$WS_SERVE_MEM` (3G), as builders run under `WS_BUILDER_MEM`; past it only the preview dies.
+- **Builders read dependencies with Read, Grep and Glob.** The audit's denied calls were mostly `cat`, `ls` and `grep` inside `node_modules`, a link to the main checkout outside the worktree; the builder prompt now says so.
+
 ## 2.3.7 (2026-10-09)
 
 - **Light-track reviews really use the cheaper model.** `ws review` looked for `Track: light` in `runs/<slug>/<name>.task.txt`, which holds the run's metadata, not the task, so every light branch reviewed on `WS_REVIEW_MODEL` since 2.3.5 (`toybox-draw-labels` hit the Fable limit on 2026-10-08). It now reads the task file that `task=` names (`task_is_light` in lib.sh); the selftest checks it.

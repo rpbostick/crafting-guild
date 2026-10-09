@@ -27,6 +27,8 @@ ws serve <name|main> [port]     start the project's preview server from a worktr
 ws serve stop [name|main]       stop it;  ws serve list
 ws release [--dry-run] [--notes T] [--no-asset]   publish main as a release of the public repo (remote 'public'):
                                 audit, one commit with main's tree, tag vX.Y.Z, clean-clone build, GitHub release
+ws site [--dry-run]             copy the project's SITE_SYNC files into its SITE_PROJECT, check they match,
+                                run the site's tests, commit, push, wait until live
 ws version                      print the workspace version (see CHANGELOG.md)
 USAGE
 }
@@ -88,6 +90,7 @@ case "$cmd" in
   review) "$WS/scripts/review.sh" ${proj:+--project "$proj"} "$@" ;;
   merge) "$WS/scripts/merge.sh" ${proj:+--project "$proj"} "$@" ;;
   release) "$WS/scripts/release.sh" ${proj:+--project "$proj"} "$@" ;;
+  site) "$WS/scripts/site.sh" ${proj:+--project "$proj"} "$@" ;;
   check) "$WS/scripts/check-result.sh" ${proj:+--project "$proj"} "$@" ;;
   chain)
     # The chain runs detached in its own systemd scope (as builders do), so closing the session that started it
@@ -149,9 +152,13 @@ case "$cmd" in
          if [ "$what" = main ]; then dir="$PROJECT_PATH"; [ -z "$port" ] && port=8800; else dir="$(worktree_dir "$what")"; [ -d "$dir" ] || die "no worktree $what"; [ -z "$port" ] && port=8801; fi
          sf="$RUNS/serve-$what.pid"; [ -f "$sf" ] && kill -0 "$(cut -d' ' -f1 "$sf")" 2>/dev/null && die "$what is already serving (ws serve stop $what)"
          cmd="${PREVIEW_CMD//\{port\}/$port}"
-         ( cd "$dir" && exec setsid bash -c "$cmd" ) > "$RUNS/serve-$what.log" 2>&1 &
+         # A preview runs under WS_SERVE_MEM like a builder under WS_BUILDER_MEM: past it, only the preview
+         # is killed. Two uncapped Expo previews took the desktop session on 2026-10-08.
+         cap=(); [ -n "${WS_SERVE_MEM:-}" ] && systemd-run --user --scope --quiet true >/dev/null 2>&1 &&
+           cap=(systemd-run --user --scope --quiet -p "MemoryMax=$WS_SERVE_MEM" -p MemorySwapMax=0 --unit "ws-$SLUG-serve-$what-$(date -u +%Y%m%dT%H%M%SZ)" --description "ws serve $SLUG/$what")
+         ( cd "$dir" && exec "${cap[@]}" setsid bash -c "$cmd" ) > "$RUNS/serve-$what.log" 2>&1 &
          echo "$! $port" > "$sf"; sleep 2
-         if kill -0 "$!" 2>/dev/null; then echo "serving $what at http://127.0.0.1:$port/ (log: runs/$SLUG/serve-$what.log; stop: ws serve stop $what)"; else rm -f "$sf"; tail -n 20 "$RUNS/serve-$what.log"; die "server exited"; fi ;;
+         if kill -0 "$!" 2>/dev/null; then echo "serving $what at http://127.0.0.1:$port/ (memory cap: ${WS_SERVE_MEM:-none}; log: runs/$SLUG/serve-$what.log; stop: ws serve stop $what)"; else rm -f "$sf"; tail -n 20 "$RUNS/serve-$what.log"; die "server exited"; fi ;;
     esac ;;
   stop)
     name="${1:?ws stop <name>}"; load_project "$proj"; pf="$RUNS/$name.pid"; [ -f "$pf" ] || die "no running $name"
