@@ -16,6 +16,9 @@ WRAPPER = re.compile(r"(run_logged|run\.js|run_check|grid\.js|scripts/evidence/)
 TEST = re.compile(r"^(npx )?(jest|vitest)|^npm (run )?test|pytest|-m unittest|^node --test")
 SCRIPT = re.compile(r"^(npx )?tsx\s+((scripts|spike)/\S+)|^(node|python3?|\S*/python3?)\s+((scripts|spike)/\S+)")
 
+ws = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+wsrun_added = int((subprocess.run(["git", "-C", ws, "log", "--diff-filter=A", "--format=%ct", "--", "bin/ws-run"],
+                                  capture_output=True, text=True).stdout.split() or ["0"])[-1])
 runs = [f for f in glob.glob(os.path.join(runs_dir, "*.jsonl")) if os.path.getmtime(f) >= since]
 cat = collections.Counter(); per_script = collections.defaultdict(set); probes_per_run = {}
 wrappers = collections.Counter(); wsrun_runs = 0; denied = collections.Counter(); minutes = 0.0
@@ -34,7 +37,9 @@ for f in runs:
             cmd = (c["input"].get("command") or "").strip()
             if "/bin/ws-run " in cmd: used_wsrun = True; cmd = cmd.split(None, 2)[2] if len(cmd.split(None, 2)) > 2 else cmd
             if TEST.search(cmd): cat["test runs"] += 1
-            elif WRAPPER.search(cmd): cat["hand-written evidence wrappers"] += 1; wrappers[name] += 1
+            elif WRAPPER.search(cmd):
+                cat["hand-written evidence wrappers"] += 1
+                if os.path.getmtime(f) >= wsrun_added: wrappers[name] += 1  # older runs had no ws-run to use
             elif PROBE.search(cmd): cat["one-off probe scripts"] += 1; probes += 1
             elif m := SCRIPT.search(cmd): cat["committed scripts run by hand"] += 1; per_script[m.group(2) or m.group(5)].add(name)
             elif cmd.startswith("git "): cat["git"] += 1
@@ -48,20 +53,29 @@ def tracked(*pats):
 # Check scripts in the repo that nothing in the test command's reach runs. A test that names the script
 # (a require, or a path it spawns) counts as running it, the same rule precheck.sh uses.
 gate_text = test_cmd
-named = [w for w in test_cmd.split() if os.path.isfile(os.path.join(path, w))]  # e.g. bash scripts/selftest.sh
-for p in tracked("package.json", "scripts/run-all-tests.sh", "jest.config.*", "pytest.ini", *named):
-    try: gate_text += open(os.path.join(path, p), errors="replace").read()
-    except OSError: pass
+# The files the test command names, and the scripts those name in turn (run-all-tests.sh -> run-e2e.sh).
+queue = tracked("package.json", "scripts/run-all-tests.sh", "jest.config.*", "pytest.ini") \
+    + [w for w in test_cmd.split() if os.path.isfile(os.path.join(path, w))]
+read = set()
+while queue:
+    p = queue.pop()
+    if p in read: continue
+    read.add(p)
+    try: text = open(os.path.join(path, p), errors="replace").read()
+    except OSError: continue
+    gate_text += text
+    queue += [q for q in re.findall(r"scripts/[\w./-]+\.(?:sh|py)\b", text) if os.path.isfile(os.path.join(path, q))]
 tests_text = ""
 for p in tracked("test/*", "tests/*", "*/tests/*", "*.test.*"):
     try: tests_text += open(os.path.join(path, p), errors="replace").read()
     except (OSError, IsADirectoryError): pass
 unrun = [p for p in tracked("scripts/*", "*/scripts/*")
          if re.search(r"(check|e2e|verify|validate)[^/]*\.(js|ts|py|sh)$", p, re.I)
-         and os.path.basename(p) not in gate_text
+         and os.path.splitext(os.path.basename(p))[0] not in gate_text
          and os.path.splitext(os.path.basename(p))[0] not in tests_text]
 
-repeated = sorted(((len(v), k) for k, v in per_script.items() if len(v) >= 3), reverse=True)
+repeated = sorted(((len(v), k) for k, v in per_script.items()  # a script the suite runs is already pinned
+                   if len(v) >= 3 and os.path.splitext(os.path.basename(k))[0] not in gate_text), reverse=True)
 fix_tasks = [p for p in glob.glob(os.path.join(plans_dir, "*fix*.md")) if os.path.getmtime(p) >= since]
 total = sum(cat.values()) or 1
 
