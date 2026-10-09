@@ -1,0 +1,2 @@
+# Every source in these scripts reads a config file by a variable path (projects/<slug>.conf, config.local.sh).
+disable=SC1090

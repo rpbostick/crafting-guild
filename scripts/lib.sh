@@ -24,6 +24,7 @@ resolve_slug() {
 }
 # Loads projects/<slug>.conf into PROJECT_PATH, PROJECT_BRANCH, TEST_CMD, EXTRA_TOOLS (array), PREVIEW_CMD,
 # and sets SLUG, RUNS (this project's log dir) and WT_ROOT (where its worktrees go).
+# shellcheck disable=SC2034  # the conf's variables are read by the scripts that call load_project
 load_project() {
   SLUG="$(resolve_slug "${1:-}")"
   PROJECT_PATH="" PROJECT_BRANCH="master" TEST_CMD="" PREVIEW_CMD=""; EXTRA_TOOLS=(); CREDIT_PATHS=(); ATTRIBUTION_EXEMPT=(); RELEASE_PATHS=(); RELEASE_MAJOR_BRANCHES=""; SITE_SYNC=(); SITE_PROJECT="" SITE_URL="" SITE_ROOT=""; unset MERGE_NPM_FLAGS
