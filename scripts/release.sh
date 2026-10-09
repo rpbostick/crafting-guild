@@ -71,7 +71,7 @@ else
 fi
 
 git_ fetch -q public --tags 2>/dev/null || true
-if git_ ls-remote --exit-code --tags public "refs/tags/$tag" >/dev/null 2>&1; then die "$tag already exists on $public_repo; bump the version in package.json first"; fi
+if git_ ls-remote --exit-code --tags public "refs/tags/$tag" >/dev/null 2>&1; then die "$tag already exists on $public_repo; bump the version (package.json or VERSION) first"; fi
 
 prev=""
 git_ rev-parse -q --verify refs/heads/public-release >/dev/null && prev=$(git_ rev-parse refs/heads/public-release)
