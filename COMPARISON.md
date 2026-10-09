@@ -8,7 +8,7 @@ Claude Code on its own is already a capable agent. What it doesn't give you is t
 
 - **A fresh context per step.** Each task file runs cold in a new builder, so step 12 is as sharp as step 1.
 - **A gate before main.** Every branch is reviewed once against a short checklist, and merged only at the reviewed commit, with your test suite run on the merged tree. A red suite undoes the merge. `/code-review` in plain Claude Code reports; here the review and the tests decide.
-- **Claims checked, not trusted.** Commits a builder says it made must exist on its branch, test logs must be where it says, and every denied tool call is listed.
+- **Claims checked, not trusted.** Commits a builder says it made must exist on its branch, test logs must be where it says, and every denied tool call is listed. Each done-when item is reported as met, partial or open, and as observed (shown by something that ran) or inferred; a `done` with an item open is refused.
 - **Limits per run.** Each builder has a dollar budget, a wall-clock timeout, a memory cap, and exactly the shell commands its task names.
 - **Work that outlives the session.** `ws chain` runs a queue of steps detached from the terminal and resumes after a restart. Plans and results are files, so a new session picks up where the last one stopped.
 - **Releases and deploys.** `ws release` publishes an audited, fresh-history copy to a public repository. `ws site` copies built files into a site, checks every byte, and waits until it is live.
@@ -31,7 +31,7 @@ On its first app it took a project from a paused fix to a tagged v1.0 in 42 hour
 | Parallel work | Subagents, workflows, background sessions | Subagents and background tasks | Headless builders, each in its own worktree | As wide as you code it |
 | Fresh context per step | Partly: subagent summaries return to the session | Same | Yes: only a checked result file returns | If you design it |
 | Gate before main | None; review reports but does not block | None | Review verdict at a pinned commit, plus your tests on the merged tree | Yours to build |
-| Agent's claims checked | No | No | Commits and test logs checked against the branch | Yours to build |
+| Agent's claims checked | No | No | Commits, test logs and each done-when item checked against the branch | Yours to build |
 | Survives the session closing | Background sessions until shutdown | No | Detached chain that resumes after a restart | Yours to build |
 | Per-run budget, timeout, memory cap | Budget for headless runs only | No | All three, every builder | Budget and turns; the rest yours |
 | Control of each tool call | Permission modes, hooks | Same | Command patterns per task | Callbacks and hooks in code |

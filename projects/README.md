@@ -1,6 +1,6 @@
 # Registered projects
 
-One file per project, `<slug>.conf`, written by `bin/ws init <path>` and safe to edit by hand:
+One file per project, `<slug>.conf`, written by `bin/ws init <path>` and safe to edit by hand. Running `ws init` again on a registered project changes nothing unless you pass `--force`, which backs the conf up and keeps the keys init does not write; `--dry-run` shows the difference first:
 
 ```
 PROJECT_PATH="/absolute/path/to/repo"
