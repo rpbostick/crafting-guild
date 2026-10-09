@@ -1,8 +1,8 @@
-# agentic-workspace v2: public release as Waystation Guild
+# agentic-workspace v2: public release as Crafting Guild Agentic Workspace
 
 **In flight right now**
 
-**NOW (2026-10-09 10:28 MDT):** name changed to **Crafting Guild** (Patrick: Waystation overlaps too much). `ws-public-scrub` first round done ($3.80; review fix-first $0.75: MODIFYING.md file-map rows run together); fix round running (task-public-scrub-fix.md, $4) with the rename. Then: review, merge, findings list to Patrick (release-audit.md section 5), create `rpbostick/crafting-guild` (free on 2026-10-09; 9 GitHub repos named crafting guild, none AI; web noise is game guilds and the UK chefs' Craft Guild app), `git remote add public`, `ws --project agentic-workspace-v2 release`.
+**DONE (2026-10-09 11:00 MDT):** Crafting Guild Agentic Workspace v2.3.9 is public at github.com/rpbostick/crafting-guild (one fresh commit 7a9b07c, tag v2.3.9, 36 files; a fresh clone passes its selftest). Scrub merged 0a08c9e ($3.80 + $1.15 fix round, reviews $0.75 + $0.73). Patrick read the README and approved; copyright "Robert Patrick Bostick". Later releases: bump VERSION, add a CHANGELOG.public.md entry, `ws --project agentic-workspace-v2 release --no-asset` (`--no-asset`: the workspace's own scripts/release.sh is `ws release`, not a build). Private stays private: plans/, projects/*.conf, runs/, reports/, *.local.md, config.local.sh, CHANGELOG.md (release.sh refuses any *.local.* in the public tree).
 
 ## Decisions (Patrick, 2026-10-09)
 - A new public repository; this one stays private as the working copy and research record, and publishes into the public one with `ws release` + `RELEASE_PATHS` (2.3.9).
