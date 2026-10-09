@@ -75,4 +75,4 @@ state/current           the last project opened with `ws <slug>`; what a termina
 
 `scripts/selftest.sh` checks syntax and exercises init, dispatch (dry run), the resume path and cold-start against a throwaway repo. For a real end-to-end check, register a scratch repo and run a small task with `--model haiku --budget 1`; a full dispatch, review and merge costs under twenty cents.
 
-- `scripts/release.sh` (`ws release`): publishes main as a release of the project's public repository (remote `public`, local branch `public-release`); audit, plumbing commit of main's tree, tag, clean-clone asset build, GitHub release. Covered by `scripts/selftest.sh`.
+- `scripts/release.sh` (`ws release`): with `RELEASE_PATHS` in the project's conf, only those paths (and `source=dest` renames) go public. Publishes main as a release of the project's public repository (remote `public`, local branch `public-release`); audit, plumbing commit of main's tree, tag, clean-clone asset build, GitHub release. Covered by `scripts/selftest.sh`.

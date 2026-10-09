@@ -4,7 +4,8 @@
 #
 # The public repository holds one commit per release on the local branch `public-release`, pushed to the
 # remote `public` as its main branch; the private repository (remote `origin`) keeps the full history.
-# Each release commit has exactly main's tree, so nothing that is not on main can reach the public side.
+# Each release commit has exactly main's tree (or the RELEASE_PATHS part of it), so nothing that is not on main
+# can reach the public side.
 #   1. main checkout clean (generated files the gate rewrites are listed by git status; restore or commit them)
 #   2. version from package.json (tag vX.Y.Z); refuse a tag that already exists on `public`
 #   3. audit the lines main adds since the last public release: home paths, the user name, e-mail addresses,
@@ -29,8 +30,10 @@ esac; done
 load_project "$proj"
 git_() { git -C "$PROJECT_PATH" "$@"; }
 
-[ -f "$PROJECT_PATH/package.json" ] || die "$SLUG has no package.json to read a version from"
-version=$(node -p "require('$PROJECT_PATH/package.json').version" 2>/dev/null) || die "cannot read the version from package.json"
+if [ -f "$PROJECT_PATH/package.json" ]; then
+  version=$(node -p "require('$PROJECT_PATH/package.json').version" 2>/dev/null) || die "cannot read the version from package.json"
+elif [ -f "$PROJECT_PATH/VERSION" ]; then version=$(tr -d ' \n' < "$PROJECT_PATH/VERSION")
+else die "$SLUG has no package.json or VERSION to read a version from"; fi
 tag="v$version"
 git_ remote get-url public >/dev/null 2>&1 || die "$SLUG has no 'public' remote (git -C $PROJECT_PATH remote add public <url of the public repository>)"
 public_url=$(git_ remote get-url public)
@@ -41,26 +44,47 @@ dirty=$(git_ status --porcelain --untracked-files=no)
 [ -z "$dirty" ] || die "main checkout has modified tracked files; restore generated ones (git -C $PROJECT_PATH checkout -- <file>) or commit them first:
 $dirty"
 
+# The public tree: main's whole tree, or with RELEASE_PATHS in the project's conf only the paths it lists,
+# each `path` as it is or `source=dest` to publish a file under another name (a public CHANGELOG, lessons).
+# Deliberate: built in a temporary index from main's tree objects, never from the working tree.
+if [ ${#RELEASE_PATHS[@]} -gt 0 ]; then
+  idx=$(mktemp); rm -f "$idx"
+  for entry in "${RELEASE_PATHS[@]}"; do
+    src="${entry%%=*}" dest="${entry#*=}"
+    listed=$(git_ ls-tree -r "$PROJECT_BRANCH" -- "$src")
+    [ -n "$listed" ] || die "RELEASE_PATHS names $src, which is not on $PROJECT_BRANCH"
+    if [ "$src" != "$entry" ]; then
+      [ "$(wc -l <<< "$listed")" -eq 1 ] || die "RELEASE_PATHS: $entry renames a directory; rename files one by one"
+      listed="${listed%%$'\t'*}"$'\t'"$dest"
+    fi
+    printf '%s\n' "$listed" | GIT_INDEX_FILE="$idx" git -C "$PROJECT_PATH" update-index --add --index-info
+  done
+  rel_tree=$(GIT_INDEX_FILE="$idx" git -C "$PROJECT_PATH" write-tree); rm -f "$idx"
+  echo "public tree: ${#RELEASE_PATHS[@]} RELEASE_PATHS entries, $(git_ ls-tree -r --name-only "$rel_tree" | wc -l) files"
+else
+  rel_tree=$(git_ rev-parse "$PROJECT_BRANCH^{tree}")
+fi
+
 git_ fetch -q public --tags 2>/dev/null || true
 if git_ ls-remote --exit-code --tags public "refs/tags/$tag" >/dev/null 2>&1; then die "$tag already exists on $public_repo; bump the version in package.json first"; fi
 
 prev=""
 git_ rev-parse -q --verify refs/heads/public-release >/dev/null && prev=$(git_ rev-parse refs/heads/public-release)
 if [ -n "$prev" ]; then
-  [ "$(git_ rev-parse "$prev^{tree}")" != "$(git_ rev-parse "$PROJECT_BRANCH^{tree}")" ] || die "main has nothing new since the last public release"
+  [ "$(git_ rev-parse "$prev^{tree}")" != "$rel_tree" ] || die "main has nothing new since the last public release"
   base="$prev"
 else
   base=$(git_ hash-object -t tree /dev/null)   # first release: audit everything on main
 fi
 
 # 3. audit the added lines
-added=$(git_ diff "$base" "$PROJECT_BRANCH" | grep -E '^\+[^+]' || true)
+added=$(git_ diff "$base" "$rel_tree" | grep -E '^\+[^+]' || true)
 hits=$(printf '%s\n' "$added" | grep -nF -e "$HOME" -e "/$USER/" -e "-of-$USER" | head -5)
 hits+=$(printf '%s\n' "$added" | grep -nE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' | grep -viE 'noreply@|@example\.|@users\.noreply' | head -5)
 hits+=$(printf '%s\n' "$added" | grep -nE 'BEGIN (RSA|OPENSSH|EC|PGP|PRIVATE)|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}' | head -5)
 if [ -n "${WS_ATTRIBUTION_RE:-}" ]; then
   mapfile -t exempt < <(attribution_exempt)
-  attrib=$(git_ diff "$base" "$PROJECT_BRANCH" -- . "${exempt[@]}" | grep -E '^\+[^+]' | grep -iE "$WS_ATTRIBUTION_RE" | head -5 || true)
+  attrib=$(git_ diff "$base" "$rel_tree" -- . "${exempt[@]}" | grep -E '^\+[^+]' | grep -iE "$WS_ATTRIBUTION_RE" | head -5 || true)
   hits+="$attrib"
 fi
 lines=$(printf '%s\n' "$added" | grep -c . || true)
@@ -74,9 +98,9 @@ if $dry; then echo "dry run: would publish $SLUG $tag to $public_repo"; exit 0; 
 # 4. commit, tag, push
 git_ push -q origin "$PROJECT_BRANCH"
 msg="$(basename "$PROJECT_PATH") $version"
-if [ -n "$prev" ]; then commit=$(git_ commit-tree "$PROJECT_BRANCH^{tree}" -p "$prev" -m "$msg")
-else commit=$(git_ commit-tree "$PROJECT_BRANCH^{tree}" -m "$msg"); fi
-[ "$(git_ rev-parse "$commit^{tree}")" = "$(git_ rev-parse "$PROJECT_BRANCH^{tree}")" ] || die "release commit tree differs from main (should be impossible)"
+if [ -n "$prev" ]; then commit=$(git_ commit-tree "$rel_tree" -p "$prev" -m "$msg")
+else commit=$(git_ commit-tree "$rel_tree" -m "$msg"); fi
+[ "$(git_ rev-parse "$commit^{tree}")" = "$rel_tree" ] || die "release commit tree differs from the public tree (should be impossible)"
 git_ update-ref refs/heads/public-release "$commit" ${prev:+"$prev"}
 git_ tag -a "public-$tag" "$commit" -m "$msg"
 git_ push -q public "refs/heads/public-release:refs/heads/main" "refs/tags/public-$tag:refs/tags/$tag"

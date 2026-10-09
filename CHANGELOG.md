@@ -2,6 +2,10 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.3.9 (2026-10-09)
+
+- **`ws release` can publish part of a repository.** `RELEASE_PATHS` in a project's conf lists the paths that go public (`source=dest` publishes a file under another name, e.g. a public CHANGELOG); the release commit's tree is built from main's objects in a temporary index, and the audit reads only that tree. A project without a `package.json` takes its version from `VERSION`. For publishing the workspace itself without its plans, runs and project confs.
+
 ## 2.3.8 (2026-10-09)
 
 - **`ws site` copies a project's published files into the site.** A project's conf names `SITE_PROJECT` and `SITE_SYNC` (`release:` for its GitHub release zip, or paths in the project); the command mirrors each with `rsync --checksum`, checks every copy matches, runs the site's tests, commits, pushes and waits until the live site serves a changed file of each. By hand three times on 2026-10-03 and 08; the last hand copy kept an old `toybox.js` (release zips have fixed timestamps, so rsync's size-and-time check skipped it). Set up for toybox and pen-paper-rpg (chargen-toybox).

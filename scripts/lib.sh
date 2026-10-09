@@ -21,7 +21,7 @@ resolve_slug() {
 # and sets SLUG, RUNS (this project's log dir) and WT_ROOT (where its worktrees go).
 load_project() {
   SLUG="$(resolve_slug "${1:-}")"
-  PROJECT_PATH="" PROJECT_BRANCH="master" TEST_CMD="" PREVIEW_CMD=""; EXTRA_TOOLS=(); CREDIT_PATHS=(); ATTRIBUTION_EXEMPT=(); unset MERGE_NPM_FLAGS
+  PROJECT_PATH="" PROJECT_BRANCH="master" TEST_CMD="" PREVIEW_CMD=""; EXTRA_TOOLS=(); CREDIT_PATHS=(); ATTRIBUTION_EXEMPT=(); RELEASE_PATHS=(); SITE_SYNC=(); SITE_PROJECT="" SITE_URL="" SITE_ROOT=""; unset MERGE_NPM_FLAGS
   # shellcheck disable=SC1090
   . "$WS/projects/$SLUG.conf"
   [ -d "$PROJECT_PATH/.git" ] || [ -f "$PROJECT_PATH/.git" ] || die "project path $PROJECT_PATH is not a git repo"
