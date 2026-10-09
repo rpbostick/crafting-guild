@@ -2,6 +2,8 @@
 
 **In flight right now**
 
+**2.5.3 PUBLIC (2026-10-09, Patrick approved):** dispatch globs in task commands no longer expand against the folder; dispatch dry runs leave no worktree. Fresh clone of v2 passes.
+
 **2.5.2 PUBLIC (2026-10-09 17:09 MDT, Patrick approved):** git -C grant fix, audit false positives (gate scripts followed through more than one file, pre-ws-run wrappers and suite-run scripts not flagged), shellcheck-clean with the lint step failing the selftest (shellcheck installed). A fresh clone of v2 passes. Last session's carry-overs are done: 2.5.2 published, bike-weather previews :8805/:8806 stopped. Colorwright's audit findings were all stale (fixed in the audit, no task).
 
 **FOLDER (2026-10-09 16:56 MDT, Patrick):** the workspace moved from ~/agentic-workspace-v2 to ~/crafting-guild, matching the README's install path; ~/agentic-workspace-v2 is a symlink to it so old task files and links still resolve. `ws` (~/.local/bin/ws) points at the new folder, the project is registered as `crafting-guild` (`ws crafting-guild`), and Claude's memory was copied to the new folder's key (the old key's copy and old session transcripts are left in place).
