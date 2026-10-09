@@ -102,7 +102,7 @@ if $dry; then echo "dry run: would publish $SLUG $tag to $public_repo"; exit 0; 
 
 # 4. commit, tag, push
 git_ push -q origin "$PROJECT_BRANCH"
-msg="$(basename "$PROJECT_PATH") $version"
+msg="${public_repo##*/} $version"   # the public repository's name, not the private folder's
 if [ -n "$prev" ]; then commit=$(git_ commit-tree "$rel_tree" -p "$prev" -m "$msg")
 else commit=$(git_ commit-tree "$rel_tree" -m "$msg"); fi
 [ "$(git_ rev-parse "$commit^{tree}")" = "$rel_tree" ] || die "release commit tree differs from the public tree (should be impossible)"
