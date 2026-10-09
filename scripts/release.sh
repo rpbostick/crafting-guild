@@ -111,17 +111,29 @@ git_ tag -a "public-$tag" "$commit" -m "$msg"
 git_ push -q public "refs/heads/public-release:refs/heads/main" "refs/tags/public-$tag:refs/tags/$tag"
 echo "published $tag to $public_repo ($(git_ rev-parse --short "$commit"))"
 
-# 5. release asset
-if $asset && [ -f "$PROJECT_PATH/scripts/release.sh" ] && command -v gh >/dev/null; then
+# 5. markers: the private commit this release came from (for ws rollback and history), and, with
+# RELEASE_MAJOR_BRANCHES=1, a branch v<major> on the public repository that follows the newest release of
+# that major version, so users can stay on a major version and still get its fixes.
+git_ tag -a "released-$tag" "$PROJECT_BRANCH" -m "$msg: the private commit published as $tag" && git_ push -q origin "refs/tags/released-$tag" \
+  || echo "ws: could not tag or push released-$tag in the private repository" >&2
+if [ "${RELEASE_MAJOR_BRANCHES:-}" = 1 ]; then
+  major="v${version%%.*}"
+  git_ push -q public "$commit:refs/heads/$major" && echo "public branch $major now at $tag"
+fi
+
+# 6. the GitHub release: a page per version with its changelog notes, marked Latest, plus the clean-clone
+# build's zip when the project has scripts/release.sh (skipped with --no-asset).
+case "$public_url" in *github.com*) ;; *) exit 0 ;; esac   # a release page needs a GitHub repository
+command -v gh >/dev/null || { echo "ws: gh not found; $tag is tagged but has no GitHub release page" >&2; exit 0; }
+zips=()
+if $asset && [ -f "$PROJECT_PATH/scripts/release.sh" ]; then
   tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
   git clone -q --branch "$tag" "https://github.com/$public_repo.git" "$tmp/repo"
   ( cd "$tmp/repo" && npm ci --silent --no-audit --no-fund >/dev/null && bash scripts/release.sh ) > "$RUNS/release-$tag.log" 2>&1 \
     || die "the clean-clone build failed (log: $RUNS/release-$tag.log); the tag is published, rerun the asset with: gh release create $tag <zip> -R $public_repo"
   zips=("$tmp"/repo/release/*.zip)
   [ -e "${zips[0]}" ] || die "scripts/release.sh wrote no release/*.zip (log: $RUNS/release-$tag.log)"
-  if [ -z "$notes" ] && [ -f "$PROJECT_PATH/CHANGELOG.md" ]; then
-    notes=$(awk -v v="$version" '$0 ~ "^## " && index($0, v) {on=1; next} on && /^## / {exit} on' "$PROJECT_PATH/CHANGELOG.md")
-  fi
-  gh release create "$tag" "${zips[@]}" -R "$public_repo" --title "$msg" --notes "${notes:-$msg}" >/dev/null
-  echo "release $tag: $(basename "${zips[@]}") attached (https://github.com/$public_repo/releases/tag/$tag)"
 fi
+[ -z "$notes" ] && notes=$(release_notes "$version")
+gh release create "$tag" "${zips[@]}" -R "$public_repo" --verify-tag --latest --title "$msg" --notes "${notes:-$msg}" >/dev/null
+echo "release $tag: https://github.com/$public_repo/releases/tag/$tag${zips[0]:+ ($(basename "${zips[@]}") attached)}"

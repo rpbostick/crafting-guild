@@ -26,7 +26,7 @@ resolve_slug() {
 # and sets SLUG, RUNS (this project's log dir) and WT_ROOT (where its worktrees go).
 load_project() {
   SLUG="$(resolve_slug "${1:-}")"
-  PROJECT_PATH="" PROJECT_BRANCH="master" TEST_CMD="" PREVIEW_CMD=""; EXTRA_TOOLS=(); CREDIT_PATHS=(); ATTRIBUTION_EXEMPT=(); RELEASE_PATHS=(); SITE_SYNC=(); SITE_PROJECT="" SITE_URL="" SITE_ROOT=""; unset MERGE_NPM_FLAGS
+  PROJECT_PATH="" PROJECT_BRANCH="master" TEST_CMD="" PREVIEW_CMD=""; EXTRA_TOOLS=(); CREDIT_PATHS=(); ATTRIBUTION_EXEMPT=(); RELEASE_PATHS=(); RELEASE_MAJOR_BRANCHES=""; SITE_SYNC=(); SITE_PROJECT="" SITE_URL="" SITE_ROOT=""; unset MERGE_NPM_FLAGS
   # shellcheck disable=SC1090
   . "$WS/projects/$SLUG.conf"
   [ -d "$PROJECT_PATH/.git" ] || [ -f "$PROJECT_PATH/.git" ] || die "project path $PROJECT_PATH is not a git repo"
@@ -49,6 +49,14 @@ lessons_for() {
 worktree_dir() { echo "$WT_ROOT/$1"; }
 # The task file a run was dispatched with (its runs/<slug>/<name>.task.txt holds the run's metadata,
 # not the task), and whether that task is marked `Track: light`.
+# The changelog section for a version, from the file published as CHANGELOG.md (a RELEASE_PATHS rename such
+# as CHANGELOG.public.md=CHANGELOG.md, or CHANGELOG.md itself). Matches the version exactly: 2.3.1 is not 2.3.10.
+release_notes() {
+  local src="CHANGELOG.md" e
+  for e in "${RELEASE_PATHS[@]}"; do [ "${e#*=}" = CHANGELOG.md ] && [ "$e" != CHANGELOG.md ] && src="${e%%=*}"; done
+  [ -f "$PROJECT_PATH/$src" ] || return 0
+  awk -v v="$1" '/^## / { if (on) exit; h = $0 " "; if (index(h, " " v " ") || index(h, "[" v "]")) { on = 1; next } } on' "$PROJECT_PATH/$src" | sed '/./,$!d'
+}
 task_file() { sed -n 's/^task=//p' "$RUNS/$1.task.txt" 2>/dev/null; }
 task_is_light() { local f; f=$(task_file "$1"); [ -n "$f" ] && grep -qi 'track: *light' "$f" 2>/dev/null; }
 branch_of() { echo "agent/$1"; }

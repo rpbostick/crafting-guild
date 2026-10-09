@@ -2,6 +2,11 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.5.0
+
+- **Versions and rollback.** Every `ws release` now creates a GitHub release page (notes from the published changelog, marked Latest), tags the private commit it published (`released-vX.Y.Z`), and with `RELEASE_MAJOR_BRANCHES=1` moves a public branch `v<major>` to the release, so users can install any exact version or the newest of a major version. `ws rollback <version>` puts the published files back to a release as one new commit, leaving everything outside `RELEASE_PATHS` alone; `--dry-run` lists what would change. README: Install a specific version.
+- Release notes match the version exactly (2.3.1 no longer picks up 2.3.10's section).
+
 ## 2.4.2
 
 - `ws doctor` runs on its own: cold start prints its failures (with their fix) and warnings at every session start, and `ws chain` refuses to start while a required check fails. CLAUDE.md says when to run it by hand. Its `gh` check has a 5-second timeout.

@@ -24,3 +24,4 @@ PREVIEW_CMD="npx serve -l {port} dist"
 # In the site project's own conf: where it is served and which folder is the web root.
 # SITE_URL="https://example.org"
 # SITE_ROOT="public"
+# RELEASE_MAJOR_BRANCHES=1           # ws release moves a public branch v<major> to each new release of that major version
