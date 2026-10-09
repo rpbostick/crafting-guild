@@ -44,14 +44,15 @@ wt="$(worktree_dir "$name")"; br="$(branch_of "$name")"
 if [ -f "$RUNS/$name.pid" ] && kill -0 "$(cat "$RUNS/$name.pid")" 2>/dev/null; then die "a run named $name is still going (pid $(cat "$RUNS/$name.pid"))"; fi
 
 # Worktree: create on a fresh branch from the main branch, or reuse an existing one (a resume).
+fresh_wt=false fresh_br=false
 if [ ! -d "$wt" ]; then
-  mkdir -p "$WT_ROOT"
+  fresh_wt=true; mkdir -p "$WT_ROOT"
   excl="$(git -C "$PROJECT_PATH" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
   for e in .worktrees .ws-evidence; do grep -qx "$e" "$excl" 2>/dev/null || echo "$e" >> "$excl"; done
   if git -C "$PROJECT_PATH" show-ref --verify --quiet "refs/heads/$br"; then
     git -C "$PROJECT_PATH" worktree add -q "$wt" "$br"
   else
-    git -C "$PROJECT_PATH" worktree add -q -b "$br" "$wt" "$PROJECT_BRANCH"
+    git -C "$PROJECT_PATH" worktree add -q -b "$br" "$wt" "$PROJECT_BRANCH"; fresh_br=true
   fi
   # Share gitignored environments and data with the main checkout instead of rebuilding them.
   for src in "$PROJECT_PATH"/.venv "$PROJECT_PATH"/node_modules "$PROJECT_PATH"/*/.venv "$PROJECT_PATH"/*/node_modules; do
@@ -97,7 +98,8 @@ cmds=$(awk '/^## Commands/{f=1; next} /^## /{f=0} f' "$task" | sed -E 's/\b([Nn]
 derived=()
 while IFS= read -r c; do
   [ -n "$c" ] || continue
-  set -- $c; w1="${1:-}"; w2="${2:-}"; w3="${3:-}"; w4="${4:-}"
+  # No glob expansion: `node *` is a pattern, not this folder's files.
+  set -f; set -- $c; set +f; w1="${1:-}"; w2="${2:-}"; w3="${3:-}"; w4="${4:-}"
   # git with an option first: `git -C <dir> <sub>` is granted as exactly that; any other option form is not
   # granted at all, since the fallback below would be Bash(git*), every git command.
   if [ "$w1" = git ] && [ "${w2#-}" != "$w2" ]; then
@@ -106,7 +108,7 @@ while IFS= read -r c; do
     pat="Bash(git -C $w3 $w4*)"; printf '%s\n' "${TOOLS[@]}" "${derived[@]}" | grep -qxF "$pat" || derived+=("$pat"); continue
   fi
   case "$w1" in ''|'<'*|'#'*|'$'*|'-'*|'.'*|*/) continue ;; rm|mv|sudo|su|dd|mkfs|shutdown|reboot|kill|pkill|killall) continue ;; esac
-  case "$w1" in npx|npm|node|python3|python|git) [ -n "$w2" ] && [ "${w2#<}" = "$w2" ] && [ "${w2#-}" = "$w2" ] && g="$w1 $w2" || g="$w1" ;; *) g="$w1" ;; esac
+  case "$w1" in npx|npm|node|python3|python|git) [ -n "$w2" ] && [ "${w2#<}" = "$w2" ] && [ "${w2#-}" = "$w2" ] && [ "${w2#\*}" = "$w2" ] && g="$w1 $w2" || g="$w1" ;; *) g="$w1" ;; esac
   case "$g" in "git push"|"git config"|"git reset"|"git rebase"|"git worktree"|"git stash"|"git checkout") continue ;; esac
   pat="Bash($g*)"; printf '%s\n' "${TOOLS[@]}" "${derived[@]}" | grep -qxF "$pat" || derived+=("$pat")
 done <<< "$cmds"
@@ -159,6 +161,9 @@ if $dry; then
   echo "cwd: $wt"; echo "tools: ${TOOLS[*]}"; echo "deny: ${DENY[*]}"; echo "budget: \$$budget timeout: $tmo model: ${model:-default} memory cap: ${WS_BUILDER_MEM:-none}"
   echo "prompt bytes: ${#prompt}"; echo "evidence: $wt/.ws-evidence"
   if $show_prompt; then echo "--- prompt ---"; printf '%s\n' "$prompt"; fi
+  # A dry run leaves nothing behind: a worktree (and branch) it made goes again, so a later dispatch branches from
+  # the main branch as it is then. One that existed before (a resume) stays.
+  if $fresh_wt; then git -C "$PROJECT_PATH" worktree remove --force "$wt"; $fresh_br && git -C "$PROJECT_PATH" branch -q -D "$br"; fi
   exit 0
 fi
 
