@@ -60,6 +60,11 @@ if [ ${#RELEASE_PATHS[@]} -gt 0 ]; then
     printf '%s\n' "$listed" | GIT_INDEX_FILE="$idx" git -C "$PROJECT_PATH" update-index --add --index-info
   done
   rel_tree=$(GIT_INDEX_FILE="$idx" git -C "$PROJECT_PATH" write-tree); rm -f "$idx"
+  # Private overlays (lessons/<role>.local.md, CLAUDE.local.md, config.local.sh) never go public, even inside
+  # a directory entry.
+  private=$(git_ ls-tree -r --name-only "$rel_tree" | grep -E '(^|/)[^/]*\.local(\.[^/]*)?$' | head -5 || true)
+  [ -z "$private" ] || die "the public tree would include private files (*.local.*); narrow RELEASE_PATHS:
+$private"
   echo "public tree: ${#RELEASE_PATHS[@]} RELEASE_PATHS entries, $(git_ ls-tree -r --name-only "$rel_tree" | wc -l) files"
 else
   rel_tree=$(git_ rev-parse "$PROJECT_BRANCH^{tree}")

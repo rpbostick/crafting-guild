@@ -4,6 +4,7 @@ Versions of the workspace itself. `ws version` prints the current one. The produ
 
 ## 2.3.9 (2026-10-09)
 
+- `ws release` refuses a public tree holding any private overlay (`*.local.*`), even inside a listed directory.
 - **`ws release` can publish part of a repository.** `RELEASE_PATHS` in a project's conf lists the paths that go public (`source=dest` publishes a file under another name, e.g. a public CHANGELOG); the release commit's tree is built from main's objects in a temporary index, and the audit reads only that tree. A project without a `package.json` takes its version from `VERSION`. For publishing the workspace itself without its plans, runs and project confs.
 
 ## 2.3.8 (2026-10-09)
