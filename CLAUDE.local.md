@@ -19,4 +19,4 @@ Read with CLAUDE.md; where they differ, this file wins. Not part of a public rel
 - Nothing goes public without `release-audit.md` passing and Patrick seeing the findings and approving.
 - Credits the audit checks for this installation's projects: Open Peeps CC0, React Bits MIT + Commons Clause, Open-Meteo CC BY 4.0. Not redistributable: reference photos, BodyM (non-commercial). colorwright's `build-static.sh` is the example of a build that fails on a leak pattern.
 - Policy decided 2026-09-28; which agent-readable material each release carries is settled with Patrick per release.
-- Crafting Guild is published from this repository with `ws release --project agentic-workspace-v2` (`RELEASE_PATHS` in its conf); this file, `lessons/*.local.md`, `config.local.sh`, `plans/`, `projects/*.conf`, `reports/` and `CHANGELOG.md` stay here.
+- Crafting Guild is published from this repository with `ws --project crafting-guild release` (`RELEASE_PATHS` in its conf); this file, `lessons/*.local.md`, `config.local.sh`, `plans/`, `projects/*.conf`, `reports/` and `CHANGELOG.md` stay here.
