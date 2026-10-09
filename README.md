@@ -1,4 +1,4 @@
-# Waystation Guild
+# Crafting Guild
 
 Build software with a small team of Claude Code agents from one folder, on projects that live in other folders.
 
@@ -16,16 +16,16 @@ No servers, no Docker, no cron, no MCP: a few hundred lines of shell, one small 
 ## Install
 
 ```bash
-git clone <this repository's URL> ~/waystation-guild
-ln -s ~/waystation-guild/bin/ws ~/.local/bin/ws        # or add bin/ to your PATH
-bash ~/waystation-guild/scripts/selftest.sh            # checks the scripts against a throwaway repo
+git clone <this repository's URL> ~/crafting-guild
+ln -s ~/crafting-guild/bin/ws ~/.local/bin/ws          # or add bin/ to your PATH
+bash ~/crafting-guild/scripts/selftest.sh              # checks the scripts against a throwaway repo
 ```
 
 ## Register a project
 
 ```bash
 ws init ~/code/my-app                       # guesses the test command and tool grants
-$EDITOR ~/waystation-guild/projects/my-app.conf   # check TEST_CMD, EXTRA_TOOLS, PREVIEW_CMD
+$EDITOR ~/crafting-guild/projects/my-app.conf     # check TEST_CMD, EXTRA_TOOLS, PREVIEW_CMD
 ws my-app                                   # opens Claude Code here with the project attached
 ```
 
@@ -93,7 +93,7 @@ The workspace keeps your working material beside the tool, and none of it is mea
 - `*.local.md`: `CLAUDE.local.md` (your preferences for the orchestrator) and `lessons/<role>.local.md` (lessons that name your projects, people or dates), loaded after the shared files when present
 - `config.local.sh`: your private settings
 
-`.gitignore` ignores only `runs/` and `state/`, so a private copy of the workspace can track the rest; add `*.local.md`, `config.local.sh`, `plans/` and `projects/*.conf` to it if you keep a public fork.
+`.gitignore` ignores only `runs/`, `state/` and logs (`*.log`), so a private copy of the workspace can track the rest; add `*.local.md`, `config.local.sh`, `plans/` and `projects/*.conf` to it if you keep a public fork.
 
 ## Changing the tool
 

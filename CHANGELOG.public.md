@@ -1,6 +1,6 @@
 # Changelog
 
-Versions of Waystation Guild. `ws version` prints the current one.
+Versions of Crafting Guild. `ws version` prints the current one.
 
 ## 2.3.9
 

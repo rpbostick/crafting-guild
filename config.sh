@@ -1,4 +1,4 @@
-# Waystation Guild settings. Sourced by every script. Edit freely; nothing else reads these.
+# Crafting Guild settings. Sourced by every script. Edit freely; nothing else reads these.
 # config.local.sh, when present, is sourced after this file: put private values there (your own names below).
 WS_TZ=""                        # calendar for dates written into plans ("Europe/Lisbon"); empty = this machine's local time
 WS_DEFAULT_BUDGET="10"          # dollars, --max-budget-usd for a builder run

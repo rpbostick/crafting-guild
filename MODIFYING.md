@@ -1,4 +1,4 @@
-# Modifying Waystation Guild
+# Modifying Crafting Guild
 
 Everything is plain files. There is no daemon, no database, no service. This page says what each file does and where to change what, so you can read the whole tool in an hour and change it in a minute.
 
@@ -37,7 +37,8 @@ schema/*.json           the JSON a builder and a reviewer must return (Claude Co
 projects/<slug>.conf    one registered project: path, branch, TEST_CMD, EXTRA_TOOLS, PREVIEW_CMD.
 plans/<slug>/           plans and task files, tracked here so the product repo stays clean.
 runs/<slug>/            logs, results, reviews, server pids, and evidence/<name>/ from each merged builder. Not tracked.
-VERSION, CHANGELOG.md   the version `ws version` prints, and the notes for each one.state/current           the last project opened with `ws <slug>`; what a terminal acts on. Not tracked. A session is
+VERSION, CHANGELOG.md   the version `ws version` prints, and the notes for each one.
+state/current           the last project opened with `ws <slug>`; what a terminal acts on. Not tracked. A session is
                         pinned to its own project by WS_PROJECT (set by `ws <slug>`), which wins over this file.
 ```
 
@@ -50,7 +51,7 @@ VERSION, CHANGELOG.md   the version `ws version` prints, and the notes for each 
 | Change what counts as attribution | `WS_ATTRIBUTION_RE` in `config.sh` (merge refuses added lines, dispatch refuses task files; `--names-ok` for a scrub task). Intended credits: `CREDIT_PATHS` in the project's conf. |
 | Change the default budget, timeout or model | `config.sh`; or per run with `--budget`, `--timeout`, `--model`, `--effort`. |
 | Change how a builder behaves | `agents/builder.md` (the role) or `lessons/builder.md` (specific lessons; `lessons/builder.local.md` for private ones). All go into every builder prompt verbatim; `ws dispatch --print-prompt <name> <task>` shows the result. |
-| Change what a review checks | `checklist.md`. Add a rule only by removing one. `agents/reviewer.md` sets the reviewer's posture (what blocks, what is a suggestion). |
+| Change what a review checks | `checklist.md`. Add a rule only by removing one. `agents/reviewer.md` sets the reviewer's posture (what blocks, what is a suggestion). `ws review --print-prompt <name>` shows the reviewer's whole prompt. |
 | Change what counts as a valid result | `schema/result.json`; then update the checks in `scripts/check-result.sh`. |
 | Change what cold-start shows | `scripts/cold-start.sh`. Keep it under half a minute; it runs on every session start and after every compaction. Never put a test run in it. |
 | Change the merge gate | `scripts/merge.sh`. Today: pinned SHA, review on record, clean trees, no home paths or username in lines the branch adds, no attribution in them (`WS_ATTRIBUTION_RE` in `config.sh`; exempt: LICENSE, manifests, license lists, the project's `CREDIT_PATHS`), tests via `TEST_CMD` (timed; warns over `WS_SUITE_WARN_S`), push on green, evidence moved to `runs/`. |

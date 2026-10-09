@@ -118,7 +118,7 @@ RUN_GRANTS="$RUNS/$name.grants"
 TOOLS+=("Bash($WS/bin/ws-run *)")
 DENY=("Bash(git push *)" "Bash(git -c *)" "Bash(git config *)" "Bash(git * --output*)" "Bash(git reset --hard *)" "Bash(git rebase *)" "Bash(git worktree *)")
 
-prompt="You are a headless builder launched by Waystation Guild. Working directory: $wt (a git worktree of $PROJECT_PATH on branch $br). Do only the task below, then answer with the JSON result.
+prompt="You are a headless builder launched by Crafting Guild. Working directory: $wt (a git worktree of $PROJECT_PATH on branch $br). Do only the task below, then answer with the JSON result.
 
 # Your role
 $(cat "$WS/agents/builder.md")
