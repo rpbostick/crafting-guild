@@ -8,7 +8,7 @@ while [ $# -gt 0 ]; do case "$1" in --project) slug="$2"; shift 2 ;; --budget) b
 name="${1:?usage: review.sh [flags] <name>}"
 load_project "$slug"; wt="$(worktree_dir "$name")"; br="$(branch_of "$name")"
 # A light-track branch reviews on the cheaper model unless --model says otherwise.
-if [ -z "$model_flag" ] && [ -n "${WS_REVIEW_MODEL_LIGHT:-}" ] && grep -qi 'track: *light' "$RUNS/$name.task.txt" 2>/dev/null; then model="$WS_REVIEW_MODEL_LIGHT"; note "light track: reviewing on $model"; fi
+if [ -z "$model_flag" ] && [ -n "${WS_REVIEW_MODEL_LIGHT:-}" ] && task_is_light "$name"; then model="$WS_REVIEW_MODEL_LIGHT"; note "light track: reviewing on $model"; fi
 [ -d "$wt" ] || die "no worktree for $name"
 [ "$(git -C "$wt" status --short -uno | wc -l)" -eq 0 ] || die "worktree has modified tracked files; commit or discard first"
 unt=$(git -C "$wt" status --short | grep -c "^??" || true); [ "$unt" -gt 0 ] && note "$unt untracked file(s) in the worktree are not part of the branch"

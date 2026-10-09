@@ -36,6 +36,10 @@ attribution_exempt() {
   for p in "${ATTRIBUTION_EXEMPT[@]}"; do printf ':!%s\n' "$p"; done
 }
 worktree_dir() { echo "$WT_ROOT/$1"; }
+# The task file a run was dispatched with (its runs/<slug>/<name>.task.txt holds the run's metadata,
+# not the task), and whether that task is marked `Track: light`.
+task_file() { sed -n 's/^task=//p' "$RUNS/$1.task.txt" 2>/dev/null; }
+task_is_light() { local f; f=$(task_file "$1"); [ -n "$f" ] && grep -qi 'track: *light' "$f" 2>/dev/null; }
 branch_of() { echo "agent/$1"; }
 short() { git -C "$PROJECT_PATH" rev-parse --short "$1" 2>/dev/null || echo "$1"; }
 # The final `result` event of a stream-json log, or nothing if the run has not ended.

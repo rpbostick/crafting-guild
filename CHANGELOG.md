@@ -2,6 +2,11 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.3.7 (2026-10-09)
+
+- **Light-track reviews really use the cheaper model.** `ws review` looked for `Track: light` in `runs/<slug>/<name>.task.txt`, which holds the run's metadata, not the task, so every light branch reviewed on `WS_REVIEW_MODEL` since 2.3.5 (`toybox-draw-labels` hit the Fable limit on 2026-10-08). It now reads the task file that `task=` names (`task_is_light` in lib.sh); the selftest checks it.
+- Expo `PREVIEW_CMD`s pass `--max-workers 2`: a second `--clear` preview started 16 Metro workers at ~700 MB each and the OOM killer took the desktop session (2026-10-08).
+
 ## 2.3.6 (2026-10-07)
 
 - **Builders are granted every command a task names.** `ws dispatch` reads the backticked commands in the task's `## Commands` section and grants each by its first word (first two for npx, npm, node, python3 and git), so a task can no longer name a command the builder cannot run; `rm`, `mv`, `sudo`, `git push` and the other destructive forms stay out. The audit of 2026-10-06 found grants the most recurrent defect (seven fixes in twelve days), and bw-export-screen ended partial on an ungranted `npx expo install` hours later.
