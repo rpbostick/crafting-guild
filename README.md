@@ -1,85 +1,103 @@
-# agentic-workspace v2
+# Crafting Guild
 
 Build software with a small team of Claude Code agents from one folder, on projects that live in other folders.
 
-You open one Claude Code session here and point it at a project. That session plans, dispatches headless builders into git worktrees of the project, checks what they claim, reviews each branch once, merges with the project's tests as the gate, and keeps a plan file that survives context compaction. A twenty-second cold start runs itself at every session start and after every compaction, so a resumed session never guesses.
+You open one Claude Code session here and point it at a project. That session is the orchestrator: it plans, dispatches headless builders into git worktrees of the project, checks what they claim, reviews each branch once, and merges with the project's tests as the gate. Plans live in files that survive context compaction, and a twenty-second cold start runs at every session start and after every compaction, so a resumed session never guesses.
 
-It is the successor to [agentic-workspace](https://github.com/rpbostick/agentic-workspace), cut down to the parts that measurably produced product. No servers, no Docker, no cron, no MCP, about 700 lines of shell and a few pages of prose. The reasoning is in the [research repo](https://github.com/rpbostick/agentic-framework-research).
+No servers, no Docker, no cron, no MCP: a few hundred lines of shell, one small Python script and a few pages of prose.
 
-**Status, 2026-09-27.** It has built one app end to end: [colorwright](https://github.com/rpbostick/colorwright) went from a paused fix to a tagged `v1.0` in 42 hours through 37 builder runs, 22 reviews and 22 gated merges, with zero context compactions in a 25-hour orchestrator session and zero usage-limit stops. Nine of the 87 commits in that stretch changed the tool; the rest were plans and tasks for the product. The measured cost was in the project, not the tool: builders spent 48% of their wall time running tests, and the merge gate grew from 6 to 28 minutes for a day before a single builder run fixed the suite. Report 11 in the research repo has the numbers. The five changes it proposed are in **v2.1.0** (see [CHANGELOG.md](CHANGELOG.md)): builders run only the tests for what they touched, the merge prints and warns on suite time, evidence stays out of the product repo, the timeout follows the track, and the parallel-builder note names the CPU, not the limit.
+## Requirements
+
+- Linux or macOS with `bash`, `git`, `jq`, GNU `timeout` and `python3`
+- [Claude Code](https://code.claude.com) CLI 2.1.257 or later, signed in
+- Optional: systemd user scopes (Linux), so builders and previews run under a memory cap (`WS_BUILDER_MEM`, `WS_SERVE_MEM`) and a chain survives the session that started it
+- Optional: `gh`, for `ws release` to attach a build to a GitHub release; `rsync`, for `ws site`
 
 ## Install
 
-Requirements: [Claude Code](https://code.claude.com) 2.1.257 or later, `git`, `jq`, GNU `timeout`. Linux or macOS. On Linux with systemd, builders run under a memory cap (`WS_BUILDER_MEM`).
-
 ```bash
-git clone https://github.com/rpbostick/agentic-workspace-v2.git ~/agentic-workspace-v2
-ln -s ~/agentic-workspace-v2/bin/ws ~/.local/bin/ws      # or add bin/ to your PATH
-ws init ~/code/your-project                                 # registers it; guesses the test command and tool grants
-$EDITOR ~/agentic-workspace-v2/projects/your-project.conf   # check TEST_CMD, EXTRA_TOOLS, PREVIEW_CMD
-ws your-project                                             # opens Claude Code here with the project attached
+git clone <this repository's URL> ~/crafting-guild
+ln -s ~/crafting-guild/bin/ws ~/.local/bin/ws          # or add bin/ to your PATH
+bash ~/crafting-guild/scripts/selftest.sh              # checks the scripts against a throwaway repo
 ```
 
-Then tell the agent what you want built. It has everything it needs from `CLAUDE.md` and the cold-start context. If you skip `ws init`, the agent will ask which repo to work on and register it for you.
+## Register a project
 
-Optional: set your timezone and default budgets in `config.sh`.
+```bash
+ws init ~/code/my-app                       # guesses the test command and tool grants
+$EDITOR ~/crafting-guild/projects/my-app.conf     # check TEST_CMD, EXTRA_TOOLS, PREVIEW_CMD
+ws my-app                                   # opens Claude Code here with the project attached
+```
 
-## What a session looks like
+`projects/example.conf.sample` shows every key a conf can hold. A project without tests can be registered; its merges run without a gate until `TEST_CMD` is set. Then tell the orchestrator what you want built: `CLAUDE.md` and the cold-start context give it everything it needs. If you skip `ws init`, it asks which repository to work on and registers it.
+
+## The loop
 
 ```
 you:    add a hat slot to the avatar editor, with its own colour
-agent:  writes plans/your-project/hats.md: three steps, each a task file
-agent:  bin/ws dispatch hats-1 plans/your-project/hats-1.md      (a builder in .worktrees/hats-1, $10 cap)
-agent:  bin/ws wait hats-1                                        (in the background; you can keep talking)
+agent:  writes plans/my-app/hats.md: three steps, each a task file
+agent:  ws dispatch hats-1 plans/my-app/hats-1.md      (a builder in .worktrees/hats-1, $10 cap)
+agent:  ws wait hats-1                                  (in the background; you can keep talking)
         ...
 agent:  result: done, 2 commits, 41 tests passed, log present, no denied calls
-agent:  bin/ws serve hats-1 8801 -> http://127.0.0.1:8801/  "have a look"
+agent:  ws serve hats-1 -> http://127.0.0.1:8801/  "have a look"
 you:    looks right, merge
-agent:  bin/ws review hats-1  -> merge, no blocking findings, 2 suggestions carried forward
-agent:  bin/ws merge hats-1 3f2a9c1  -> tests passed, pushed, worktree removed
+agent:  ws review hats-1  -> merge, no blocking findings, 2 suggestions carried forward
+agent:  ws merge hats-1 3f2a9c1  -> tests passed, pushed, worktree removed
 ```
 
-Builders never push and never touch the main checkout. Every run has a dollar budget and a wall-clock cap. Every result is checked: claimed commits must exist on the branch, a claimed test log must be at the path given, denied calls are listed whether or not the builder mentions them.
+1. **Plan** in `plans/<slug>/`: small independent steps, each a task file a builder can run cold, each with a done-when.
+2. **Dispatch** one builder per step into its own worktree and branch, with a dollar budget, a wall-clock cap and a grant of exactly the commands it needs.
+3. **Wait**, then read the checked result: claimed commits must exist on the branch, a claimed test log must be where it says, and denied calls are listed whether or not the builder mentions them.
+4. **Preview** a visible change from the worktree.
+5. **Review** the whole branch once against `checklist.md`, after a mechanical precheck. Blocking findings go back to the builder; suggestions carry forward.
+6. **Merge** the reviewed SHA: the project's tests run on the merged tree, a red suite undoes the merge, a green one pushes.
+7. **Chain** sequential steps (`ws chain <queue>`), which runs 2, 3, 5 and 6 unattended and stops only for what needs a person.
+
+Builders never push and never touch the main checkout.
 
 ## Commands
 
+`ws help` prints them all. The main ones:
+
 | Command | What it does |
 |---|---|
-| `ws --project <slug> <command> ...` | run any command below against a registered project other than the selected one. A session opened with `ws <slug>` is pinned to that project; a terminal follows `state/current`, the last `ws <slug>`. Cold-start prints which one is in force and says `CONFLICT` when they differ. |
 | `ws <slug>` | open an orchestrator session for a registered project |
 | `ws init <path> [--tests CMD] [--branch B]` | register a project |
-| `ws list`, `ws status [slug]` | projects; cold-start by hand |
-| `ws dispatch [--budget N] [--timeout T] [--model M] [--effort E] [--allow RULE]... <name> <task-file>` | run a builder (timeout defaults to 45m for `Track: light`, 120m otherwise) |
+| `ws list`, `ws status [slug]` | registered projects; cold-start by hand |
+| `ws dispatch [--budget N] [--timeout T] [--model M] [--effort E] [--allow RULE]... <name> <task-file>` | run a builder (`--dry-run` or `--print-prompt` to see what it would get) |
 | `ws wait <name>`, `ws tail <name>`, `ws runs`, `ws stop <name>` | wait for, watch, list, stop runs |
 | `ws serve <name\|main> [port]`, `ws serve stop [name]` | preview server from a worktree or the main checkout |
-| `ws review <name>` | review the branch; prints the verdict and the SHA to merge |
+| `ws review <name>`, `ws precheck <name>` | review the branch (prints the verdict and the SHA to merge); the mechanical checks alone |
 | `ws merge <name> <sha>` | merge a reviewed branch, run the tests, push on green, clean up |
+| `ws chain <queue>`, `ws chain-wait` | run a queue of steps unattended; wait on a running chain |
+| `ws audit [days]` | what builders keep doing by hand, from the run logs |
+| `ws release [--dry-run]` | publish main (or its `RELEASE_PATHS`) as one audited commit on a public repository |
+| `ws site [--dry-run]` | copy a project's published files into a site project, test, push, wait until live |
+| `ws --project <slug> <command> ...` | act on a registered project other than the selected one |
 
-## The files
+## Configuration
 
-Read [MODIFYING.md](MODIFYING.md) for every file and where to change what. The short version:
+- `config.sh`: budgets, timeouts (45m for a task marked `Track: light`, 120m otherwise), models, memory caps, timezone, preview ports, the browser command `ws serve` suggests, and `WS_ATTRIBUTION_RE` (names a merge refuses to add to a repository).
+- `config.local.sh` (optional): sourced after `config.sh`, for values you keep private, such as your own names in `WS_ATTRIBUTION_RE`.
+- `projects/<slug>.conf`: one per registered project (path, branch, `TEST_CMD`, `EXTRA_TOOLS`, `PREVIEW_CMD`, release and site settings).
+- `checklist.md`, `agents/*.md`, `lessons/*.md`: the review rules, the three roles and the lessons pasted into every prompt.
 
-| Path | What |
-|---|---|
-| `CLAUDE.md` | the orchestrator's instructions, under 60 lines |
-| `bin/ws`, `scripts/` | the command and its five scripts |
-| `agents/builder.md`, `reviewer.md`, `planner.md` | the three roles, a page each |
-| `checklist.md` | 18 review rules; adding one means removing one |
-| `lessons/<role>.md` | flat, always-loaded, size-capped notes: the whole memory system |
-| `schema/` | what a builder and a reviewer must return |
-| `projects/<slug>.conf` | a registered project |
-| `plans/<slug>/` | plans and task files, kept here so the product repo stays clean |
-| `runs/`, `state/` | logs, results, merged builders' evidence, selected project; not tracked |
-| `VERSION`, `CHANGELOG.md` | the workspace version (`ws version`) and what changed in each |
+## What stays private by design
 
-## Operating notes
+The workspace keeps your working material beside the tool, and none of it is meant to be published:
 
-- Parallel builders share the machine, not only the plan. Spikes and light builds run side by side; a builder rendering or testing alongside a merge slows the merge's suite two to three times. The usage limit did not stop a single run in colorwright's 42 hours; the CPU did the slowing.
-- Builders run only the tests for the code they touched. The merge runs the whole suite, prints its time and warns when it passes `WS_SUITE_WARN_S`. When it warns, dispatch a light task to speed up the slowest test files before anything else.
-- Evidence (logs, renders, screenshots) stays out of the product repo: builders write it to `.ws-evidence/` in the worktree, the reviewer reads it there, and the merge keeps it under `runs/<slug>/evidence/<name>/`.
-- A builder that stops on the usage limit or its budget leaves its work in the worktree. Dispatch the same name again with a task that says to continue.
-- Suggestions from a review never block. They go into the next task that touches that code.
-- If the tool gets in your way, change it and commit. There is no process for changing the process. `scripts/selftest.sh` checks your change.
+- `plans/`: plans and task files, kept here so product repositories carry only product
+- `runs/`, `state/`: logs, results, reviews, builders' evidence, the selected project (gitignored)
+- `projects/*.conf`: your projects' paths and settings
+- `*.local.md`: `CLAUDE.local.md` (your preferences for the orchestrator) and `lessons/<role>.local.md` (lessons that name your projects, people or dates), loaded after the shared files when present
+- `config.local.sh`: your private settings
+
+`.gitignore` ignores only `runs/`, `state/` and logs (`*.log`), so a private copy of the workspace can track the rest; add `*.local.md`, `config.local.sh`, `plans/` and `projects/*.conf` to it if you keep a public fork.
+
+## Changing the tool
+
+[MODIFYING.md](MODIFYING.md) explains every file and where to change what. After a change, `bash scripts/selftest.sh`.
 
 ## License
 

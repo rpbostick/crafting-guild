@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # One review per branch, before merge. Read-only reviewer, confined to the worktree, diff on stdin.
-# Usage: review.sh [--project slug] [--budget USD] [--model M] <name>
+# Usage: review.sh [--project slug] [--budget USD] [--model M] [--print-prompt] <name>
+# --print-prompt prints the reviewer's whole prompt and stops before running the reviewer.
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
-slug="" budget="$WS_REVIEW_BUDGET" model="$WS_REVIEW_MODEL" model_flag=""
-while [ $# -gt 0 ]; do case "$1" in --project) slug="$2"; shift 2 ;; --budget) budget="$2"; shift 2 ;; --model) model="$2"; model_flag=1; shift 2 ;; *) break ;; esac; done
+slug="" budget="$WS_REVIEW_BUDGET" model="$WS_REVIEW_MODEL" model_flag="" show_prompt=false
+while [ $# -gt 0 ]; do case "$1" in --project) slug="$2"; shift 2 ;; --budget) budget="$2"; shift 2 ;; --model) model="$2"; model_flag=1; shift 2 ;; --print-prompt) show_prompt=true; shift ;; *) break ;; esac; done
 name="${1:?usage: review.sh [flags] <name>}"
 load_project "$slug"; wt="$(worktree_dir "$name")"; br="$(branch_of "$name")"
 # A light-track branch reviews on the cheaper model unless --model says otherwise.
@@ -28,7 +29,7 @@ prompt="You are the reviewer for branch $br of project $SLUG, working directory 
 $(cat "$WS/agents/reviewer.md")
 
 # Lessons
-$(cat "$WS/lessons/reviewer.md")
+$(lessons_for reviewer)
 
 # Checklist
 $(cat "$WS/checklist.md")
@@ -47,6 +48,7 @@ Mechanical precheck (scripts/precheck.sh, already run on this branch; take its o
 $pre
 
 The full diff is on stdin $capped. Read any changed file in full with Read when you need context. Logs and renders the builder saved are under .ws-evidence/ in the worktree (untracked, so not in the diff); read them there."
+if $show_prompt; then printf '%s\n' "$prompt"; exit 0; fi
 cmd=(claude -p "$prompt" --restricted --permission-prompts none --json-schema "$(cat "$WS/schema/review.json")"
   --max-budget-usd "$budget" --output-format json --name "ws:$SLUG:review:$name")
 [ -n "$model" ] && cmd+=(--model "$model")

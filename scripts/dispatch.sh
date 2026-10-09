@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Run one builder on one task, headless, in its own worktree on branch agent/<name>.
 # Usage: dispatch.sh [--project slug] [--budget USD] [--model M] [--effort E] [--timeout 90m]
-#                    [--allow "Bash(cmd *)"]... [--dry-run] [--names-ok] <name> <task-file>
-# The builder gets: the builder sheet, lessons/builder.md, the task file, a grant to edit inside its
+#                    [--allow "Bash(cmd *)"]... [--dry-run] [--print-prompt] [--names-ok] <name> <task-file>
+# --print-prompt is a dry run that also prints the builder's whole prompt.
+# The builder gets: the builder sheet, lessons/builder.md (and builder.local.md), the task file, a grant to edit inside its
 # worktree and commit on its branch plus the project's test command and EXTRA_TOOLS, a budget, a timeout,
 # and a JSON result schema. Logs to runs/<slug>/<name>.jsonl; the result check lands in <name>.result.txt.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
-slug="" budget="$WS_DEFAULT_BUDGET" model="$WS_MODEL" effort="$WS_EFFORT" tmo="" dry=false names_ok=false; extra=()
+slug="" budget="$WS_DEFAULT_BUDGET" model="$WS_MODEL" effort="$WS_EFFORT" tmo="" dry=false show_prompt=false names_ok=false; extra=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --project) slug="$2"; shift 2 ;;
@@ -17,6 +18,7 @@ while [ $# -gt 0 ]; do
     --timeout) tmo="$2"; shift 2 ;;
     --allow) extra+=("$2"); shift 2 ;;
     --dry-run) dry=true; shift ;;
+    --print-prompt) dry=true; show_prompt=true; shift ;;
     --names-ok) names_ok=true; shift ;;
     -*) die "unknown flag $1" ;;
     *) break ;;
@@ -87,10 +89,10 @@ TOOLS=(Read Grep Glob "Edit(./**)"
 [ ${#EXTRA_TOOLS[@]} -gt 0 ] && TOOLS+=("${EXTRA_TOOLS[@]}")
 [ ${#extra[@]} -gt 0 ] && TOOLS+=("${extra[@]}")
 # Every backticked command in the task's "## Commands" section is granted by its first word (first two for
-# npx, npm, node, python3, git), so a task never names a command the builder cannot run (bw-export-screen ended
-# partial on an ungranted `npx expo install`, 2026-10-07). Destructive forms stay denied below.
-# A forbidden command ("No `pip`", "no plain `rm` or `mv`", "never `git stash`") is dropped before the backticks are
-# read, or the prohibition itself would grant it (fw-hybrid-pelvis was granted pip and npm install, 2026-10-07).
+# npx, npm, node, python3, git), so a task never names a command the builder cannot run: an ungranted command is
+# denied silently and the run ends partial (`npm install *` does not cover `npx expo install`). Destructive forms
+# stay denied below. A forbidden command ("No `pip`", "no plain `rm` or `mv`", "never `git stash`") is dropped
+# before the backticks are read, or the prohibition itself would grant it ("No `pip`" would grant pip).
 cmds=$(awk '/^## Commands/{f=1; next} /^## /{f=0} f' "$task" | sed -E 's/\b([Nn]o|[Nn]ever|[Nn]ot)( plain| a bare| any)? `[^`]*`(,? (or|and|nor) `[^`]*`)*//g' | grep -o '`[^`]*`' | tr -d '`' | sed 's/^ *//' || true)
 derived=()
 while IFS= read -r c; do
@@ -116,7 +118,7 @@ RUN_GRANTS="$RUNS/$name.grants"
 TOOLS+=("Bash($WS/bin/ws-run *)")
 DENY=("Bash(git push *)" "Bash(git -c *)" "Bash(git config *)" "Bash(git * --output*)" "Bash(git reset --hard *)" "Bash(git rebase *)" "Bash(git worktree *)")
 
-prompt="You are a headless builder launched by agentic-workspace v2. Working directory: $wt (a git worktree of $PROJECT_PATH on branch $br). Do only the task below, then answer with the JSON result.
+prompt="You are a headless builder launched by Crafting Guild. Working directory: $wt (a git worktree of $PROJECT_PATH on branch $br). Do only the task below, then answer with the JSON result.
 
 # Your role
 $(cat "$WS/agents/builder.md")
@@ -125,7 +127,7 @@ $(cat "$WS/agents/builder.md")
 $(cat "$WS/checklist.md")
 
 # Lessons from earlier runs
-$(cat "$WS/lessons/builder.md")
+$(lessons_for builder)
 
 # Project
 Main branch: $PROJECT_BRANCH. Project test command: ${TEST_CMD:-none configured}. The merge gate runs it on the merged tree; you do not. Run only the test files that cover what you changed, with the same runners, from the worktree root, in the foreground.
@@ -148,7 +150,9 @@ cmd=(claude -p "$prompt" --allowedTools "${TOOLS[@]}" --disallowedTools "${DENY[
 printf '%s\n' "${TOOLS[@]}" | sed -n 's/^Bash(\(.*\))$/\1/p' | grep -v '/bin/ws-run ' > "$RUN_GRANTS"
 if $dry; then
   echo "cwd: $wt"; echo "tools: ${TOOLS[*]}"; echo "deny: ${DENY[*]}"; echo "budget: \$$budget timeout: $tmo model: ${model:-default} memory cap: ${WS_BUILDER_MEM:-none}"
-  echo "prompt bytes: ${#prompt}"; echo "evidence: $wt/.ws-evidence"; exit 0
+  echo "prompt bytes: ${#prompt}"; echo "evidence: $wt/.ws-evidence"
+  if $show_prompt; then echo "--- prompt ---"; printf '%s\n' "$prompt"; fi
+  exit 0
 fi
 
 # Previous run's files move aside; this run's log, pid and task record are written fresh.

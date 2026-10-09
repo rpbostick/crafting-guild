@@ -37,8 +37,8 @@ if [ "$(printf '%s' "$so" | jq -r '.tests == null')" = "false" ]; then
   lp=$(printf '%s' "$so" | jq -r '.tests.log_path'); t=$(printf '%s' "$so" | jq -r '"\(.tests.passed) passed, \(.tests.failed) failed (\(.tests.command))"')
   # Builders sometimes follow the path with prose ("runs.tsv (logs: a.log, b.log)"): the path is the first word.
   [ -n "$lp" ] && [ ! -f "$wt/$lp" ] && [ -f "$wt/${lp%% *}" ] && lp="${lp%% *}"
-  # A suite run in parts names several logs ("a.log, b.log, c.log"): every one must exist (fw-hybrid-arms, 2026-10-07,
-  # was flagged for a list whose first word carried a trailing comma).
+  # A suite run in parts names several logs ("a.log, b.log, c.log"): every one must exist (the list's
+  # first word carries a trailing comma, so the first-word rule above does not find it).
   if [ -n "$lp" ] && [ ! -f "$wt/$lp" ]; then
     missing=$(printf '%s' "$lp" | tr ',' '\n' | sed 's/^ *//;s/ *$//;s/[`)]*$//' | awk 'NF' | while read -r one; do [ -f "$wt/$one" ] || echo "$one"; done | paste -sd' ')
     [ -z "$missing" ] && lp="$(printf '%s' "$lp" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | awk 'NF' | head -1) (and the rest of the list)"

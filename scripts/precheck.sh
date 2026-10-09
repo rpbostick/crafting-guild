@@ -31,7 +31,7 @@ dangling=$(printf '%s\n' "$changed" | awk '$1=="D"{print $2} $1 ~ /^R/{print $2}
 [ -n "$dangling" ] && flag 6 "deleted or renamed, still named in: $dangling" || ok 6 "no references to deleted or renamed files"
 
 # Rule 11: changed SVGs are well-formed XML. A file that does not open as a document (`<svg` or `<?xml`) is a
-# fragment kept as a golden (figurewright's path-only goldens, 2026-10-07) and is not parsed.
+# fragment kept as a golden (a path-only test fixture) and is not parsed.
 bad_svg=$(printf '%s\n' "$changed" | awk '$1!="D" && $NF ~ /\.svg$/{print $NF}' | while read -r p; do
   head -c 300 "$wt/$p" 2>/dev/null | grep -qE '^[[:space:]]*<(svg|\?xml)' || continue
   python3 -c 'import sys,xml.dom.minidom as m; m.parse(sys.argv[1])' "$wt/$p" 2>/dev/null || echo "$p"; done | head -5 | paste -sd' ')

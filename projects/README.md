@@ -8,4 +8,6 @@ PROJECT_BRANCH="master"
 TEST_CMD="bash scripts/run-all-tests.sh"
 ```
 
+`example.conf.sample` shows a full conf with every optional key. Confs hold your machine's paths, so they stay out of a published copy of the workspace.
+
 `TEST_CMD` runs from the repo root, in the worktree for builders and in the main checkout before a push. Leave it empty for a project with no tests; merges then push without a gate and say so.

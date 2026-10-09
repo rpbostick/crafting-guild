@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# agentic-workspace v2 launcher. Run from anywhere; works on any registered project.
+# Crafting Guild launcher. Run from anywhere; works on any registered project.
 set -uo pipefail
 WS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 . "$WS/scripts/lib.sh"
@@ -37,7 +37,7 @@ proj=""; if [ "${1:-}" = "--project" ]; then proj="${2:?ws: --project needs a sl
 cmd="${1:-}"; shift || true
 case "$cmd" in
   ""|-h|--help|help) usage ;;
-  version|--version|-v) echo "agentic-workspace v$(cat "$WS/VERSION")" ;;
+  version|--version|-v) echo "Crafting Guild v$(cat "$WS/VERSION")" ;;
   list) for f in "$WS"/projects/*.conf; do [ -f "$f" ] || continue; ( . "$f"; printf '%-18s %s (%s)%s\n' "$(basename "$f" .conf)" "$PROJECT_PATH" "$PROJECT_BRANCH" "$( [ "$(head -n1 "$WS/state/current" 2>/dev/null)" = "$(basename "$f" .conf)" ] && echo '  <- current')" ); done ;;
   init)
     path="${1:?ws init <path>}"; shift; tests="" branch="" yes=false
@@ -72,7 +72,8 @@ case "$cmd" in
     mkdir -p "$WS/plans/$slug" "$WS/runs/$slug"
     excl="$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/info/exclude"; for e in .worktrees .ws-evidence; do grep -qx "$e" "$excl" 2>/dev/null || echo "$e" >> "$excl"; done
     echo "registered $slug: $path (branch $branch; tests: ${tests:-none})"
-    # v1 left per-commit review and post-merge hooks wired into .git/hooks; v2 reviews per branch and tests on merge.
+    # The earlier agentic-workspace (v1) wired per-commit review and post-merge hooks into .git/hooks; this tool
+    # reviews per branch and tests on merge, so those hooks would review twice.
     hooks="$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/hooks"; found=()
     for h in post-commit post-merge; do [ -f "$hooks/$h" ] && grep -q 'claude/hooks' "$hooks/$h" && found+=("$h"); done
     [ -f "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/agentic-workspace-root" ] && found+=("agentic-workspace-root")
@@ -149,16 +150,19 @@ case "$cmd" in
             kill -KILL -- "-$sp" 2>/dev/null; pkill -KILL -P "$sp" 2>/dev/null; rm -f "$sf"; echo "stopped $what" ;;
       "") die "usage: ws serve <worktree-name|main> [port] | ws serve stop [name] | ws serve list" ;;
       *) what="$sub"; port="${2:-}"
-         if [ "$what" = main ]; then dir="$PROJECT_PATH"; [ -z "$port" ] && port=8800; else dir="$(worktree_dir "$what")"; [ -d "$dir" ] || die "no worktree $what"; [ -z "$port" ] && port=8801; fi
+         if [ "$what" = main ]; then dir="$PROJECT_PATH"; [ -z "$port" ] && port="$WS_PREVIEW_PORT_MAIN"; else dir="$(worktree_dir "$what")"; [ -d "$dir" ] || die "no worktree $what"; [ -z "$port" ] && port="$WS_PREVIEW_PORT"; fi
          sf="$RUNS/serve-$what.pid"; [ -f "$sf" ] && kill -0 "$(cut -d' ' -f1 "$sf")" 2>/dev/null && die "$what is already serving (ws serve stop $what)"
          cmd="${PREVIEW_CMD//\{port\}/$port}"
          # A preview runs under WS_SERVE_MEM like a builder under WS_BUILDER_MEM: past it, only the preview
-         # is killed. Two uncapped Expo previews took the desktop session on 2026-10-08.
+         # is killed. An uncapped Expo preview starts a Metro worker per core (~700 MB each), and two of them on a
+         # 16-core, 14 GB machine bring the OOM killer to the desktop session.
          cap=(); [ -n "${WS_SERVE_MEM:-}" ] && systemd-run --user --scope --quiet true >/dev/null 2>&1 &&
            cap=(systemd-run --user --scope --quiet -p "MemoryMax=$WS_SERVE_MEM" -p MemorySwapMax=0 --unit "ws-$SLUG-serve-$what-$(date -u +%Y%m%dT%H%M%SZ)" --description "ws serve $SLUG/$what")
          ( cd "$dir" && exec "${cap[@]}" setsid bash -c "$cmd" ) > "$RUNS/serve-$what.log" 2>&1 &
          echo "$! $port" > "$sf"; sleep 2
-         if kill -0 "$!" 2>/dev/null; then echo "serving $what at http://127.0.0.1:$port/ (memory cap: ${WS_SERVE_MEM:-none}; log: runs/$SLUG/serve-$what.log; stop: ws serve stop $what)"; else rm -f "$sf"; tail -n 20 "$RUNS/serve-$what.log"; die "server exited"; fi ;;
+         if kill -0 "$!" 2>/dev/null; then echo "serving $what at http://127.0.0.1:$port/ (memory cap: ${WS_SERVE_MEM:-none}; log: runs/$SLUG/serve-$what.log; stop: ws serve stop $what)"
+           [ -n "${WS_BROWSER_CMD:-}" ] && echo "open it: $WS_BROWSER_CMD http://127.0.0.1:$port/"; true
+         else rm -f "$sf"; tail -n 20 "$RUNS/serve-$what.log"; die "server exited"; fi ;;
     esac ;;
   stop)
     name="${1:?ws stop <name>}"; load_project "$proj"; pf="$RUNS/$name.pid"; [ -f "$pf" ] || die "no running $name"
