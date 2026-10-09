@@ -1,0 +1,5 @@
+# Bike Weather avatar prior art (avatar-prior-art.md). Not run yet: waits for the budget reset on 2026-10-12.
+# Run with: bin/ws --project bike-weather chain plans/bike-weather/avatar-prior-art.queue   (under run_in_background)
+# The two spikes are independent; the chain runs them one after the other. Each writes one report in docs/research/.
+bw-avatar-cozybuilder       plans/bike-weather/task-bw-avatar-cozybuilder.md --budget 8
+bw-avatar-characterstudio   plans/bike-weather/task-bw-avatar-characterstudio.md --budget 8

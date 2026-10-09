@@ -2,6 +2,10 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.5.2
+
+- `ws dispatch`: a task command written `git -C <dir> <sub>` is granted as exactly that. Any other git command starting with an option is no longer granted; before, both became a grant for every git command (`Bash(git*)`).
+
 ## 2.5.1
 
 - `ws release`: moving the `v<major>` branch no longer prints GitHub's pull-request hint, and the "version already exists" message names `VERSION` as well as `package.json`.
