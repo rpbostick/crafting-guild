@@ -2,6 +2,12 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.4.0
+
+- **Done-when, item by item.** Builders report every done-when item as met, partial or open, and whether they ran something to show it (`observed`, with the log or file) or reasoned it (`inferred`), plus what they could not establish (`unknowns`). The result check fails a `done` with an item not met and an observed item whose evidence is missing, and shows items met on inference alone. The reviewer gets the task's done-when and the builder's report, and treats an inference a user would hit as blocking.
+- **`ws init --dry-run`** shows the conf it would write and the changes; an existing conf is replaced only with `--force`, after a backup, keeping keys init does not write.
+- **`ws doctor`** checks the machine (bash, git, jq, GNU timeout, python3, the Claude Code version, systemd scopes, gh, rsync, shellcheck, the browser command), the workspace (the SessionStart hook, `ws` on PATH, lessons caps) and the selected project (path, branch, test command, remote, excludes), with a fix for each failure.
+
 ## 2.3.11
 
 - CONTINUITY.md: how a new session picks up where the last one stopped (the files, the cold start, the cycle), summarised in the README.

@@ -23,6 +23,12 @@ if [ "$bytes" -gt 200000 ]; then diff="${diff:0:200000}"; capped="(diff truncate
 commits=$(git -C "$PROJECT_PATH" log --format='%h %s' "$base..$tip")
 # The rules a script can check, checked first; the reviewer takes these as given and spends its budget on judgment.
 pre=$("$WS/scripts/precheck.sh" --project "$SLUG" "$name" 2>&1); printf '%s\n' "$pre" > "$RUNS/$name.precheck.txt"
+# The task's done-when and the builder's own report of it, so the review checks each item against the
+# diff and the evidence instead of rediscovering what was asked.
+tf=$(task_file "$name"); dw=""
+[ -n "$tf" ] && [ -f "$tf" ] && dw=$(awk 'tolower($0) ~ /^#+ *done when/ {on=1; next} on && /^#/ {exit} on' "$tf")
+[ -z "$dw" ] && [ -n "$tf" ] && [ -f "$tf" ] && dw=$(grep -iE 'done when' "$tf" | head -5)
+report=$(result_json "$RUNS/$name.jsonl" | jq -r '.structured_output // empty | "status: \(.status)\n" + ((.done_when // []) | map("- \(.status) (\(.basis)): \(.item) | evidence: \(.evidence)") | join("\n")) + "\nunknowns: \((.unknowns // []) | join("; "))"' 2>/dev/null)
 prompt="You are the reviewer for branch $br of project $SLUG, working directory $wt (read-only). Review the whole branch against the checklist and answer with the JSON verdict.
 
 # Your role
@@ -43,6 +49,12 @@ $files
 
 Diff stat:
 $stat
+
+The task's done-when:
+${dw:-(the task file states none)}
+
+The builder's report of it (claims to check, not facts):
+${report:-(no structured report from the builder)}
 
 Mechanical precheck (scripts/precheck.sh, already run on this branch; take its ok lines as checked, judge each FLAG: a real defect is blocking under its rule, a false alarm is not a finding):
 $pre

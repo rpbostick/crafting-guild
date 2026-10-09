@@ -2,6 +2,16 @@
 
 Versions of the workspace itself. `ws version` prints the current one. The product repos it works on have their own tags.
 
+## 2.4.0 (2026-10-09)
+
+From research report 16 (REA): its observations / inferences / unknowns split, its checklist revisited before finishing, and its dry-run setup and doctor.
+
+- **Done-when, item by item.** Builders report every done-when item as met, partial or open, and whether they ran something to show it (`observed`, with the log or file) or reasoned it (`inferred`), plus what they could not establish (`unknowns`). The result check fails a `done` with an item not met and an observed item whose evidence is missing, and shows items met on inference alone. The reviewer gets the task's done-when and the builder's report, and treats an inference a user would hit as blocking.
+- **`ws init --dry-run`** shows the conf it would write and the changes; an existing conf is replaced only with `--force`, after a backup, keeping keys init does not write.
+- **`ws doctor`** checks the machine (bash, git, jq, GNU timeout, python3, the Claude Code version, systemd scopes, gh, rsync, shellcheck, the browser command), the workspace (the SessionStart hook, `ws` on PATH, lessons caps) and the selected project (path, branch, test command, remote, excludes), with a fix for each failure.
+- The review prompt never carried the task or the builder's result before this; it does now (the done-when and the report).
+- `ws init` overwrote an existing conf silently, losing RELEASE_PATHS, SITE_SYNC and hand fixes; now refused without --force.
+
 ## 2.3.11 (2026-10-09)
 
 - **Cold start printed only the heading of the In flight block.** Its awk stopped at the first blank line, and every plan puts one after the heading, so sessions saw `**In flight right now**` and nothing under it (visible in every cold start since the blocks grew paragraphs). It now prints the block up to the next section, skipping blank lines, 12 lines of up to 700 characters; the selftest checks it.

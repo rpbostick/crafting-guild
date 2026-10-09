@@ -45,6 +45,27 @@ if [ "$(printf '%s' "$so" | jq -r '.tests == null')" = "false" ]; then
   fi
   if [ -n "$lp" ] && { [ -f "$wt/$lp" ] || [ -f "$wt/${lp%% *}" ]; }; then ok "tests $t, log at $lp"; else flag "tests claimed ($t) but no log at ${lp:-<none>}"; fi
 else echo "note  no tests run"; fi
+# Done-when, item by item: a "done" with an item not met is a false claim; an observed item must cite
+# evidence that exists; an item met on inference alone is shown so the review can judge it.
+if [ "$(printf '%s' "$so" | jq 'has("done_when")')" = true ]; then
+  nw=$(printf '%s' "$so" | jq '.done_when | length')
+  if [ "$nw" -eq 0 ]; then
+    tf=$(task_file "$name"); if [ -n "$tf" ] && grep -qiE '^#+ *done when|done when:' "$tf" 2>/dev/null; then flag "the task states a done-when but the result reports none"; fi
+  fi
+  notmet=$(printf '%s' "$so" | jq '[.done_when[] | select(.status != "met")] | length')
+  [ "$(printf '%s' "$so" | jq -r '.status')" = done ] && [ "$notmet" -gt 0 ] && flag "status done, but $notmet done-when item(s) are not met"
+  while IFS=$'\t' read -r st basis item ev; do
+    [ -n "$st" ] || continue
+    line="done-when $st ($basis): $(printf '%s' "$item" | head -c 120)"
+    if [ "$st" != met ]; then echo "note  $line"; continue; fi
+    if [ "$basis" = inferred ]; then echo "note  $line: inferred, not run ($(printf '%s' "$ev" | head -c 120))"; continue; fi
+    path=${ev%% *}; path=${path%,}; path=${path//\`/}
+    if [[ "$path" == */* || "$path" == *.log || "$path" == *.png || "$path" == *.txt ]] && [[ "$path" != http* ]] && [ ! -e "$wt/$path" ] && ! git -C "$wt" cat-file -e "${path}^{commit}" 2>/dev/null; then
+      flag "$line: evidence $path is not in the worktree"
+    else ok "$line"; fi
+  done < <(printf '%s' "$so" | jq -r '.done_when[] | [.status, .basis, (.item | gsub("[\t\n]"; " ")), (.evidence | gsub("[\t\n]"; " "))] | @tsv')
+  nu=$(printf '%s' "$so" | jq '.unknowns | length'); [ "$nu" -gt 0 ] && echo "note  unknowns: $(printf '%s' "$so" | jq -c '.unknowns')"
+else echo "note  no done-when report (a result from before the field existed)"; fi
 nd=$(printf '%s' "$res" | jq '.permission_denials | length'); nr=$(printf '%s' "$so" | jq '.denied | length')
 if [ "$nd" -gt 0 ]; then echo "note  $nd denied call(s) (agent listed $nr): $(printf '%s' "$res" | jq -c '[.permission_denials[] | (.tool_input.command // .tool_name)][:5]')"; else ok "no denied calls"; fi
 if [ -n "$since" ]; then
