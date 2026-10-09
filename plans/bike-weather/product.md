@@ -63,6 +63,14 @@
 
 - **Minute-weather access** (Patrick, 2026-10-01, ideas for tiers): (a) a user can enter **their own API key** for a minute-level provider in settings, stored only on the device and used directly from the phone, so minute rain works with no Bike Weather server or cost; (b) a **small subscription (about $1/month)** unlocks minute-level weather through Bike Weather's proxy and its paid nowcast source. Both fit the "minute layer is optional" design; (b) belongs with milestone 3's tiers and in-app purchase. Check each candidate provider's terms for end-user keys before offering (a).
 
+## Decisions (Patrick, 2026-10-09, after the avatar prior-art reports)
+| Question | Decision |
+|---|---|
+| 2D or 3D avatar | **Layered 2D SVG.** Garments drawn in layer-role order (base, mid, outer, shell, accessory) over the body, each in the user's colour; lower layers show where upper ones are shorter. No 3D (expo-gl is pre-alpha on native, the sample asset packs have no licence). `docs/research/avatar-characterstudio.md`. |
+| Covering | **Per sub-region, as data.** Each template states what it covers (sleeve length, open front, leg length) in a table beside the template list; a test walks every outfit the recommender can produce and checks each sub-region shows the outermost garment. `docs/research/avatar-cozybuilder.md` (named-part library, hiding rules as data). |
+| Body | **figurewright's body work resumes as the avatar body**; garment art is drawn to fit it. |
+| CozyBuilder licence | **Not asked.** Ideas only, in our own words. |
+
 ## Milestones
 1. **Tools satisfactory** (separate projects): the weather library + demo app; the body/garment tool + demo app.
 2. **Bike Weather core loop**: avatar builder, clothing library from garment templates with ratings, today's forecast, suggested outfit on the avatar in ride/everyday mode, comfort rating, export/import. Closing this milestone includes publishing skywright (its plan's step 7) and asking Patrick about figurewright's release.

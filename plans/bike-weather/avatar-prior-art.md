@@ -2,6 +2,8 @@
 
 **In flight right now**
 
+**DECIDED (2026-10-09, Patrick): 2D layered SVG, covering per sub-region as data, figurewright body resumes, no CozyBuilder licence ask (product.md). Next: step 4, the build plan.**
+
 **SPIKES MERGED (2026-10-09 17:18 MDT):** bw-avatar-cozybuilder aae6820 ($1.17 + review $0.30) and bw-avatar-characterstudio c82d926 ($2.19 + review $0.29), reports in bike-weather docs/research/. CharacterStudio recommends a layered 2D SVG avatar (draw order by layer role) over 3D (pre-alpha expo-gl, no asset licences, a Blender/VRM pipeline). CozyBuilder: one named-part library, hiding rules as data, a test over every outfit; its one-item slots and all-or-nothing masks do not fit. Carry forward: prefix external paths (`CharacterStudio:`), permalinks at the commit read. Next: the decision talk (step 3).
 
 ## Why
@@ -38,4 +40,4 @@ The core loop shows the suggested outfit on the user's avatar, with clothing lay
 
 - [ ] Both reports are merged in `docs/research/`, answering questions 1 to 6 with file and line references.
 - [ ] Neither report copies code or assets from CozyBuilder.
-- [ ] Patrick has decided 2D or 3D, the slot and layer model, and what happens to the figurewright body work, and the decisions are in `product.md`.
+- [x] Patrick has decided 2D or 3D, the slot and layer model, and what happens to the figurewright body work, and the decisions are in `product.md`.
