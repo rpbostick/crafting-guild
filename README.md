@@ -6,6 +6,21 @@ You open one Claude Code session here and point it at a project. That session is
 
 No servers, no Docker, no cron, no MCP: about 1,300 lines of shell, one small Python script and a few pages of prose.
 
+## Why use it
+
+Plain Claude Code is a capable agent; Crafting Guild adds the layer above it for building a whole app:
+
+- **A fresh context per step:** each task runs in its own builder and worktree, so the orchestrator never fills up and compacts.
+- **A gate before main:** one review per branch, then a merge at the reviewed commit with your tests run on the merged tree; red undoes it.
+- **Claims checked, limits per run:** commits and test logs are checked against the branch; every builder has a budget, a timeout and a memory cap.
+- **Work that outlives the session:** queued steps run detached and resume after a restart.
+
+It costs immediacy (a change is minutes, not seconds) and it is shell for one person at a terminal. Use plain Claude Code for quick fixes and line-by-line review, the Agent SDK for services and products. [COMPARISON.md](COMPARISON.md) has the evidence and a table against Claude Code in a terminal, in VS Code, and the Agent SDK.
+
+## How a new session picks up where the last one stopped
+
+Nothing is kept in the model. A `SessionStart` hook runs a cold start at every session start and after every compaction. In about twenty seconds it prints the project's git state, the builder worktrees and runs, any running chain and previews, the last results, and the plan's **In flight right now** block, which the orchestrator rewrites at every dispatch, merge and decision. Plans, task files and lessons are files in git; results are files under `runs/`. [CONTINUITY.md](CONTINUITY.md) lists every file involved, what cold start prints, and how to keep it working.
+
 ## Requirements
 
 - Linux or macOS with `bash`, `git`, `jq`, GNU `timeout` and `python3`
