@@ -125,4 +125,4 @@ for i in "${!steps[@]}"; do
     fi
   fi
 done
-status done "all steps in $queue merged"; log "chain done: $queue"
+status "done" "all steps in $queue merged"; log "chain done: $queue"

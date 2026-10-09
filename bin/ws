@@ -59,7 +59,7 @@ case "$cmd" in
       [ -d "$v" ] || continue; rel="${v#"$path"/}"
       extras+=("\"Bash($rel/bin/python *)\"" "\"Bash($rel/bin/python3 *)\"" "\"Bash($rel/bin/pytest *)\"")
     done
-    [ -d "$path/node_modules" ] || [ -d "$path"/*/node_modules ] 2>/dev/null && extras+=("\"Bash(node *)\"" "\"Bash(npm test*)\"" "\"Bash(npx *)\"")
+    { [ -d "$path/node_modules" ] || compgen -G "$path/*/node_modules" >/dev/null; } && extras+=("\"Bash(node *)\"" "\"Bash(npm test*)\"" "\"Bash(npx *)\"")
     preview=""; [ -f "$path/backend/app/main.py" ] && preview="cd backend && .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port {port}"
     conf_file="$WS/projects/$slug.conf"
     conf=$({
@@ -161,6 +161,7 @@ case "$cmd" in
       else empty end' 2>/dev/null ;;
   runs)
     load_project "${1:-$proj}"; echo "runs for $SLUG:"
+    # shellcheck disable=SC2045  # newest first; run names have no spaces
     for f in $(ls -t "$RUNS"/*.result.txt "$RUNS"/*.pid 2>/dev/null); do
       n=$(basename "$f"); n="${n%.result.txt}"; n="${n%.pid}"
       case "$f" in *.pid) kill -0 "$(cat "$f")" 2>/dev/null && echo "  $n: RUNNING (pid $(cat "$f"))" ;; *) echo "  $n: $(head -n1 "$f" | cut -c1-100)  [$(tail -n1 "$f" | cut -c1-60)]" ;; esac
