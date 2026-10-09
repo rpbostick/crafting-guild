@@ -1,0 +1,26 @@
+# An example of what `ws init <path>` writes to projects/<slug>.conf, with the optional keys below it.
+# Edit by hand; every key is read by scripts/lib.sh.
+PROJECT_PATH="/absolute/path/to/my-app"
+PROJECT_BRANCH="main"          # the branch builders branch from and merges land on
+TEST_CMD="npm test"   # run from the repo root; empty = no test gate
+# Extra Bash grants for builders (Claude Code permission rules). Builders already get git add/commit/rm/mv,
+# ls/cat/grep/head/tail/wc/diff/mkdir/chmod/expr/date, bash -n, git grep and the test command. Add what your tests and tools need.
+EXTRA_TOOLS=("Bash(node *)" "Bash(npm test*)" "Bash(npx *)")
+# Command that serves the app for a preview; {port} is replaced. Used by: ws serve <worktree|main> <port>
+PREVIEW_CMD="npx serve -l {port} dist"
+
+# Optional keys; leave a key out for its default.
+# Paths whose lines may name people (intended credits); the attribution check skips them.
+# CREDIT_PATHS=("CREDITS.md")
+# Generated files the attribution check skips (bundles that inline third-party code; their sources are checked).
+# ATTRIBUTION_EXEMPT=("dist/*")
+# Flags for ws merge's `npm ci` (default --ignore-scripts); empty for git dependencies that build in `prepare`.
+# MERGE_NPM_FLAGS=""
+# ws release: only these paths go public; `source=dest` publishes a file under another name.
+# RELEASE_PATHS=("src" "package.json" "README.md" "LICENSE" "CHANGELOG.public.md=CHANGELOG.md")
+# ws site, in the project that publishes: the site project and what goes where (see scripts/site.sh).
+# SITE_PROJECT="my-site"
+# SITE_SYNC=("release: public/my-app")
+# In the site project's own conf: where it is served and which folder is the web root.
+# SITE_URL="https://example.org"
+# SITE_ROOT="public"
