@@ -4,6 +4,8 @@ Versions of the workspace itself. `ws version` prints the current one. The produ
 
 ## 2.3.11 (2026-10-09)
 
+- **Cold start printed only the heading of the In flight block.** Its awk stopped at the first blank line, and every plan puts one after the heading, so sessions saw `**In flight right now**` and nothing under it (visible in every cold start since the blocks grew paragraphs). It now prints the block up to the next section, skipping blank lines, 12 lines of up to 700 characters; the selftest checks it.
+- CONTINUITY.md (published): how a session picks up where the last stopped; README summary. COMPARISON.md (published): the long case for and against, moved out of the README.
 - README "Why use it", from research reports 13 to 15 (agentic-framework-research): plain Claude Code in a terminal and in VS Code, Crafting Guild and the Agent SDK compared; the evidence is the first app's numbers, anonymised.
 
 ## 2.3.10 (2026-10-09)

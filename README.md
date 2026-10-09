@@ -17,6 +17,10 @@ Plain Claude Code is a capable agent; Crafting Guild adds the layer above it for
 
 It costs immediacy (a change is minutes, not seconds) and it is shell for one person at a terminal. Use plain Claude Code for quick fixes and line-by-line review, the Agent SDK for services and products. [COMPARISON.md](COMPARISON.md) has the evidence and a table against Claude Code in a terminal, in VS Code, and the Agent SDK.
 
+## How a new session picks up where the last one stopped
+
+Nothing is kept in the model. A `SessionStart` hook runs a cold start at every session start and after every compaction. In about twenty seconds it prints the project's git state, the builder worktrees and runs, any running chain and previews, the last results, and the plan's **In flight right now** block, which the orchestrator rewrites at every dispatch, merge and decision. Plans, task files and lessons are files in git; results are files under `runs/`. [CONTINUITY.md](CONTINUITY.md) lists every file involved, what cold start prints, and how to keep it working.
+
 ## Requirements
 
 - Linux or macOS with `bash`, `git`, `jq`, GNU `timeout` and `python3`

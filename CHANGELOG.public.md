@@ -4,6 +4,8 @@ Versions of Crafting Guild. `ws version` prints the current one.
 
 ## 2.3.11
 
+- CONTINUITY.md: how a new session picks up where the last one stopped (the files, the cold start, the cycle), summarised in the README.
+- Cold start prints the whole In flight block: paragraphs separated by blank lines, up to the next section. It used to stop at the first blank line.
 - README: a short "Why use it"; COMPARISON.md has the longer case, the evidence and a table against Claude Code in a terminal, Claude Code in VS Code and the Agent SDK.
 
 ## 2.3.10

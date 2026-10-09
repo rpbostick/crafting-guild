@@ -75,12 +75,13 @@ for r in $(ls -t "$RUNS"/*.result.txt 2>/dev/null | head -5); do
   n=$(basename "$r" .result.txt); echo "  last: $n: $(head -n1 "$r" | cut -c1-110)"
 done
 echo
+# The block runs from its heading to the next section; blank lines between its paragraphs are skipped.
 echo "--- in flight (plans/$SLUG) ---"
 found=0
 for p in "$WS/plans/$SLUG"/*.md; do
   [ -f "$p" ] || continue
   grep -q '^\*\*In flight right now\*\*' "$p" || continue
-  echo "  ${p#"$WS/"}:"; awk '/^\*\*In flight right now\*\*/ {on=1} on && /^$/ {exit} on {print "    " $0}' "$p" | head -15; found=1
+  echo "  ${p#"$WS/"}:"; awk '/^\*\*In flight right now\*\*/ {on=1; next} on && (/^## / || /^\(Older blocks/) {exit} on && NF {print "    " substr($0, 1, 700) (length($0) > 700 ? " …" : "")}' "$p" | head -12; found=1
 done
 [ "$found" -eq 0 ] && echo "  none. Plans: $(ls "$WS/plans/$SLUG"/*.md 2>/dev/null | xargs -rn1 basename | paste -sd' ' | grep . || echo none)"
 echo
