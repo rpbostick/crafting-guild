@@ -2,6 +2,8 @@
 
 **In flight right now**
 
+**CADENCE (2026-10-09, Patrick):** weekly batch releases, safety fixes at once. **2.5.4 pending** (review usage-limit fallback): VERSION and CHANGELOG.public.md hold it; add later changes to its entry, release with the week's batch.
+
 **2.5.3 PUBLIC (2026-10-09, Patrick approved):** dispatch globs in task commands no longer expand against the folder; dispatch dry runs leave no worktree. Fresh clone of v2 passes.
 
 **2.5.2 PUBLIC (2026-10-09 17:09 MDT, Patrick approved):** git -C grant fix, audit false positives (gate scripts followed through more than one file, pre-ws-run wrappers and suite-run scripts not flagged), shellcheck-clean with the lint step failing the selftest (shellcheck installed). A fresh clone of v2 passes. Last session's carry-overs are done: 2.5.2 published, bike-weather previews :8805/:8806 stopped. Colorwright's audit findings were all stale (fixed in the audit, no task).
