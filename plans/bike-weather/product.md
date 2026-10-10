@@ -51,7 +51,7 @@
 - **Misuse:** exact coordinates logged by a provider reveal a home and daily ride times; a leaked export joins body measurements, home and trip dates (an empty house); an extracted key runs up the bill.
 - **Rules for the build:** coordinates leave the device rounded to 0.01° (skywright, `sky-coarse-location`); never log coordinates or measurements; the export carries no location history unless the user includes it, and the app says what is in it; the paid provider's key goes through a proxy or a restricted key before launch, never a bare key in the bundle; ask for "while using" location only, and allow a typed place instead.
 
-- 2026-10-01: provider research merged (`docs/research/weather-providers.md`, 755f1ae). Recommends **Open-Meteo commercial behind a small Bike Weather proxy**, WeatherKit REST as fallback; OpenWeather out on cost, Tomorrow.io on terms/privacy. Open for Patrick, after the Dark Sky report: who runs the proxy; iOS-only or both at launch; confirm Open-Meteo prices. Review suggestions for a revision: hourly horizon per provider in the table (OpenWeather 48 h, MET Norway 6-hourly later), state the privacy rule in the doc, WeatherKit's cache limit next to the recommendation, link skywright's files by commit.
+- 2026-10-01: provider research merged (`docs/research/weather-providers.md`, 755f1ae). Recommends **Open-Meteo commercial behind a small Bike Weather proxy**, WeatherKit REST as fallback; OpenWeather out on cost, Tomorrow.io on terms/privacy. Answered: both platforms at launch (2026-10-01); the proxy runs on Patrick's Cloudflare account, and prices are confirmed when paid services start (2026-10-09). Review suggestions for a revision: hourly horizon per provider in the table (OpenWeather 48 h, MET Norway 6-hourly later), state the privacy rule in the doc, WeatherKit's cache limit next to the recommendation, link skywright's files by commit.
 
 ## Decisions (Patrick, 2026-10-01, after the provider and Dark Sky reports)
 | Question | Decision |
@@ -84,6 +84,14 @@
 | Server | **Cloudflare Workers + D1**, the serverless platform already chosen for the forecast proxy. Built and tested locally (wrangler); deployed only on Patrick's word. |
 | Body and climate info | **Later, opt-in only** (may count as health data). |
 | Privacy | This replaces "Collect: nothing on a server" (Privacy, 2026-10-01) for ratings: shared ratings are uploaded. A privacy policy is written before upload ships and gets a lawyer's read before launch. |
+
+## Decisions (Patrick, 2026-10-09, money and services)
+| Question | Decision |
+|---|---|
+| Paid services | **None until there is revenue or an audience.** The pieces are built ready to switch on, and stay off. |
+| Free tiers | Allowed for real deployments (for example the ratings Worker or the forecast proxy for testers): Cloudflare's free plan and Open-Meteo's free API (non-commercial: development and unpaid testing), **with no payment method on file**. Open-Meteo's paid plan starts when the app is sold. |
+| Proxy owner | **Patrick's own Cloudflare account**; it moves to a business account if Bike Weather becomes a company. |
+| skywright | **Frozen, done enough**: fixes only. The plain-language weather summaries ("light rain starting in 12 min") live in Bike Weather. |
 
 ## Milestones
 1. **Tools satisfactory** (separate projects): the weather library + demo app; the body/garment tool + demo app.

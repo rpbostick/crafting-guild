@@ -7,7 +7,7 @@
 ## Requirements (decisions 2026-10-09 in `product.md`, ratings-export talk round 2)
 - Sharing is **on by default**, explained on first run, with an off switch in Settings; the app works fully with it off. The user can see what is shared (round 1: preview before sharing).
 - A shared rating holds conditions, effort, garment kinds with their warmth/wind/water ratings, comfort, **region** (Köppen climate zone + country + altitude band) and **brand and model**. Time is rounded to the hour. No place, account ID or device ID; a fresh random ID per upload.
-- **Server:** Cloudflare Workers + D1. Raw uploads stay private. When the shared table or a dataset is built, any region or brand/model with **fewer than 10 contributors** is merged into "other". Built and tested locally (wrangler); deployed only on Patrick's word.
+- **Server:** Cloudflare Workers + D1. Raw uploads stay private. When the shared table or a dataset is built, any region or brand/model with **fewer than 10 contributors** is merged into "other". Built and tested locally (wrangler); deployed only on Patrick's word, on Cloudflare's free plan with no payment method (2026-10-09: nothing paid until revenue or an audience).
 - File export and import of one's own ratings **already exists** (`src/model/transfer.ts`, the wardrobe document; ratings carry no place). Upload is built right after, so it is mostly ready when users arrive.
 - Body and climate information: later, opt-in only. Not in this plan.
 - A privacy policy is written before upload ships.
