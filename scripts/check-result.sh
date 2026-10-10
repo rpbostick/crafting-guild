@@ -59,8 +59,10 @@ if [ "$(printf '%s' "$so" | jq 'has("done_when")')" = true ]; then
     line="done-when $st ($basis): $(printf '%s' "$item" | head -c 120)"
     if [ "$st" != met ]; then echo "note  $line"; continue; fi
     if [ "$basis" = inferred ]; then echo "note  $line: inferred, not run ($(printf '%s' "$ev" | head -c 120))"; continue; fi
-    path=${ev%% *}; path=${path%,}; path=${path//\`/}
-    if [[ "$path" == */* || "$path" == *.log || "$path" == *.png || "$path" == *.txt ]] && [[ "$path" != http* ]] && [ ! -e "$wt/$path" ] && ! git -C "$wt" cat-file -e "${path}^{commit}" 2>/dev/null; then
+    # First word of the evidence, without the punctuation of the sentence it opens (".ws-evidence/a.log: 192");
+    # a bare file name ("a.log") is looked up in .ws-evidence/ too.
+    path=${ev%% *}; path=${path//\`/}; while [[ "$path" == *[,:\;.\)] ]]; do path=${path%?}; done
+    if [[ "$path" == */* || "$path" == *.log || "$path" == *.png || "$path" == *.txt ]] && [[ "$path" != http* ]] && [ ! -e "$wt/$path" ] && [ ! -e "$wt/.ws-evidence/$path" ] && ! git -C "$wt" cat-file -e "${path}^{commit}" 2>/dev/null; then
       flag "$line: evidence $path is not in the worktree"
     else ok "$line"; fi
   done < <(printf '%s' "$so" | jq -r '.done_when[] | [.status, .basis, (.item | gsub("[\t\n]"; " ")), (.evidence | gsub("[\t\n]"; " "))] | @tsv')
