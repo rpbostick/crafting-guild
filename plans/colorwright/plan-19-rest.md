@@ -1,6 +1,8 @@
 # Colorwright: the rest of plan 19 (3a-2, 3b, 3c-2) and the Option C spike
 
-**In flight right now** (2026-10-05 14:34 MDT, rewrite at every dispatch):
+**In flight right now**
+
+**DIRECTION (2026-10-09 19:26 MDT, Patrick):** feature-frozen and kept live. Two jobs left: (1) video 01 (build-notes), whose shot 4 needs a waiting colorwright branch: the cw-gate-speed carry-forwards, built and left unreviewed until recording; (2) **polish it enough to show Pablo Stanley, the Open Peeps artist**, so they can see what people make with their art. Next: a polish pass. Patrick and the orchestrator look at the live site together and list the rough spots, which become one or two light tasks after 10/12. The Open Peeps credit should be prominent and link to openpeeps.com. Parked: the hijab and Hat Hip as hats. (2026-10-05 14:34 MDT, rewrite at every dispatch):
 **2026-10-09 19:10 MDT:** `cw-gate-speed` reviewed (merge, $0.27) and merged 62ef6d7: the gate's browser checks run two at a time, 232 s against 554 s. **This broke build-notes video 01 shot 4**, which needed this branch waiting unmerged until recording; see build-notes' plan. Carry forward: the README's gate time as a range (242 to 257 s), a test for a check that leaves no .status file, and thumbnail-framing failing under load at pool 4.
 
 ## Requirements (from v1 `plans/backlog-plan-19.md` and `backlog-plan-18.md`; Patrick's choices there are settled)
