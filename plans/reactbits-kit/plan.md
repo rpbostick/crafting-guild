@@ -1,6 +1,10 @@
 # reactbits-kit: plan
 
-**In flight right now** (2026-10-02): step 1 merged (rbk-foundation: our modules, 12 transforms for Waves/Aurora/Iridescence, rbx CLI, 81 tests). Step 2 merged (rbk-seven: all ten components, sheet and site profiles, React adapter, 114 tests). Next: step 3, move rpbostick.github.io onto rbx (after the figurewright inside-the-ball round merges, since it changes Waves), step 4 (chargen-toybox plug-in) running as `ppr-toybox-rbx`. Kit on GitHub private, tag v0.2.0.
+**In flight right now**
+
+**MAINTENANCE (2026-10-09 20:02 MDT, Patrick keeps making demos with React Bits backgrounds):** the kit is the one source for customised backgrounds; new demos use `rbx`. A background is added only when a demo needs it. Step 3 (the site onto the kit, so the two don't drift) is one light task when there's room after Bike Weather. Licence: React Bits is MIT + Commons Clause, so it stays out of Bike Weather and anything sold unless the terms are checked first.
+
+(2026-10-02): step 1 merged (rbk-foundation: our modules, 12 transforms for Waves/Aurora/Iridescence, rbx CLI, 81 tests). Step 2 merged (rbk-seven: all ten components, sheet and site profiles, React adapter, 114 tests). Next: step 3, move rpbostick.github.io onto rbx (after the figurewright inside-the-ball round merges, since it changes Waves), step 4 (chargen-toybox plug-in) running as `ppr-toybox-rbx`. Kit on GitHub private, tag v0.2.0.
 
 ## Requirements (Patrick, 2026-10-02)
 - One tool to deploy all our React Bits customizations everywhere; its own repo; never package React Bits itself.
