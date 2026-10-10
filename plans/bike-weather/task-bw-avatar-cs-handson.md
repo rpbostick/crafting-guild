@@ -1,6 +1,6 @@
 # Bike Weather research: CharacterStudio hands-on (sandboxed install, run, safety report)
 
-Track: light
+Track: full
 
 `docs/research/avatar-characterstudio.md` read CharacterStudio (github.com/M3-org/CharacterStudio, MIT, a three.js / VRM web avatar creator) but did not run it, because its install pulls in cryptocurrency-wallet libraries. This round installs it **in a sandbox**, removes anything harmful, runs its editor, and measures how its layering behaves. The avatar decisions (2D layered SVG, per-sub-region covering, figurewright's body) are in the earlier report's sources and in figurewright's garment engine (`node_modules` has no figurewright; read its design in the report and in `docs/research/avatar-cozybuilder.md` §5). Research only: nothing from CharacterStudio enters `src/`.
 
@@ -12,7 +12,7 @@ Track: light
    - In the repo and its dependencies' published code: list wallet or key handling, network calls to hosts other than the app's own assets, telemetry, `eval` / `new Function` / obfuscated code, and scripts that fetch and run remote code (for example `get-assets` cloning another repo).
    
    Install with `npm ci --ignore-scripts` only. Then run `npm audit --omit=dev` and `npm query ":attr(scripts, [postinstall])"` and save both.
-3. **Cut out** in the sandbox whatever is harmful or not needed to run the editor: wallet and web3 packages and the code that imports them, and install hooks. Record each cut (file, package, why, and whether the editor still runs) in `.ws-evidence/cuts.md`. Never connect a wallet or enter a key.
+3. **Cut out** in the sandbox whatever is harmful or not needed to run the editor: wallet and web3 packages and the code that imports them, and install hooks. Record each cut (file, package, why, and whether the editor still runs) in `.ws-evidence/cuts.md`. Never connect a wallet or enter a key. **Timebox the cuts to about 20 minutes:** if the editor still won't build or run without the wallet code, put it back and run the editor with that code present but never connected, and say in the report why it couldn't be cut.
 4. **Run it.** Build with `npx vite build`. Write `.ws-evidence/scratch/drive.js`, which serves `dist/` on a port in 8790–8799 and drives it with puppeteer-core (install it with `--ignore-scripts`; the browser is the newest Chrome under `~/.cache/puppeteer/chrome/`). Run it in the foreground. Use the editor: pick a body, stack garments in several slots, change a colour, and export. Screenshot each step, at most twelve screenshots, onto one page `.ws-evidence/page/index.html`.
 5. **Measure layering** against our needs: do lower layers show where an upper one is shorter; what culling removes and when; the cost of adding one garment; the frame time and memory in the browser; and how traits map to slots.
 

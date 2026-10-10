@@ -1,5 +1,5 @@
 # Hands-on research on CozyBuilder and CharacterStudio: the gate before more figurewright or avatar work (avatar-build.md).
 # Independent: dispatch both side by side after the 10/12 reset, then review and merge each:
-#   npm_config_ignore_scripts=true bin/ws --project bike-weather dispatch --budget 8 bw-avatar-cs-handson plans/bike-weather/task-bw-avatar-cs-handson.md
+#   npm_config_ignore_scripts=true bin/ws --project bike-weather dispatch --budget 12 --timeout 90 bw-avatar-cs-handson plans/bike-weather/task-bw-avatar-cs-handson.md
 #   bin/ws --project bike-weather dispatch --budget 8 --allow "Bash(bash .ws-evidence/scratch/dotnet-install.sh *)" --allow "Bash(.ws-evidence/scratch/dotnet/dotnet *)" bw-avatar-cozy-handson plans/bike-weather/task-bw-avatar-cozy-handson.md
 # Issue drafts (.ws-evidence/issue-draft.md) go to Patrick before anything is filed on GitHub.
