@@ -3,6 +3,8 @@
 **In flight right now**
 
 **PLANNED (2026-10-09 16:26 MDT, Patrick):** avatar prior art: research spikes on CozyBuilder (no licence: read for ideas only) and CharacterStudio (MIT, web VRM avatars), then a decision talk on 2D or 3D, the slot and layer model, and figurewright's body work. Plan `avatar-prior-art.md`, queue `avatar-prior-art.queue`; not dispatched, waits for the 2026-10-12 budget reset (about $19).
+**RATINGS-EXPORT DECIDED (2026-10-09 18:06 MDT, round 2):** see Decisions 2026-10-09 (ratings-export talk round 2). Next: a build plan (file export/import, then upload to Workers + D1 with the server-side scrub).
+
 **RATINGS-EXPORT TALK, round 1 (2026-10-08 17:03 MDT, Patrick):** For whom: our users first (the recommendation table), then a public research dataset and makers/vendors second. Contents: all details are wanted (conditions + comfort, garment kinds + warmth/wind/water ratings, brand and model, climate or body info), but start with the basic general data and expand as able. Channel: upload to our server, a file the user sends, and import back in; email only if it can be easily automated. A privacy policy will be written. Consent: preview before sharing; Patrick leans to sharing on by default (anonymous, never used for marketing), possibly without an opt-out since the data is the app's purpose; **talk more first** about that and its implications, so nothing is built yet. To raise next round: GDPR consent must be freely given and an app-store reviewer may reject data collection required to use the app (Apple 5.1.1), so a mandatory share may need to be framed as the service itself, with a clear notice; what "anonymous" means for ratings with timestamps and brand/model; which first slice to build (basic conditions + comfort + garment kinds as an exported file?).
 **LOOK (2026-10-08 16:56 MDT, Patrick on :8805 at 360 wide and the Oymyakon copy on :8806):** 360 wide reads fine: the three carry-forwards are closed (the 65-point label and 38-point figure estimates stand). Seen, left for now (Patrick): List and Shelves repeat "feels like X on your …" on every worn garment (`garmentReasons` / `conditionsOn` in src/recommend/reasons.ts) under the screen's own "Feels like"; revisit when the recommendation table gives each garment a real reason. Case for the comfort research and recommendation table (Patrick): at Oymyakon's deep cold the outfit was a winter coat plus sweater (probably too warm on top) with jeans and shoes (too cold below). Next: the ratings-export talk. :8806 (`preview-cold`, a throwaway worktree with a PREVIEW ONLY edit) still serving.
 **BUDGET (Patrick, 2026-10-07 22:47 MDT):** over 80% of the week's spend, resets 2026-10-12; figurewright paused, bike-weather gets the spending. Next: one light queue for the three carry-forwards below (~$8), then the daytime talk about ratings export, then one build if the money allows. Keep ~$20 in reserve.
@@ -70,6 +72,18 @@
 | Covering | **Per sub-region, as data.** Each template states what it covers (sleeve length, open front, leg length) in a table beside the template list; a test walks every outfit the recommender can produce and checks each sub-region shows the outermost garment. `docs/research/avatar-cozybuilder.md` (named-part library, hiding rules as data). |
 | Body | **figurewright's body work resumes as the avatar body**; garment art is drawn to fit it. |
 | CozyBuilder licence | **Not asked.** Ideas only, in our own words. |
+
+## Decisions (Patrick, 2026-10-09, ratings-export talk round 2)
+| Question | Decision |
+|---|---|
+| Sharing default | **On by default**, explained on first run, with an off switch in Settings; the app works fully with it off (GDPR freely-given consent; App Store 5.1.1). |
+| What a shared rating holds | Conditions (temperature, feels-like, wind, rain, sun), effort, garment kinds and their warmth/wind/water ratings, comfort, **region** and **brand and model**. Time rounded to the hour. No place, account ID or device ID; a fresh random ID per upload. |
+| Region | **Köppen climate zone + country + altitude band.** With many users, evaluate a ~50 km cell. |
+| Small groups | **Scrubbed on the server at fewer than 10 contributors** per region or brand/model, merged into "other", when the shared table or a dataset is built (as YouTube Analytics thresholds small channels). Raw uploads stay private on the server. |
+| First slice | **Export and import a file** of the user's own ratings first, **with upload built right after** so sharing is mostly ready when users arrive. |
+| Server | **Cloudflare Workers + D1**, the serverless platform already chosen for the forecast proxy. Built and tested locally (wrangler); deployed only on Patrick's word. |
+| Body and climate info | **Later, opt-in only** (may count as health data). |
+| Privacy | This replaces "Collect: nothing on a server" (Privacy, 2026-10-01) for ratings: shared ratings are uploaded. A privacy policy is written before upload ships and gets a lawyer's read before launch. |
 
 ## Milestones
 1. **Tools satisfactory** (separate projects): the weather library + demo app; the body/garment tool + demo app.

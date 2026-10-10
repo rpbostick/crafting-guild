@@ -2,7 +2,7 @@
 
 Track: full
 
-The 3D-direct spike (`spike/3d-direct/REPORT.md`, read "The scorecard measure" and "The measure itself" first) showed that the parametric body can reproduce five Open Peeps drawings to within about a centimetre on average. The big misses come from rule and rig limits, not from the body. The body has been judged part by part, and whole figures still read wrong. This task adds the whole-figure check the report proposes, so every later body change is judged by it.
+The 3D-direct spike (`docs/research/3d-direct-spike.md`, read "The scorecard measure" and "The measure itself" first) showed that the parametric body can reproduce five Open Peeps drawings to within about a centimetre on average. The big misses come from rule and rig limits, not from the body. The body has been judged part by part, and whole figures still read wrong. This task adds the whole-figure check the report proposes, so every later body change is judged by it.
 
 ## Steps
 
