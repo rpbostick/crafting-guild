@@ -2,7 +2,7 @@
 
 **In flight right now**
 
-**CHAIN (2026-10-10 15:40 MDT):** `plan.queue` running `rw-nes-player` ($12, full, 2h, **gate**). When it stops at the gate: `ws --project retrowright serve rw-nes-player` (8801 is taken by the rea-roms-test smoke page; use 8802), ask Patrick whether to open it, he plays Final Fantasy (load `~/retrowright/roms/Final_Fantasy_USA.nes`), then merge at the reviewed SHA and restart the chain.
+**GATE (2026-10-10 16:17 MDT):** `rw-nes-player` built ($6.37, 23 min), review fix-first (Reset wiped battery RAM), fix round 0be980a ($0.30), re-review **merge at 0be980a**. Preview on :8802 (`ws --project retrowright serve stop rw-nes-player` after); Patrick is playing Final Fantasy. On his OK: `bin/ws --project retrowright merge rw-nes-player 0be980a85a67b283ba4828b73ae9e9149ae53029`. The review's lockfile note is a false alarm (`npm ci --dry-run` accepts it). Carry forward to the next task: on-screen touch buttons (left out); README says Node 20 but puppeteer-core 25 needs 22.12+; the e2e "battery RAM stored while playing" check cannot fail (compare stored and core battery RAM instead); add a Reset step to the e2e after the battery digest; regenerate the lockfile so the root spec matches package.json; `window.__retrowright` debug handle ships in production (decide whether to keep it).
 
 ## Requirements (Patrick, 2026-10-10)
 - A browser-based retro game emulator, run from a static demo page like the other demos (rpbostick.github.io/retrowright/), React.
