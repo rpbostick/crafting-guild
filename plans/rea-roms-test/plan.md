@@ -2,6 +2,8 @@
 
 **In flight right now**
 
+**CHAIN (2026-10-10 15:14 MDT):** `snes-entry` ($5, light, 45m) via plan.queue. REA: Ghidra and emulators directly; issue draft to Patrick before filing. GBA: mGBA (no BIOS for MesenCE).
+
 **DONE (2026-10-10 15:09 MDT):** both steps merged. `rea-setup` cba933d, `emu-setup` 3839323 (build $5.99, review merge $0.49; partial only because MesenCE needs a GBA BIOS dump to boot GBA; mGBA boots GBA without one). Installed in `$HOME/tools`: JDK 21, Ghidra 12.1.4 with GhidraNes, gba-ghidra-loader and ghidra-snes, REA 0fa0b04 (safety check passed), MesenCE 2.2.1, mGBA 0.11-9155. Ghidra headless in `$HOME/tools`: NES 192 functions, GBA 2711, **SNES 0** (the loader finds HiROM and the 65816 but seeds no entry points: needs the reset and interrupt vectors at $00:FFE0–FFFF marked as functions, and `ghidra-list-functions.sh` should fail on zero functions). **REA refuses raw ROMs** (`target_unavailable`). Bridges: try mcp-mgba (needs a libmgba source build), borrow ideas from mesen-for-ai. Smoke page served on :8801 (`/page/index.html`). Next, with Patrick: the REA-on-ROMs decision, then the SNES entry-point fix as a light task.
 
 ## Requirements (Patrick, 2026-10-10)

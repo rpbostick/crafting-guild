@@ -1,3 +1,4 @@
 # REA, Ghidra and emulators for rea-roms-test (plan.md). Sequential: emu-setup edits README.md and tests/ after rea-setup.
 rea-setup plans/rea-roms-test/task-rea-setup.md --budget 8
 emu-setup plans/rea-roms-test/task-emu-setup.md --budget 8 --allow "Bash(.ws-evidence/tools/mesen/Mesen *)" --allow "Bash(.ws-evidence/tools/mgba/*)"
+snes-entry plans/rea-roms-test/task-snes-entry.md --budget 5
