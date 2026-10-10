@@ -2,6 +2,10 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.5.4
+
+- `ws review`: when the reviewer model has reached its usage limit, the review runs once more on the light-track model (`WS_REVIEW_MODEL_LIGHT`) instead of failing, so a chain doesn't stop on it.
+
 ## 2.5.3
 
 - `ws dispatch`: a glob in a task's `## Commands` is not expanded against the workspace's files. `` `node *` `` is granted as `Bash(node*)`; before, it became `Bash(node agents*)` from the folder listing.
