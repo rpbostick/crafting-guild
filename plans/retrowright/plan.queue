@@ -1,0 +1,2 @@
+# retrowright first build (plan.md). Visible: gated for Patrick to play it on a preview before the merge.
+rw-nes-player plans/retrowright/task-rw-nes-player.md gate --budget 12
