@@ -54,6 +54,13 @@ echo w > "$T/.worktrees/demo/w.txt"; git -C "$T/.worktrees/demo" add w.txt; git 
 out=$("$WS/bin/ws" --project "$slug" review --print-prompt demo 2>&1 || true)
 grep -q 'The widget renders.' <<< "$out" && grep -q 'partial (inferred): The widget renders. | evidence: no browser here' <<< "$out" && echo "review prompt done-when ok" || { echo "review prompt done-when FAILED"; echo "$out" | head -40; exit 1; }
 rm -f "$WS/runs/$slug/demo.jsonl"
+# review: a branch named in another project's plan is pointed out before the merge.
+P="$T/plans"; mkdir -p "$P/$slug" "$P/other"; printf 'demo is ours\n' > "$P/$slug/a.md"
+out=$(WS_PLANS_DIR="$P" "$WS/bin/ws" --project "$slug" review --print-prompt demo 2>&1 || true)
+! grep -q "named in other projects" <<< "$out" || { echo "review other plans FAILED: own plan counted"; exit 1; }
+printf 'keep demo unmerged until recorded\n' > "$P/other/p.md"
+out=$(WS_PLANS_DIR="$P" "$WS/bin/ws" --project "$slug" review --print-prompt demo 2>&1 || true)
+grep -q "demo is named in other projects' plans; read them before merging: plans/other/p.md" <<< "$out" && echo "review names other plans ok" || { echo "review other plans FAILED:"; echo "$out" | head -5; exit 1; }
 # review: a reviewer model at its usage limit is retried once on the light-track model (a stand-in claude on PATH).
 mkdir -p "$T/fakebin"; cat > "$T/fakebin/claude" <<'FAKE'
 #!/bin/bash

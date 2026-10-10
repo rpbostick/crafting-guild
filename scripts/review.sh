@@ -22,6 +22,10 @@ bytes=${#diff}; capped=""
 if [ "$bytes" -gt 200000 ]; then diff="${diff:0:200000}"; capped="(diff truncated at 200 KB of $bytes; read the files for the rest)"; fi
 commits=$(git -C "$PROJECT_PATH" log --format='%h %s' "$base..$tip")
 # The rules a script can check, checked first; the reviewer takes these as given and spends its budget on judgment.
+# Another project's plan that names this branch may need it to stay as it is (a demo, a recording): say so before the merge.
+plans_root="${WS_PLANS_DIR:-$WS/plans}"
+others=$(grep -rlw --include='*.md' -e "$name" "$plans_root" 2>/dev/null | grep -v "^$plans_root/$SLUG/" | sed "s|^$plans_root/|plans/|" | head -5)
+[ -z "$others" ] || note "$name is named in other projects' plans; read them before merging: $(echo $others)"
 pre=$("$WS/scripts/precheck.sh" --project "$SLUG" "$name" 2>&1); printf '%s\n' "$pre" > "$RUNS/$name.precheck.txt"
 # The task's done-when and the builder's own report of it, so the review checks each item against the
 # diff and the evidence instead of rediscovering what was asked.

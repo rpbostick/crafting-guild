@@ -5,6 +5,7 @@ Versions of Crafting Guild. `ws version` prints the current one.
 ## 2.5.4
 
 - `ws review`: when the reviewer model has reached its usage limit, the review runs once more on the light-track model (`WS_REVIEW_MODEL_LIGHT`) instead of failing, so a chain doesn't stop on it.
+- `ws review` names any other project's plan that mentions the branch, so a branch kept waiting on purpose (for a demo or a recording) isn't merged by mistake.
 
 ## 2.5.3
 
