@@ -14,7 +14,7 @@
 ## Guesses
 - Tools install under `$HOME/tools` (outside every repo); builders install into `.ws-evidence/tools` in their worktree for the smoke run.
 - A user-local JDK 21 (Temurin), because the machine has no Java and builders cannot use sudo.
-- Headless emulator runs without Xvfb (not installed): MesenCE `--testrunner`, mGBA Qt offscreen. If that fails, ask Patrick to install `xvfb`.
+- Headless emulator runs: MesenCE `--testrunner`, mGBA Qt offscreen, or `xvfb-run -a` (Xvfb installed by Patrick 2026-10-10).
 
 ## Steps
 1. `rea-setup` (`task-rea-setup.md`): `scripts/check-rea.sh`, `install-rea.sh`, `install-ghidra.sh`, `checks/rea-allowlist.txt`, `tests/`. Safe to re-run (the installers are idempotent; the worktree is reused).

@@ -15,7 +15,7 @@ Install under a prefix directory given as an argument (after the merge it will b
 Run each emulator **without a window** and drive it from a Lua script committed under `lua/`: boot the ROM, run about 600 frames, press Start a few times, read a few bytes of work RAM, save a screenshot, and exit with a status code. Find out what works without a display:
 - MesenCE: its `--testrunner` mode (Lua, no UI), if it still exists in 2.2.1.
 - mGBA: the Qt build with `--script` under `QT_QPA_PLATFORM=offscreen`.
-- If either truly needs an X display, say so and stop; Xvfb is not installed and installing system packages is not allowed. Report the exact package the orchestrator would need.
+- If either needs an X display, run it under `xvfb-run -a` (Xvfb is installed). Say in the README which method each emulator needed. Installing system packages is not allowed.
 
 Run it on one ROM per system, from `research-files/` (a link into the main checkout): `research-files/NES ROMs/Final_Fantasy_USA.nes`, `research-files/SNES ROMs/Final_Fantasy_II_USA_Rev_1.sfc`, `research-files/GBA ROMs/Final_Fantasy_V_Advance_USA.gba` (MesenCE on all three, mGBA on the GBA ROM). Outputs go to `.ws-evidence/smoke/`, with screenshots on one page `.ws-evidence/page/index.html`. Never commit ROM bytes, screenshots of the games or RAM dumps.
 
@@ -29,7 +29,7 @@ Clone shallowly into `.ws-evidence/scratch/`: paulomanrique/mesen-for-ai (GPL-3.
 MesenCE's test runner and Lua API docs, mGBA's scripting API (mgba.io/docs/dev/scripting.html). The two MCP bridges are read here as prior art for a later step. Use the official releases; do not build the emulators from source.
 
 ## Commands
-`curl *`, `sha256sum *`, `unzip *`, `tar *`, `chmod *`, `git clone --depth 1 *`, `git -C .ws-evidence/scratch/mesen-for-ai log -1`, `git -C .ws-evidence/scratch/mcp-mgba log -1`, `bash scripts/*`, `bash tests/*`, `shellcheck *`, `find *`, `file *`, `ldd *`, `timeout *`, `.ws-evidence/tools/mesen/Mesen *`, `.ws-evidence/tools/mgba/*`, WebSearch, WebFetch, `git add`, `git commit`. One command per Bash call. No `sudo`, no `npm install`, no `pip`.
+`curl *`, `sha256sum *`, `unzip *`, `tar *`, `chmod *`, `git clone --depth 1 *`, `git -C .ws-evidence/scratch/mesen-for-ai log -1`, `git -C .ws-evidence/scratch/mcp-mgba log -1`, `bash scripts/*`, `bash tests/*`, `shellcheck *`, `find *`, `file *`, `ldd *`, `timeout *`, `xvfb-run *`, `.ws-evidence/tools/mesen/Mesen *`, `.ws-evidence/tools/mgba/*`, WebSearch, WebFetch, `git add`, `git commit`. One command per Bash call. No `sudo`, no `npm install`, no `pip`.
 
 ## Done when
 - `scripts/install-emulators.sh`, `scripts/smoke-emulator.sh`, the Lua scripts under `lua/` and `tests/install-emulators.test.sh` are committed; `bash tests/run.sh` passes and `shellcheck` is clean.
