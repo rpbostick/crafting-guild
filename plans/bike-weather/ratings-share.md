@@ -2,7 +2,7 @@
 
 **In flight right now**
 
-**PLANNED (2026-10-09 18:07 MDT), nothing dispatched.** Step 1 (research spike, $8) runs after the budget reset on 2026-10-12, beside or after the avatar build (`avatar-build.md`). Steps 2 to 5 get task files from the spike's findings.
+**APPROVED (2026-10-09, Patrick), nothing dispatched.** Step 1 (research spike, $8) runs after the budget reset on 2026-10-12, beside or after the avatar build (`avatar-build.md`). Steps 2 to 5 get task files from the spike's findings.
 
 ## Requirements (decisions 2026-10-09 in `product.md`, ratings-export talk round 2)
 - Sharing is **on by default**, explained on first run, with an off switch in Settings; the app works fully with it off. The user can see what is shared (round 1: preview before sharing).
