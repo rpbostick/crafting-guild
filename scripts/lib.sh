@@ -64,3 +64,17 @@ branch_of() { echo "agent/$1"; }
 short() { git -C "$PROJECT_PATH" rev-parse --short "$1" 2>/dev/null || echo "$1"; }
 # The final `result` event of a stream-json log, or nothing if the run has not ended.
 result_json() { grep '"type":"result"' "$1" 2>/dev/null | tail -1; }
+# An automatic fix round's task: the review's blocking findings, the original task demoted for context, and the
+# original's "## Commands" section kept at level 2, since dispatch grants only from that heading (a fix round
+# that cannot re-run its tests ends partial).
+write_fix_task() { # <task> <review.json> <round> <reviewed-sha> <out>
+  local task="$1" rv="$2" n="$3" tip="$4" out="$5" cmds
+  cmds=$(awk '/^## Commands/{f=1; print; next} /^## /{f=0} f' "$task")
+  {
+    echo "# Fix round $n for \`$(basename "$task")\`"; echo
+    echo "The review of this branch at $tip found blocking issues. Fix each one, with a test where the finding is about behaviour, commit, and re-run the covering test files through ws-run. Do nothing else; suggestions are carried to a later task."
+    echo; echo "## Blocking findings"; jq -r '.blocking[] | "- `\(.file):\(.line)` (rule \(.rule)): \(.why)"' "$rv"
+    [ -n "$cmds" ] && { echo; printf '%s\n' "$cmds"; }
+    echo; echo "## The original task (for context)"; sed 's/^#/##/' "$task"
+  } > "$out"
+}

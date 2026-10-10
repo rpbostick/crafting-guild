@@ -103,12 +103,7 @@ for i in "${!steps[@]}"; do
     fix=$((fix+1)); [ "$fix" -le "$max_fix" ] || stop "$name" "still fix-first after $max_fix automatic fix round(s); see runs/$SLUG/$name.review.md"
     # Automatic fix round: the same builder, its blocking findings as the task.
     ft="$(dirname "$task")/$(basename "$task" .md)-fix-auto-$fix.md"
-    {
-      echo "# Fix round $fix for \`$(basename "$task")\`"; echo
-      echo "The review of this branch at $(short "$tip") found blocking issues. Fix each one, with a test where the finding is about behaviour, commit, and re-run the covering test files through ws-run. Do nothing else; suggestions are carried to a later task."
-      echo; echo "## Blocking findings"; jq -r '.blocking[] | "- `\(.file):\(.line)` (rule \(.rule)): \(.why)"' "$rv"
-      echo; echo "## The original task (for context)"; sed 's/^#/##/' "$task"
-    } > "$ft"
+    write_fix_task "$task" "$rv" "$fix" "$(short "$tip")" "$ft"
     log "$name: fix-first; automatic fix round $fix ($ft)"
     ws dispatch "${flags[@]}" "$name" "$ft" 2>&1 | tee -a "$tee_to" | tail -1; running "$name" || stop "$name" "fix dispatch failed (see $logf)"
   done
