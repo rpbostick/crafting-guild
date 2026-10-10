@@ -2,7 +2,7 @@
 
 **In flight right now**
 
-**CHAIN (2026-10-10 14:19 MDT):** `plan.queue` running: `rea-setup` ($8, light, 45m), then `emu-setup` ($8, light, 45m), each reviewed and merged by the chain. When it stops, read `runs/rea-roms-test/chain.status`. After both merge: run the installers into `$HOME/tools` from the main checkout (`bash scripts/install-ghidra.sh "$HOME/tools"`, `install-rea.sh`, `install-emulators.sh`), then show Patrick the safety report, the smoke screenshots and the bridge recommendation.
+**CHAIN (2026-10-10 14:52 MDT):** `plan.queue` restarted for `emu-setup` ($8, light, 45m). `rea-setup` merged as cba933d after one fix round (review merge, $0.43; build $6.08, fix $0.31): REA safety check passes on REA main bbd0192; JDK 21, Ghidra 12.1.4 and the NES, GBA and SNES (joshleaves/ghidra-snes) extensions install; Ghidra headless lists 192 functions in the NES ROM and 2607 in the GBA ROM. **REA itself refuses raw ROMs** (`target_unavailable`, unsupported binary format: REA only admits formats it has a profile for, such as ELF, PE, Mach-O and DOS). Decide with Patrick: ask upstream for a ROM profile, add one ourselves, or use Ghidra and the emulators directly. When the chain stops, read `runs/rea-roms-test/chain.status`. After it merges: run the installers into `$HOME/tools`, then show Patrick the safety report, the smoke screenshots and the bridge recommendation.
 
 ## Requirements (Patrick, 2026-10-10)
 - rea-roms-test is REA's first use (ahead of the deferred Toybox eyedropper spike).
