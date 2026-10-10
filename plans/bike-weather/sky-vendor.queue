@@ -1,0 +1,5 @@
+# Bike Weather owns its weather code (decided 2026-10-09). After the 10/12 reset, by hand (the first commit is the orchestrator's copy):
+#   git -C ~/bike-weather worktree add -b agent/bw-sky-vendor ~/bike-weather/.worktrees/bw-sky-vendor main
+#   copy ~/skywright at bf6dfe0 into the worktree's src/weather/sky/: src/*.ts, src/providers/, test/*.test.ts except example-*, LICENSE; write SOURCE.md (commit, date, what was copied); commit "skywright bf6dfe0 copied verbatim"
+#   bin/ws --project bike-weather dispatch --budget 8 bw-sky-vendor plans/bike-weather/task-bw-sky-vendor.md   (reuses the worktree)
+# After the merge: remove ~/bike-weather/.worktrees/skywright (the sibling symlink), and the file:../ note for bike-weather in lessons/orchestrator.local.md.

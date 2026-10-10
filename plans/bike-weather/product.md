@@ -91,7 +91,7 @@
 | Paid services | **None until there is revenue or an audience.** The pieces are built ready to switch on, and stay off. |
 | Free tiers | Allowed for real deployments (for example the ratings Worker or the forecast proxy for testers): Cloudflare's free plan and Open-Meteo's free API (non-commercial: development and unpaid testing), **with no payment method on file**. Open-Meteo's paid plan starts when the app is sold. |
 | Proxy owner | **Patrick's own Cloudflare account**; it moves to a business account if Bike Weather becomes a company. |
-| skywright | **Frozen, done enough**: fixes only. The plain-language weather summaries ("light rain starting in 12 min") live in Bike Weather. |
+| skywright | **Frozen, done enough.** Bike Weather **copies its code in** (`src/weather/sky/`, from bf6dfe0) and stops linking to it, so it depends on nothing undeveloped (`task-bw-sky-vendor.md`). Low-cost improvements may be ported back to the open-source skywright later. The plain-language weather summaries ("light rain starting in 12 min") live in Bike Weather. |
 
 ## Milestones
 1. **Tools satisfactory** (separate projects): the weather library + demo app; the body/garment tool + demo app.
