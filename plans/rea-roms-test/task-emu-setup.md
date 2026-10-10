@@ -25,6 +25,11 @@ Clone shallowly into `.ws-evidence/scratch/`: paulomanrique/mesen-for-ai (GPL-3.
 ## 4. Tests and docs
 `tests/install-emulators.test.sh` with a stubbed `curl`: a wrong checksum stops the install, and a second run keeps an existing install. `bash tests/run.sh` passes and `shellcheck` is clean. `README.md` gains an "Emulators" section: how to install, how to run the smoke test, and the headless method that worked for each emulator.
 
+## 5. Carried from the last review (small)
+- `scripts/install-ghidra.sh` header: it says "the NES and GBA loaders" but also installs ghidra-snes; make it say all three.
+- `scripts/ghidra-list-functions.sh`: the analysis-timeout handling has no run on record since its fix. Add a test that feeds it a canned headless log (a timeout line plus the summary passes; a `SCRIPT ERROR` fails), with `analyzeHeadless` stubbed.
+- `scripts/install-rea.sh`: add a stubbed test that a failing `check-rea.sh` stops the install before `npm ci`, and writes no `last-checked`.
+
 ## Prior art
 MesenCE's test runner and Lua API docs, mGBA's scripting API (mgba.io/docs/dev/scripting.html). The two MCP bridges are read here as prior art for a later step. Use the official releases; do not build the emulators from source.
 
