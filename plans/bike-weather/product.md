@@ -46,7 +46,7 @@
 
 ## Privacy (audit, 2026-10-01)
 - **Protect:** the user's location (GPS fix, home and commute), body measurements (height, chest, waist, hips), clothing library and comfort ratings, and trip plans (where and when they will be away from home). Later, the commercial weather provider's API key.
-- **Collect:** nothing on a server. Everything stays on the device; export is a file the user makes. Third parties receive only what a forecast needs: coordinates (weather provider) and place-search text (geocoder), plus the device's IP address.
+- **Collect:** nothing on a server (for ratings, replaced 2026-10-09: shared ratings are uploaded, see that day's ratings Decisions). Everything stays on the device; export is a file the user makes. Third parties receive only what a forecast needs: coordinates (weather provider) and place-search text (geocoder), plus the device's IP address.
 - **Expose:** each forecast request to the provider; the export file (plain JSON); skywright and figurewright once public (no keys, no personal data in history: `release-audit.md`); any API key shipped in the app bundle is extractable.
 - **Misuse:** exact coordinates logged by a provider reveal a home and daily ride times; a leaked export joins body measurements, home and trip dates (an empty house); an extracted key runs up the bill.
 - **Rules for the build:** coordinates leave the device rounded to 0.01° (skywright, `sky-coarse-location`); never log coordinates or measurements; the export carries no location history unless the user includes it, and the app says what is in it; the paid provider's key goes through a proxy or a restricted key before launch, never a bare key in the bundle; ask for "while using" location only, and allow a typed place instead.
