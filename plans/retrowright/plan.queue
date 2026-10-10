@@ -1,2 +1,6 @@
 # retrowright first build (plan.md). Visible: gated for Patrick to play it on a preview before the merge.
 rw-nes-player plans/retrowright/task-rw-nes-player.md gate --budget 12
+# Automated play for testing (Patrick, 2026-10-10: all four tools). Sequential: each builds on the harness.
+rw-replay plans/retrowright/task-rw-replay.md gate --budget 10
+rw-tas-replay plans/retrowright/task-rw-tas-replay.md --budget 8
+rw-mesen-diff plans/retrowright/task-rw-mesen-diff.md --budget 10
