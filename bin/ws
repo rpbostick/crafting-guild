@@ -142,6 +142,13 @@ case "$cmd" in
   wait)
     name="${1:?ws wait <name> [minutes]}"; mins="${2:-150}"; load_project "$proj"
     for _ in $(seq 1 $((mins*6))); do
+      # A saved FAIL from an older result check is checked again, so a fixed check unblocks a stopped chain.
+      if [ -f "$RUNS/$name.result.txt" ] && [ ! -f "$RUNS/$name.pid" ] && [ -f "$RUNS/$name.jsonl" ] \
+        && [ "$WS/scripts/check-result.sh" -nt "$RUNS/$name.result.txt" ] && grep -q '^FAIL' "$RUNS/$name.result.txt"; then
+        since=$(sed -n 's/^since=//p' "$RUNS/$name.task.txt" 2>/dev/null)
+        "$WS/scripts/check-result.sh" --project "$SLUG" ${since:+--since "$since"} "$name" > "$RUNS/$name.result.txt.new" 2>&1 || true
+        mv "$RUNS/$name.result.txt.new" "$RUNS/$name.result.txt"
+      fi
       if [ -f "$RUNS/$name.result.txt" ] && [ ! -f "$RUNS/$name.pid" ]; then cat "$RUNS/$name.result.txt"; grep -q '^FAIL\|^NO RESULT\|^TIMEOUT\|^LIMIT' "$RUNS/$name.result.txt" && exit 1 || exit 0; fi
       [ -f "$RUNS/$name.pid" ] || [ -f "$RUNS/$name.jsonl" ] || die "no run named $name"
       # A run whose wrapper died with it (the usage limit can take both) never writes its result: write it here.

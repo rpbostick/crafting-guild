@@ -7,6 +7,7 @@ Versions of Crafting Guild. `ws version` prints the current one.
 - `ws review`: when the reviewer model has reached its usage limit, the review runs once more on the light-track model (`WS_REVIEW_MODEL_LIGHT`) instead of failing, so a chain doesn't stop on it.
 - `ws chain`: an automatic fix round's task keeps the original task's `## Commands` section, so the fix builder gets the same grants and can re-run its tests. Before, the section was demoted with the rest of the original task, the fix round got none of those grants, and it ended partial.
 - Result check: a done-when item's evidence path is read without the punctuation after it (`.ws-evidence/a.log: 192 functions` names `.ws-evidence/a.log`), and a bare file name is also looked for in `.ws-evidence/`. Before, a trailing colon failed a run whose evidence was there, and some citations weren't checked at all.
+- `ws wait` checks a saved failing result again when the result check has changed since, so restarting `ws chain` after a fix to the check carries on instead of stopping on the old verdict.
 - `ws review` names any other project's plan that mentions the branch, so a branch kept waiting on purpose (for a demo or a recording) isn't merged by mistake.
 
 ## 2.5.3
