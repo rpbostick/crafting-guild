@@ -2,6 +2,8 @@
 
 **In flight right now**
 
+**GATE (2026-10-09 18:16 MDT, Patrick): before any more figurewright or avatar work, a hands-on research round on CozyBuilder and CharacterStudio.** Today's reports (bike-weather `docs/research/avatar-*.md`) only read the code. This round installs and runs them, or inspects them with REA (morluto/rea, research report 16). It's for the avatar, and maybe for figurewright. CharacterStudio: install in isolation with install scripts off, run its editor, and measure its layers and culling against figurewright's garment engine. CozyBuilder (no licence): study only, nothing copied; run it or inspect its .NET build with REA. If REA is used, this is its first use: install the live version from GitHub, with our own safety checks before it runs (memory: rea-live-install). Each spike ends with what the avatar, and separately figurewright, should take or change. Task files not written yet. Until this round is done, `fw-package`, `fw-reproduction-measure` and avatar-build steps 1 to 5 wait.
+
 **APPROVED (2026-10-09, Patrick), nothing dispatched.** Waits for the budget reset on 2026-10-12. The GitHub token has `write:packages` (refreshed 2026-10-09), so step 2 can publish. About $34 in builders plus about $3 in reviews for steps 1 to 5.
 
 ## Requirements
