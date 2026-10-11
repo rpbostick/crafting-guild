@@ -19,6 +19,8 @@ Read `README.md`, `docs/research/emulator-ux.md` (section 3's touch controls and
 - The e2e duplicate check and the 'Add works again in the same page' check pass a literal `true`; record the real notice text or card count under each check's name.
 - `addFiles` in `src/ui/App.tsx` awaits `readyStore()` outside its try block, so a throw there becomes an unhandled rejection with no notice: move it inside the try, as `playGame` does.
 
+- **A card must load what its picture shows** (found by the operator: Final Fantasy II's card showed a save-slot picture but clicking it started from power-on). `saveSummary` pictures the newest of the slots and the resume state, while a click only checks `resumeAt`. Make them agree: clicking a card opens a short choice whose first, focused item continues from the pictured save: "Continue" for a resume state, or "Load slot N" (with its time) when the newest picture is a slot. Also offer Continue (if a resume state exists and is not the pictured one), "Load a save state…" (the slot grid) and "Start from power-on". The big Continue card at the top follows the same rule. Test it: a game with only a slot loads that slot from its card; one whose newest save is the resume state continues it.
+
 ## Prior art
 `docs/research/emulator-ux.md`: Delta's `.deltaskin` format (documented by the community: per-orientation layouts, button frames, extended edges, screen rectangle), Lemuroid's limits (only move and resize), and the research's warning not to bundle community skins. Pointer Events for multi-touch. No new dependency unless clearly needed.
 
