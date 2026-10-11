@@ -16,7 +16,8 @@ Read `README.md`, `docs/research/emulator-ux.md` (section 3's touch controls and
 - Adding a single file starts that game at once; adding several files only adds them to the library.
 - `updateGameIn` in `src/storage/gameStore.ts` throws inside `get.onsuccess` on a malformed record, so callers see a bare AbortError: reject with the real error.
 - The library view's 'played' sort repeats `libraryOrder` from the store: export one comparator and use it in both.
-- The e2e duplicate check passes a literal `true`; make it record the real notice check under its own name.
+- The e2e duplicate check and the 'Add works again in the same page' check pass a literal `true`; record the real notice text or card count under each check's name.
+- `addFiles` in `src/ui/App.tsx` awaits `readyStore()` outside its try block, so a throw there becomes an unhandled rejection with no notice: move it inside the try, as `playGame` does.
 
 ## Prior art
 `docs/research/emulator-ux.md`: Delta's `.deltaskin` format (documented by the community: per-orientation layouts, button frames, extended edges, screen rectangle), Lemuroid's limits (only move and resize), and the research's warning not to bundle community skins. Pointer Events for multi-touch. No new dependency unless clearly needed.
