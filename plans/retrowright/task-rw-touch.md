@@ -11,6 +11,13 @@ Read `README.md`, `docs/research/emulator-ux.md` (section 3's touch controls and
 - **Page behaviour on phones:** no page scroll, zoom or text selection while playing (`touch-action`, `user-select`), the safe-area insets respected (notches), and the orientation change handled without losing the game.
 - **Size and opacity** sliders in the quick menu (moving buttons freely is for later).
 
+## Also (carried from the library review and the operator's choices)
+- Remember the library's grid/list view and sort order per browser (next to the theme), surviving a reload.
+- Adding a single file starts that game at once; adding several files only adds them to the library.
+- `updateGameIn` in `src/storage/gameStore.ts` throws inside `get.onsuccess` on a malformed record, so callers see a bare AbortError: reject with the real error.
+- The library view's 'played' sort repeats `libraryOrder` from the store: export one comparator and use it in both.
+- The e2e duplicate check passes a literal `true`; make it record the real notice check under its own name.
+
 ## Prior art
 `docs/research/emulator-ux.md`: Delta's `.deltaskin` format (documented by the community: per-orientation layouts, button frames, extended edges, screen rectangle), Lemuroid's limits (only move and resize), and the research's warning not to bundle community skins. Pointer Events for multi-touch. No new dependency unless clearly needed.
 
