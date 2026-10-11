@@ -14,6 +14,13 @@ Read `README.md`, `docs/research/emulator-ux.md` (section 2, section 3's save st
 - Storage stays per browser (IndexedDB), and everything degrades sensibly when storage is unavailable. Migrate the existing Recent list and its saves into the library without losing anything.
 - Keyboard, gamepad and mouse navigation of the grid with visible focus; cards are real buttons with labels; light and dark themes; readable at phone width.
 
+## Also (carried from the quick-menu review)
+- A gamepad's "choose" in the quick menu cannot open the file picker (Play movie…) or fullscreen: the Gamepad API gives no user activation. Show a short hint on those items when the gamepad is in use ("Use the mouse or keyboard for this"), or disable them for gamepad, and test it.
+- Quit to library keeps the previous game's current slot and record choice; reset them when a game closes.
+- `readStateRecord` in `src/storage/gameStore.ts` casts `romId` and `slot` without checking them; validate them and fail loudly on a malformed record.
+- README: the play-bar sentence leaves out the REC/playback indicator and the sound hint.
+- `src/ui/menuFocus.ts` hand-writes the focus trap: either replace it with focus-trap (MIT) or say in the Prior art section why not.
+
 ## Prior art
 `docs/research/emulator-ux.md`: OpenEmu (drop-in library), ES-DE (favourites, collections), LaunchBox's grid/list views; the licence table rules out libretro-thumbnails, ScreenScraper, IGDB and TheGamesDB art. CSS grid for the layout; no new dependency unless clearly needed.
 
