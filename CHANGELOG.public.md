@@ -8,6 +8,7 @@ Versions of Crafting Guild. `ws version` prints the current one.
 - `ws chain`: an automatic fix round's task keeps the original task's `## Commands` section, so the fix builder gets the same grants and can re-run its tests. Before, the section was demoted with the rest of the original task, the fix round got none of those grants, and it ended partial.
 - Result check: a done-when item's evidence path is read without the punctuation after it (`.ws-evidence/a.log: 192 functions` names `.ws-evidence/a.log`), and a bare file name is also looked for in `.ws-evidence/`. Before, a trailing colon failed a run whose evidence was there, and some citations weren't checked at all.
 - `ws wait` checks a saved failing result again when the result check has changed since, so restarting `ws chain` after a fix to the check carries on instead of stopping on the old verdict.
+- `ws merge` keeps the git-ignored files a builder made (a generated recording, a download) under `runs/<project>/evidence/<name>/ignored/` and names them, instead of discarding them with the worktree. Dependency, build and cache folders, `.ws-evidence` and linked paths are skipped; files over 20 MB are named, not kept.
 - `ws review` names any other project's plan that mentions the branch, so a branch kept waiting on purpose (for a demo or a recording) isn't merged by mistake.
 
 ## 2.5.3

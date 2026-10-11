@@ -78,3 +78,21 @@ write_fix_task() { # <task> <review.json> <round> <reviewed-sha> <out>
     echo; echo "## The original task (for context)"; sed 's/^#/##/' "$task"
   } > "$out"
 }
+# Git-ignored files a builder made in its worktree (a generated recording, a download) vanish with the
+# worktree at merge. Copy the small ones to <dest>, keeping their paths, and print what was kept and what was
+# too big; dependency, build and cache folders, .ws-evidence and links (.worktree-links) are skipped.
+keep_ignored_outputs() { # <worktree> <dest>
+  local wt="$1" dest="$2" f size kept=0 big=()
+  while IFS= read -r f; do
+    case "$f" in node_modules/*|*/node_modules/*|.ws-evidence/*|dist/*|build/*|.venv/*|coverage/*|.cache/*|*/__pycache__/*|*.pyc|.worktrees/*) continue ;; esac
+    [ -L "$wt/$f" ] && continue; [ -f "$wt/$f" ] || continue
+    size=$(stat -c %s "$wt/$f")
+    if [ "$size" -gt 20971520 ]; then big+=("$f"); continue; fi
+    mkdir -p "$dest/$(dirname "$f")"; cp -p "$wt/$f" "$dest/$f"; kept=$((kept+1))
+    [ "$kept" -le 10 ] && echo "kept ignored file: $f"
+  done < <(git -C "$wt" ls-files --others --ignored --exclude-standard 2>/dev/null)
+  [ "$kept" -gt 10 ] && echo "kept $kept ignored files in all"
+  [ "$kept" -gt 0 ] && echo "ignored files the builder made are kept under ${dest#"$WS"/}/ (move any the project needs into place)"
+  [ ${#big[@]} -gt 0 ] && echo "warning: discarded ignored files over 20 MB: ${big[*]}"
+  return 0
+}
