@@ -30,5 +30,5 @@ Read `README.md`, `docs/research/emulator-ux.md` (section 3's touch controls and
 - The layout JSON is validated by a unit test (every button present, frames inside the screen, no overlapping touch areas except the A+B area), and D-pad diagonals and slides are unit-tested.
 - Touch controls hide when a gamepad or keyboard is used and come back on touch.
 - No page scroll or zoom while playing on a phone-sized viewport (checked in the script).
-- `npm test` and `npm run build` pass; screenshots of both orientations, light and dark, on `.ws-evidence/page/index.html`.
+- The tests covering the change pass and `npm run build` passes (the merge gate runs the whole `npm test`); screenshots of both orientations, light and dark, on `.ws-evidence/page/index.html`.
 - README describes touch play.

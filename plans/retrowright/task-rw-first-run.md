@@ -23,5 +23,5 @@ Read `README.md`, `docs/research/emulator-ux.md` (sections 4 and 5, and roadmap 
 - Saves exported from one browser profile load in another: the Firefox script exports from one profile, imports into a fresh one, adds Final Fantasy from `roms/`, and its battery save and a save-state thumbnail are there.
 - Persistence is requested after the first save and its result shown; the storage meter shows a number (unit tests with a stubbed Storage API).
 - Importing a file of a newer format version is refused with a message (unit test).
-- `npm test` and `npm run build` pass; screenshots on `.ws-evidence/page/index.html`.
+- The tests covering the change pass and `npm run build` passes (the merge gate runs the whole `npm test`); screenshots on `.ws-evidence/page/index.html`.
 - README: the Node version fixed; export and import described.
