@@ -9,6 +9,7 @@ Versions of Crafting Guild. `ws version` prints the current one.
 - Result check: a done-when item's evidence path is read without the punctuation after it (`.ws-evidence/a.log: 192 functions` names `.ws-evidence/a.log`), and a bare file name is also looked for in `.ws-evidence/`. Before, a trailing colon failed a run whose evidence was there, and some citations weren't checked at all.
 - `ws wait` checks a saved failing result again when the result check has changed since, so restarting `ws chain` after a fix to the check carries on instead of stopping on the old verdict.
 - `ws merge` keeps the git-ignored files a builder made (a generated recording, a download) under `runs/<project>/evidence/<name>/ignored/` and names them, instead of discarding them with the worktree. Dependency, build and cache folders, `.ws-evidence` and linked paths are skipped; files over 20 MB are named, not kept.
+- `ws dispatch` names the paths `.worktree-links` links into a worktree as read-only in the builder's prompt (writing through them is denied), and says where to save files that must outlive the run.
 - `ws review` names any other project's plan that mentions the branch, so a branch kept waiting on purpose (for a demo or a recording) isn't merged by mistake.
 
 ## 2.5.3
