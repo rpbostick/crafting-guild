@@ -9,3 +9,6 @@ rw-quick-menu plans/retrowright/task-rw-quick-menu.md gate --budget 10
 rw-library plans/retrowright/task-rw-library.md gate --budget 10
 rw-touch plans/retrowright/task-rw-touch.md gate --budget 10
 rw-first-run plans/retrowright/task-rw-first-run.md gate --budget 8
+# Interface roadmap steps 5-6 (Patrick, 2026-10-12). Spikes for cores and toolkit run alongside, dispatched by hand.
+rw-display plans/retrowright/task-rw-display.md gate --budget 8
+rw-offline plans/retrowright/task-rw-offline.md gate --budget 8
