@@ -11,6 +11,7 @@ Versions of Crafting Guild. `ws version` prints the current one.
 - `ws merge` keeps the git-ignored files a builder made (a generated recording, a download) under `runs/<project>/evidence/<name>/ignored/` and names them, instead of discarding them with the worktree. Dependency, build and cache folders, `.ws-evidence` and linked paths are skipped; files over 20 MB are named, not kept.
 - `ws dispatch` names the paths `.worktree-links` links into a worktree as read-only in the builder's prompt (writing through them is denied), and says where to save files that must outlive the run.
 - `ws review` names any other project's plan that mentions the branch, so a branch kept waiting on purpose (for a demo or a recording) isn't merged by mistake.
+- Builders may run `sha256sum` and `file` by default (both read-only), so checking a download no longer costs a denied call. `unzip` still has to be named in a task's `## Commands`.
 
 ## 2.5.3
 
