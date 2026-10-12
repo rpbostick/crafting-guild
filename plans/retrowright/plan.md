@@ -2,7 +2,7 @@
 
 **In flight right now**
 
-**IDLE (2026-10-12 12:45 MDT):** the queue is done. Patrick approved `rw-first-run` on its preview; merged as 16520b2 (suite green in 20s, pushed). Nothing is running. Next: write interface steps 5 and 6 (item 3 below) as task files and queue them, gated.
+**IDLE (2026-10-12 12:40 MDT):** the queue is done. Patrick approved `rw-first-run` on its preview; merged as 16520b2 (suite green in 20s, pushed). Nothing is running. Next: write interface steps 5 and 6 (item 3 below) as task files and queue them, gated.
 
 **Where we are (merged on main, pushed to rpbostick/retrowright-dev):** NES player on jsnes behind our `EmulatorCore` (42125ee); record and replay with the Node harness and the Final Fantasy memory map (5273daf); `.fm2` converter, TheAxeMan's TAS in step on jsnes for all 257,725 frames (f6e7772); jsnes against MesenCE frame by frame, the same game state at every compared frame (565b3b8); interface research `docs/research/emulator-ux.md` (eda134a); quick menu with thumbnail save slots (f8ae6c5); library with Continue and the blocked-upgrade fix (876e583); touch play with JSON layouts, the card-picture fix, remembered grid/list and sort (22e7390); first run: empty-library explanation, persistent storage, storage meter, export and import of saves (16520b2). Accuracy record: `docs/accuracy.md`. Local-only files: `roms/`, `movies/ff1-new-game.rwmovie.json` (`npm run movie:ff1`), `movies/tas/` (sources in `movies/TAS-SOURCES.md`).
 
