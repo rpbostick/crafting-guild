@@ -2,7 +2,7 @@
 
 Track: full
 
-Read `README.md`, `docs/research/emulator-ux.md` (sections 5 and 6 and roadmap step 6), `vite.config.ts` and `src/ui/` first. The app is a static page served from a sub-path (`base: './'`, later rpbostick.github.io/retrowright/). Games and saves already live in the browser; the page itself still needs the network.
+Read `README.md`, `docs/research/emulator-ux.md` (sections 5 and 6 and roadmap step 6), `vite.config.ts` and `src/ui/` first. The app is a static page served from a sub-path (`base: './'`, later a GitHub Pages sub-path). Games and saves already live in the browser; the page itself still needs the network.
 
 ## Build
 - **Installable:** a web app manifest (name, icons made here as SVG/PNG, theme colour, `display: standalone` or `fullscreen` as the research recommends) that works from a sub-path.
