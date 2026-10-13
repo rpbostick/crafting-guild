@@ -7,6 +7,8 @@ slug="" need_review=true
 while [ $# -gt 0 ]; do case "$1" in --project) slug="$2"; shift 2 ;; --no-review) need_review=false; shift ;; *) break ;; esac; done
 name="${1:?usage: merge.sh [flags] <name> <reviewed-sha>}"; pin="${2:?missing the reviewed SHA}"
 load_project "$slug"; wt="$(worktree_dir "$name")"; br="$(branch_of "$name")"
+# One merge at a time per project: two lanes can finish together, and both merge in the same main checkout.
+exec 9>"$RUNS/merge.lock"; flock -n 9 || { echo "waiting for another merge of $SLUG to finish"; flock -w 3600 9 || die "another merge of $SLUG held the lock for an hour"; }
 tip=$(git -C "$PROJECT_PATH" rev-parse "$br" 2>/dev/null) || die "no branch $br"
 pinfull=$(git -C "$PROJECT_PATH" rev-parse --verify "$pin^{commit}" 2>/dev/null) || die "unknown SHA $pin"
 [ "$tip" = "$pinfull" ] || die "branch $br is at $(short "$tip"), not the reviewed $(short "$pin"). Review again."
