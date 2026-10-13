@@ -1,0 +1,4 @@
+# Toolkit lane A (Patrick, 2026-10-13: toolkit first, two builders at a time when their files don't overlap).
+# Lane B runs by hand alongside: rw-patches (gate), then rw-smb-build (needs the SMB ROM).
+rw-hooks plans/retrowright/task-rw-hooks.md --budget 8
+rw-ram-search plans/retrowright/task-rw-ram-search.md gate --budget 8
