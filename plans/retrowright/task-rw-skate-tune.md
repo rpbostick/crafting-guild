@@ -1,0 +1,25 @@
+# retrowright: live skate tuning, and pushing by tapping the direction
+
+Track: full
+
+The operator played the skate patches (merged: `patches/smb/skate-*.diff`, on `run-speed`). Coasting felt right. Pushing felt weird: pushes too strong, tapping B was tiring, and the arrows alone seemed to do nothing. The foot brake and the ollie were too subtle to notice. He wants to tune the feel himself, live, while playing. Read `patches/smb/` and the README's SMB section, `harness/smb.ts`, `harness/smbSkate.test.ts`, `docs/research/toolkit.md` section 4, `src/core/types.ts` and `src/core/jsnesCore.ts`, `src/patch/`, and the tools panel (`src/ui/ToolsPanel.tsx`, `src/tools/`) first. Build with `RETROWRIGHT_SMB_SRC` = `~/retrowright-smb/smb1` and `RETROWRIGHT_ASM6F` = `~/retrowright-smb/asm6f-bin/asm6f`; never write those paths into the repository.
+
+## Build
+- **New pushing, `skate-pedal`** (stacked on `run-speed`, like the others, and including coasting, the foot brake and the ollie, so it replaces `skate-all` as the one to play): each fresh press of the direction you're facing gives a push. Holding B while you do it gives bigger pushes, or pushes automatically at a rhythm while the direction is held, whichever plays better (measure both in movies and say which you kept, with the numbers). Holding the direction alone, with no taps, keeps a gentle walking push, so the arrows always do something. B no longer has to be tapped.
+- **Tunables in one table:** move every number that sets the feel into one small table of bytes in the patched ROM, at a fixed address: push strength, push strength with B, auto-push interval, the walking push, coasting friction, brake strength, ollie delay (frames), ollie pop (jump force row or Y speed), and the top speed. Default values: today's, except that pushes are about half as strong, the brake is clearly felt (stopping from top speed in under a second), and the ollie delay is long enough to notice (about 6 frames) with a visibly higher pop. Write `patches/smb/skate-pedal.tunables.json`: for each value its name, its ROM offset and CPU address, a range, the default, and one plain sentence on what it does. Key it by the patched ROM's SHA-256.
+- **Core:** add an optional `pokeRom(address, value)` to `EmulatorCore`, implemented in `JsnesCore` for the mapped PRG at that CPU address and in the ROM data, so the change holds through bank switches and save states.
+- **Tune section in the tools panel:** when the loaded ROM's SHA-256 has a tunables file (bundled with the app from `patches/smb/`), the tools panel shows a **Tune** section: one slider per value with its name, its sentence and its current number. Moving a slider writes the byte into the running game at once. A **Reset** button returns to the defaults. **Save as new version…** makes a BPS from the game as it was loaded to the game with the tuned bytes (with the existing `createBps`), adds the result to the library as a new entry named with a short summary of what changed, and downloads the `.bps` with a `.json` of the values. Tuned values are also kept per ROM in the browser, so a reload keeps them.
+- **Movie tests** for `skate-pedal` at the defaults: taps of the direction raise speed in steps, holding B makes the steps bigger (or pushes on a rhythm), holding the direction alone keeps moving, the brake stops from top speed within 60 frames, and the ollie lifts off at the delay with the higher pop.
+
+## Prior art
+Emulator cheat engines and RAM tools poke ROM and RAM live (FCEUX's cheats write ROM through Game Genie-style patches; jsnes's own Game Genie swaps reads). Tuning panels in game engines (Dear ImGui sliders, Unity inspector) are the model for the sliders. Write it on the existing tools panel and patch module; nothing to vendor.
+
+## Commands
+`npx vitest *`, `npx tsc *`, `npx tsx *`, `npm run *`, `node *`, `firefox --headless *`, `sha256sum *`, `diff *`, `git add`, `git commit`. One command per Bash call. If the SMB build tests skip because the environment variables can't be set on the command line, use a small untracked config in `.ws-evidence/scratch/` that sets them, as the last run did, and say so.
+
+## Done when
+- `npm run smb -- patch skate-pedal --on run-speed` builds, and its movie tests pass at the defaults (logs).
+- In the page, with the `skate-pedal` ROM loaded, the Tune section shows every value from the tunables file. Moving the push slider changes the speed gained per tap in the running game, measured in a Firefox script by reading `$0057` before and after.
+- **Save as new version…** gives a library entry whose ROM has exactly the tuned bytes changed from the loaded game, and a `.bps` that the harness applies to give the same SHA-256 (Firefox script and test).
+- Tuned values survive a reload, and Reset restores the defaults (tests).
+- `npm run a11y` passes with the Tune section open (slider labels and values are read out), the tests for what changed pass, and `npm run build` passes. The README describes tuning. Screenshots are on `.ws-evidence/page/index.html`.
