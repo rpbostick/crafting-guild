@@ -14,6 +14,8 @@ The SMBDIS source has no licence and its asm6f port ships Nintendo's graphics, s
 - **The first patch, `run-speed`:** in a copy of the tree, change `MaxRightXSpdData` `$28` → `$30` and `MaxLeftXSpdData` `$D8` → `$D0`. Build it and write the BPS. Commit only the BPS, its `.json` and a `-U0` diff of the source change.
 - **A movie test:** record a short World 1-1 run holding B and Right on the patched ROM, with a checkpoint `$0057 == 48`. It skips when the ROM or `RETROWRIGHT_SMB_SRC` is missing, like the existing movie tests.
 
+- **Carried from the rw-patches review:** a truncated or damaged BPS can hang the page (the vendored `BPS_readVLV` loops past the end of the file). In `src/patch/patch.ts`, check the BPS's trailing CRC32 over everything before it before parsing, and refuse a damaged patch with a clear message. Add a truncated case to the 'refuses a damaged BPS' test. In the e2e, make the wrong-ROM refusal assert the CRC32 text, not just any alert.
+
 ## Prior art
 `docs/research/toolkit.md` section 4: Xkeeper0/smb1 (SMBDIS in asm6f, with a SHA-256 check in its `build.sh`), pgattic/smb1-disasm (`make check`), and Bojidarist/smb1dg (changes kept as source patches) are the models; asm6f is the assembler. Build on that layout; write nothing it already does.
 
@@ -25,4 +27,5 @@ The SMBDIS source has no licence and its asm6f port ships Nintendo's graphics, s
 - The `run-speed` patch changes only the two table bytes (shown by comparing the two builds byte for byte), and it applies to the ROM in the library (from rw-patches) to give the patched build's SHA-256.
 - The movie test reaches `$0057 == 48` while running in 1-1 on the patched ROM, and skips cleanly without the ROM.
 - No SMB code, graphics or ROM bytes are committed: the precheck and `git diff main --stat` show only the harness, the patch, its `.json`, the `-U0` diff and tests.
+- A BPS cut short by any number of bytes is refused quickly, with no hang (unit test).
 - The tests for what changed pass, and `npm run build` passes. The README describes setting up `RETROWRIGHT_SMB_SRC` and the two commands.
