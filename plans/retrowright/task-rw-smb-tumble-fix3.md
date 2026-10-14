@@ -2,7 +2,7 @@
 
 Track: full
 
-This continues this branch (`38732a2`). Read your earlier results and `git log --oneline main..` first; keep what is there. Use `.ws-evidence/scratch/tree2.ts` and `edits2.ts`. Never keep SMBDIS source in `.ws-evidence/` or the repository. Only change the SMB section of the README. Fold in any suggestions from `runs/retrowright/rw-smb-tumble.review.md` (the review of `38732a2`) that touch this code.
+This continues this branch (`38732a2`). Read your earlier results and `git log --oneline main..` first; keep what is there. Use `.ws-evidence/scratch/tree2.ts` and `edits2.ts`. Never keep SMBDIS source in `.ws-evidence/` or the repository. Only change the SMB section of the README.
 
 In play on SKATE 14: "let's give the board a little bit of memory off screen. use the turtle shell mechanics for this. a turtle shell can go off screen a little ways and if it hits a wall not too far, it will come back."
 
