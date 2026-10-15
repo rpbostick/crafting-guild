@@ -2,6 +2,8 @@
 
 Track: full
 
+Resume: an earlier run of this task was cut off by the usage limit. Its work is in the worktree (`git status`, `git log --oneline main..`); read it and keep what fits.
+
 Players who tune a game's feel find the Tune sliders at the bottom of the F4 tools panel, under RAM search, the watch list and the memory viewer, which are developer tools most people never need. In play: "i'm not sure who the tools panel is for, but it doesn't look very useful to most people. where is the tuning panel?" Read the README (Tools, Tune, the developer console, the controls side panel, Display and speed), `src/ui/` (the panels and their layout), the quick menu and the key bindings first. Do not touch `patches/smb/` or `harness/smbSkate.test.ts`: another builder is changing them.
 
 ## Build

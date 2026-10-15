@@ -2,6 +2,8 @@
 
 Track: full
 
+Resume: an earlier run of this task was cut off by the usage limit. Its work is in the worktree (`git status`, `git log --oneline main..`); read it and keep what fits.
+
 Tie tricks into SMB's stomp chain, so stringing tricks and stomps together pays out in points, coins and 1-ups. Read the README's SMB section (the tricks, their score and bail, the manual, the loose board), `patches/smb/skate-pedal.diff`, its tunables and `harness/smbSkate.test.ts` first, and SMB's stomp chain (`StompChainCounter`, `SetupFloateyNumber`, the score ladder 100, 200, 400, 500, 800, 1000, 2000, 4000, 5000, 8000, then 1-up). Build with the untracked config in `.ws-evidence/scratch/` as before; never keep SMBDIS source, even emptied, in `.ws-evidence/` or the repository.
 
 ## Build (a first version, tuned in play)
