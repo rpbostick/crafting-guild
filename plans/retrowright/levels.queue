@@ -1,0 +1,4 @@
+# Levels (Patrick, 2026-10-14: A then B after the crouch, C research). Visible steps gated: Patrick plays before merge.
+rw-ramp-spike plans/retrowright/task-rw-ramp-spike.md --budget 5
+rw-level-stairgap plans/retrowright/task-rw-level-stairgap.md gate --budget 20
+rw-level-rail plans/retrowright/task-rw-level-rail.md gate --budget 15

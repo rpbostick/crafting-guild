@@ -18,3 +18,8 @@ The search bot finishes 1-1. Extend it to play on through 1-2, 1-3 and 1-4, on t
 
 ## Done when
 - The three runs reach 1-4's axe, or the report shows where each stuck with the screenshot and the result says why (logs with the reports); `npm test` and `npm run build` pass. The README's Search bot part describes `--to` and `--warp`.
+
+## Carried from the rw-harness-leftovers review (suggestions; do them where the code is yours to touch)
+- `docs/research/skate-levels.md:14`: Rule 3: the doc now says 1-1's 30-byte enemy data was "counted in SMBDIS's E_GroundArea6", but the builder's unknowns say the SMBDIS source was not opened to recount it. Either recount it, or word it as an earlier reading that was not re-checked here.
+- `harness/tasStart.ts:46`: Rule 15: the only check of bootAt and the tas:trace / tas:sweep CLIs on the real FF1 ROM is a pair of hand-run smoke logs (smoke-tas-trace.log, smoke-tas-sweep.log). A short ROM-gated test, like the existing FF1 tests that skip when the ROM is missing, would keep that check running.
+- `src/player/player.ts:490`: onMovieFinished is covered by the jsdom App test only; e2e/movieLink.mjs was not run against the new path. Run it once in a browser before relying on it.
