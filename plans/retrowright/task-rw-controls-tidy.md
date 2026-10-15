@@ -18,3 +18,8 @@ The code as it is.
 
 ## Done when
 - The tests for what changed pass and `npm test` passes (log).
+
+## Carried from the rw-e2e-all review (suggestions; do them where the code is yours to touch)
+- `e2e/outcome.test.ts:14`: Rule 2 (precheck FLAG): runs.tsv has no failing run for the new test. The test does exercise the real `outcome()` and can fail. A recorded red run, for example with the `!lines.some(PASS)` guard removed, would show that the whole-script skip case can fail, since that path never ran end to end here.
+- `e2e/all.mjs:45`: If `spawn` emits 'error', the promise rejects and the write stream for that check's log is never ended. The run aborts with an unhandled rejection instead of printing a FAIL line for that check. It is unlikely, since `npm` is on PATH whenever this runs through `npm run`, but resolving to a failed status would keep the per-check reporting consistent.
+- `.ws-evidence/after-e2e-all-final.log:7`: Evidence formatting: the 'Logs:' line records an absolute home-directory path. It is untracked evidence, so it can be cleaned at merge.

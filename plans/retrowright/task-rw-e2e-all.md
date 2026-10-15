@@ -17,3 +17,7 @@ How `package.json` runs the scripts today; npm-run-all/concurrently exist but a 
 
 ## Done when
 - `npm run e2e:all` passes here with every script run or skipped with a reason (log); `npm test` and `npm run build` pass.
+
+## Carried from the rw-bot-tidy review (suggestions; do them where the code is yours to touch)
+- `docs/research/game-bots.md:117`: Rule 3: 'A child whose cell already has a faster node is dropped' leaves out the live-before-faster exception that README.md:265 and holdsCellBefore now state: a node with a surviving future keeps the cell before a faster one whose futures all died. This is a research doc describing the design, so it is not blocking, but it could say the same as the README.
+- `harness/bot/archive.test.ts:60`: The sweep only checks one direction: when a child could win, shutsOut must be false. It never asserts shutsOut is true in the remaining cases, apart from the one hand-written check at line 61. Asserting `expect(shutsOut(ahead, frames)).toBe(!anyChildWins)` would cover both directions, so a shutsOut that always returned false (it would never drop a child cheaply) would also fail.
