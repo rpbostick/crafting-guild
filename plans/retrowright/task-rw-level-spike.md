@@ -19,3 +19,10 @@ This task is the prior-art step.
 
 ## Done when
 - `docs/research/skate-levels.md` covers the above with sources and proposes 2-3 changes to 1-1 with costs and sketches.
+
+## Carried from the rw-bot-watch review (suggestions; do them where the code is yours to touch)
+- `e2e/movieLink.mjs:110`: The script listens on port 5191, the same port e2e/mouse.mjs uses. e2e:all runs them in sequence so it works today, but a parallel or overlapping run would fail to bind; the other scripts each take a distinct port (5190, 5192), so 5193 would keep the convention.
+- `e2e/movieLink.mjs:136`: Rule 2: `check("Esc again resumes it", true)` (and `check("the movie lets go of A...", true)` at line 152) is an assertion that cannot fail on its own; it only records that the preceding waitFor did not throw. Passing the waited-for value into the check (e.g. the frame reached, or the hash matched) would make the PASS line carry its own evidence.
+- `src/ui/App.tsx:912`: Rule 1: a movie fetch that rejects (network error rather than a non-OK response) falls into the outer catch, which reports 'Test link: <ROM> could not be opened' and never starts the game, whereas the README says a movie that cannot be fetched leaves the game running. Wrapping the movie fetch in its own try so the ROM still opens would match the documented behaviour.
+- `src/ui/testLink.ts:26`: Rule 1: a page URL with movie= but no play= returns null, so the movie parameter is silently ignored with no notice. A user who drops play= from a printed link gets the library with no hint why; naming the missing play= would fail loud.
+- `harness/bot/bot.ts:293`: Rule 15: the runBot branch that calls writeWatchFiles is covered only by the real run in .ws-evidence/bot-watch-run.log via a scratch script. The existing bot tests that run to the node cap could pass a `watch` target and assert that nothing is written on an unfinished run, which covers the 'writes nothing there' claim in the README without a full search.

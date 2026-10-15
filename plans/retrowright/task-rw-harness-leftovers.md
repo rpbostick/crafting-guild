@@ -22,3 +22,8 @@ The code as it is.
 
 ## Done when
 - Each item is done or answered with a reason; the tests for what changed pass and `npm test` passes (log).
+
+## Carried from the rw-level-spike review (suggestions; do them where the code is yours to touch)
+- `docs/research/skate-levels.md:205`: In proposal B, the bridge (X 1328-1440) overlaps the row-3 brick row (X 1280-1392) and the hole (X 1376-1408). At X 1376-1392 that puts three long objects open at once, which is exactly the parser limit the doc gives at line 61. The cost and risk notes should say so, because moving or lengthening any of these objects, or adding one, would break the drawing there.
+- `docs/research/skate-levels.md:14`: Rule 3: the 30-byte figure for 1-1's enemy data is not in either saved probe log. probe-level-addrs.log gives only the address $9F01. Either back the figure with the probe output or mark it as read from the source.
+- `docs/research/skate-levels.md:92`: Rule 4 (the precheck FLAG is a false alarm): the doc does say this is jsnes's file, but writing the path as `node_modules/jsnes/src/mappers/mapper0.js` would make it resolvable and stop the precheck flagging it.
