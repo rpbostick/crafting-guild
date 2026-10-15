@@ -6,7 +6,7 @@ This continues this branch (`eed23ba`). Read your earlier result and `git log --
 
 In play on SKATE 21: "c is good. but his feet should go back to the riding stance when the board goes level. also if he ollies or lands a trick from over 3x his height, he should briefly drop into a crouch for long enough to travel a few board lengths. play with this." On the nollie: "it's kinda weird that his head is pointing backwards for it." Chosen: in fakie Mario faces the way he rolls, with the board drawn reversed.
 
-Resume: an earlier run of this task was stopped to add the bug below. Its changes are in the worktree (`git status`, `git log --oneline main..`); keep what fits.
+Resume: earlier runs of this task were stopped (to add the bug below, then by the usage limit). The movie that reproduces the bug is `.ws-evidence/report/sunk-board.rwmovie.json` (1,400 frames from power-on on this branch's `eed23ba` build; its last checkpoint shows the sunk board). Its changes are in the worktree (`git status`, `git log --oneline main..`); keep what fits.
 
 ## Bug first
 In play on SKATE 21: "sometimes when Mario is small and gets a mushroom and board, when he rides the skateboard, the board is on the ground and the wheels are under the ground. i did this by losing my board when i was little, and getting the first mushroom plus board, then ollying." The screenshot is `.ws-evidence/report/sunk-board.png` (big Mario standing in 1-1 near the first ? blocks, the board drawn flat on the ground with its wheels below it).
