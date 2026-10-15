@@ -25,4 +25,4 @@ The movie link and `harness/movieScript.ts`; SMBDIS area data for 2-1. Build on 
 ## Done when
 - Movie tests: the crouch shows in the delay, A held after the pop does not keep it, Down held keeps it with the duck box, Down in the air crouches (logs, no lag frames).
 - The vine movie replays from its state to Mario climbing and back on the board with Select (replay log), with the watch link in the result.
-- `npm test`, `npm run e2e:tune`, `npm run a11y` and `npm run build` pass; the bot finishes 1-1 on the board (logs). The README describes the crouch as changed.
+- `npm test`, `npm run e2e:tune`, `npm run a11y` and `npm run build` pass; the bot finishes 1-1 on the board, with `--cell 8` if the default cell width still sticks at the last staircase (another builder owns the default in `bot.ts`) (logs). The README describes the crouch as changed.
