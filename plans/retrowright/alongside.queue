@@ -1,0 +1,5 @@
+# Alongside rw-smb-crouch (Patrick, 2026-10-14: all four). Invisible to play: merge on evidence; show the bot link and the level proposals afterwards.
+rw-bot-watch plans/retrowright/task-rw-bot-watch.md --budget 8
+rw-level-spike plans/retrowright/task-rw-level-spike.md --budget 5
+rw-harness-leftovers plans/retrowright/task-rw-harness-leftovers.md --budget 5
+rw-bot-levels plans/retrowright/task-rw-bot-levels.md --budget 8
