@@ -24,3 +24,8 @@ Skate games' 2D flip tricks (Skate or Die 2, Tony Hawk's Pro Skater 2 on Game Bo
 ## Done when
 - The movie tests above pass with no lag frames; the bot finishes 1-1 on the board (logs).
 - `npm test`, `npm run e2e:tune`, `npm run a11y` and `npm run build` pass. The README describes both tricks, the bail, the score and the rename.
+
+## Carried from the rw-gba-spike review (suggestions; do them where the code is yours to touch)
+- `docs/research/smb-slopes.md:123`: Rules 3 and 15: 'The kicker build checks it in harness/smbSkate.test.ts' is written in the present tense, but the test does not exist yet. Write it as a plan ('the kicker build will add a check…') so nobody reads it as an existing guard.
+- `docs/research/gba-core.md:7`: Rule 3: the doc says the npm logs are 'kept with the run's evidence', but those logs are untracked .ws-evidence files that do not ship with the doc. Consider putting the measured values and the commands that produced them inline, as the table already partly does, so the doc stands on its own after merge.
+- `docs/research/gba-core.md:22`: The libretro core sizes in the Nostalgist row and the SkyEmu web build size are left unmeasured. The unknowns already say so; they could be filled in during the first build step.
