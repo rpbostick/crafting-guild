@@ -1,0 +1,4 @@
+# Light tidy-ups alongside rw-smb-board-big (Patrick, 2026-10-14: all three). Invisible: merge on evidence.
+rw-bot-tidy plans/retrowright/task-rw-bot-tidy.md --budget 5
+rw-e2e-all plans/retrowright/task-rw-e2e-all.md --budget 5
+rw-controls-tidy plans/retrowright/task-rw-controls-tidy.md --budget 5
