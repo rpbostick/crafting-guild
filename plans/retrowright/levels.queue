@@ -1,4 +1,5 @@
 # After the crouch (Patrick, 2026-10-14): ollie kick-up and nollie, then kickflip and pop shove-it (B, Up+B in the air; bail loses the board; points), then trick and stomp combos for coins and 1-ups, then levels A then B, C research. Visible steps gated: Patrick plays before merge.
+rw-smb-pedal-anim plans/retrowright/task-rw-smb-pedal-anim.md gate --budget 12
 rw-ssb-demo plans/retrowright/task-rw-ssb-demo.md gate --budget 25
 rw-level-stairgap plans/retrowright/task-rw-level-stairgap.md gate --budget 20
 rw-level-rail plans/retrowright/task-rw-level-rail.md gate --budget 15
