@@ -2,6 +2,8 @@
 
 Track: full
 
+Build on the ollie kick-up branch, which is not merged yet: run `git merge agent/rw-smb-ollie-anim` first (it holds the kick-up, the nollie, fakie facing the roll, the riding stance after the kick-up, the landing crouch and the sunk-board fix), and say in the result which commit of it you built on. If that branch has uncommitted work or its builder is still running (`git log -1 agent/rw-smb-ollie-anim` older than 10 minutes is fine), merge its latest commit anyway and say so.
+
 Add two flip tricks in the air on the board, with their board animations, and a bail when Mario lands before a trick finishes. Read the README's SMB section (the ollie and its kick-up frames, the nollie, fakie, the crouch, both board sizes, the loose board after a hit, the push frame and its CHR bank switch), `patches/smb/skate-pedal.diff`, its tunables, `patches/smb/board-drafts/`, the kick-up drafts and their tool, and `harness/smbSkate.test.ts` first. Build with the untracked config in `.ws-evidence/scratch/` as before; never keep SMBDIS source, even emptied, in `.ws-evidence/` or the repository; store only our own pixels.
 
 ## Build

@@ -1,0 +1,5 @@
+# Overnight 2026-10-14/15 (Patrick: instant replay, ramp research, GBA research, tricks held for him; $80 cap with the running ollie fix). Invisible merge on evidence; tricks gated (stacks on the unmerged ollie branch).
+rw-instant-replay plans/retrowright/task-rw-instant-replay.md --budget 20
+rw-ramp-spike plans/retrowright/task-rw-ramp-spike.md --budget 5
+rw-gba-spike plans/retrowright/task-rw-gba-spike.md --budget 8
+rw-smb-tricks plans/retrowright/task-rw-smb-tricks.md gate --budget 18
