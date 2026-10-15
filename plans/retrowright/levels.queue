@@ -1,4 +1,5 @@
-# Levels (Patrick, 2026-10-14: A then B after the crouch, C research). Visible steps gated: Patrick plays before merge.
+# After the crouch (Patrick, 2026-10-14): ollie kick-up and nollie first, then levels A then B, C research. Visible steps gated: Patrick plays before merge.
 rw-ramp-spike plans/retrowright/task-rw-ramp-spike.md --budget 5
+rw-smb-ollie-anim plans/retrowright/task-rw-smb-ollie-anim.md gate --budget 20
 rw-level-stairgap plans/retrowright/task-rw-level-stairgap.md gate --budget 20
 rw-level-rail plans/retrowright/task-rw-level-rail.md gate --budget 15
