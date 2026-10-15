@@ -11,7 +11,11 @@ On the board, the ollie should look like a skater's: a crouch before the pop, an
 - **Crouched is smaller**, as SMB's duck is: while crouched in the air, big Mario's collision box is the ducking one, so he can pass under things a standing big Mario would hit and does not bump blocks above. Make sure standing up again inside a gap behaves as SMB's own duck release does (no getting stuck in blocks); test it.
 - The board stays drawn under his feet in the crouch, at the right height for the crouch picture.
 - **Movie tests:** the crouch frame shows during the ollie delay; it stays while A is held in the air and goes when A is released; Down in the air crouches; the crouched collision box is the duck one (Mario passes under a block row a standing big Mario would hit, set up by a RAM edit if 1-1 has no such place); small Mario's ollie is unchanged; no lag frames. Run `npm run bot -- skate-pedal --mode board` and say whether 1-1 still finishes.
+- **Hide the board while climbing:** while Mario climbs a vine or slides down the flagpole (`Player_State` 3, and the flagpole's slide), the board is not drawn; it shows again when he lets go, still riding. Test with the vine and flagpole set-ups the climbing tests use.
 - **A comparison page** (`.ws-evidence/page/index.html`, not committed): big Mario crouching before the pop, crouched in the air, standing in the air, both facings and fakie, on the 24-pixel board.
+
+## Carried from the last review
+- `runBot` stores `report.movie` and `report.stuck` relative to the working folder too (not only the printed text); update `bot.test.ts`'s expectation.
 
 ## Prior art
 SMB's ducking (`PlayerCrouch`/`CrouchingFlag`, the duck bounding box in `BoundBoxCtrlData`), and skateboarding games' ollie animation (crouch, pop, tuck). Build on the existing patch.
