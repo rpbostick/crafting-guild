@@ -11,6 +11,10 @@ Today the board stays flat through the ollie. Make it read as a skater's ollie: 
 - **Movie tests:** the board's tiles or sprite heights in OAM through the kick-up frames after the pop, for both boards and facings; in fakie the mirrored frames and the nollie pop height used; no lag frames. Run `npm run bot -- skate-pedal --mode board` and say whether 1-1 still finishes.
 - **A comparison page** (`.ws-evidence/page/index.html`, not committed): the drafts at 1x and 3x for both boards, then each in a strip of the ollie's frames with Mario on it, ollie and nollie, both facings.
 
+## Carried from the last review (do those that touch this code; say which you leave)
+- harness/bot/bot.test.ts:71: Two statements share one line: the `expect(existsSync(out)).toBe(false)` was joined onto the end of the `report.stuck` expectation. Split it back onto its own line.
+- harness/bot/bot.ts:337: formatBotReport applies fromWorkingFolder to report.stuck and report.movie, which runBot already stored relative to the working folder; path.relative is idempotent here so it works, but the double application is confusing an
+
 ## Prior art
 The board and push drafts tools; skate games' ollie animation (Skate or Die 2's board on the pop, Tony Hawk's 2D games). Build on the existing patch.
 
