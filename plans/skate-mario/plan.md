@@ -2,7 +2,7 @@
 
 **In flight right now**
 
-**RUNNING (2026-10-16 02:xx MDT):** chain `engine.queue` at step 4 (merged: sm-engine-2 b209af2, sm-engine-3 87ff016): skate engine split steps 2-4 (skate-engine.md 3.2: ground movement, air/hop/ollie, the engine computes the speed), pure refactors merging on evidence; step 1 merged in retrowright (33cec6e) before the split.
+**DONE (2026-10-16):** engine split steps 2-4 merged (sm-engine-2 b209af2, sm-engine-3 87ff016, sm-engine-4: the engine computes the speed, RAM byte-for-byte equal over 15 movies and 200 falls). Next per skate-engine.md 3.2: step 6, the RAM block (decide: a caps field, or the engine takes over X_Physics' riding rows); step 7, the engine as its own ca65 binary; then the NES homebrew. Note: e2e:tune and e2e:expand need retrowright's dist built with the default base (npm run build, not build:pages). Was: (skate-engine.md 3.2: ground movement, air/hop/ollie, the engine computes the speed), pure refactors merging on evidence; step 1 merged in retrowright (33cec6e) before the split.
 
 **Where we are:** split out of rpbostick/retrowright-dev on 2026-10-16 into rpbostick/skate-mario (private) with `git filter-repo --subdirectory-filter skate` (history from the split commit on; the earlier history stays in retrowright-dev). Depends on retrowright as a sibling checkout (`file:../retrowright`). Holds: the SMB patches (expand, run-speed, skate levels, skate-pedal, super-skate-bros), the SMB harness and tests, the search bot, the fall fuzzer, the drafts tools, the SMB e2e scripts, the skate and SMB research, Super Skate Bros.' home build (`npm run smb -- demo`, ROM to ~/retrowright-test-roms, never published). All 468 tests pass with the ROM folder named.
 
