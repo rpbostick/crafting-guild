@@ -2,6 +2,8 @@
 
 Track: full
 
+Resume: an earlier run of this task was cut off by the usage limit. Its work is in the worktree (`git status`, `git log --oneline main..`); read it and keep what fits.
+
 retrowright (the browser emulator) is going public on its own. The Super Mario Bros. skate project (the patches, Super Skate Bros., the SMB tests, tools and research) will move to its own private repository. This task prepares the split inside this repo: the app stops bundling or naming any game-specific data, and everything skate- or SMB-specific moves under one top-level folder `skate/` that builds and tests on its own against retrowright. After it merges, that folder is extracted with its history into the new repository. Read the README in full, `docs/`, `src/` (Tune, the console and its game tables, the `?game=` link, the library), `harness/`, `tools/`, `e2e/`, `patches/`, `package.json` and `vite.config.ts` first.
 
 ## The app becomes game-agnostic
