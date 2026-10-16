@@ -2,6 +2,8 @@
 
 Track: full
 
+Resume: an earlier run of this task was stopped at a pause point. Its work is in the worktree (`git status`, `git log --oneline main..`); read it and keep what fits.
+
 Plug the skate engine (`engine/`, built with ca65 for any host) into the homebrew test level (`homebrew/`), so the box player rides a board with the skate physics: pushing, coasting, braking, the ollie, the 180 and the kickturn, getting on and off with Select, and the manual. Read `docs/research/skate-engine.md` section 2 (the interface: the RAM block, the calls, `HostSolidAt`), `engine/`, `homebrew/` and its README first. No SMB code, data or graphics in `homebrew/`.
 
 ## Build
@@ -19,3 +21,10 @@ The engine interface; the homebrew base. Build on both.
 
 ## Done when
 - The tests above pass (logs); the same-input comparison with the SMB build is in the result; `npm test` passes in full (logs).
+
+## Carried from the sm-engine-7 review (suggestions; do them where the code is yours to touch)
+- `engine/skate.s:79`: Rule 2/15: SkateInit, SkateHit and SkatePowerUp run on no SMB path and no test exercises them; a short check that jumps into each on a core with the state set (riding, on foot, with and without a board) would prove they match SkateLoseBoard and SkateNewBoard, which the homebrew will rely on.
+- `harness/skateEngineBlock.ts:19`: definedLabels catches only `Name:` labels, so an adapter equate (SkatePushChr, SkateBoardChr, SKATE_IO) or a Skate-prefixed routine in SMB's own banks (SkateLoseBoard) imported by the engine would pass engineHostNames; the earlier check used definedNames (labels and equates). Listing the interface's constants (SkateDeckTile) explicitly and using definedNames for the adapter would close the gap.
+- `harness/skateEngineHost.test.ts:69`: Only the names the engine imports are checked against the build; the adjacency smb.s relies on (HopHeight = OlliePop+1, DismountKeep = MountKeep+4, SlideFriction, SlideExit, PushWithB, NolliePop 22 on) is placed in smb.s but not imported, so a move of one of those bytes in SMB's build would not fail here and would surface only in the tuning RAM movies. Checking every name smb.s exports, not just IMPORTS, makes the placement test complete.
+- `harness/skateEngine.ts:30`: Spacing: `engineBinaryFile =(host` reads as a typo; `= (host`.
+- `.ws-evidence/runs.tsv:11`: Evidence: the first npm test run (exit 1, 15:43) has no log kept, as the second run overwrote after-npm-test.log; keeping the failing run under its own name would show what was fixed between them.
