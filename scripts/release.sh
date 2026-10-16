@@ -104,7 +104,11 @@ echo "audit: $lines added lines since $since; no home paths, user name, e-mail, 
 
 if $dry; then echo "dry run: would publish $SLUG $tag to $public_repo"; exit 0; fi
 
-# 4. commit, tag, push
+# 4. commit, tag, push. The public commit's author is GitHub's no-reply address for the public repository's
+# owner (or RELEASE_EMAIL from the conf), never the private repository's own e-mail.
+pub_name="${RELEASE_NAME:-$(git_ config user.name)}"
+pub_email="${RELEASE_EMAIL:-${public_repo%%/*}@users.noreply.github.com}"
+export GIT_AUTHOR_NAME="$pub_name" GIT_COMMITTER_NAME="$pub_name" GIT_AUTHOR_EMAIL="$pub_email" GIT_COMMITTER_EMAIL="$pub_email"
 git_ push -q origin "$PROJECT_BRANCH"
 msg="${public_repo##*/} $version"   # the public repository's name, not the private folder's
 if [ -n "$prev" ]; then commit=$(git_ commit-tree "$rel_tree" -p "$prev" -m "$msg")
@@ -141,3 +145,28 @@ fi
 [ -z "$notes" ] && notes=$(release_notes "$version")
 gh release create "$tag" "${zips[@]}" -R "$public_repo" --verify-tag --latest --title "$msg" --notes "${notes:-$msg}" >/dev/null
 echo "release $tag: https://github.com/$public_repo/releases/tag/$tag${zips[0]:+ ($(basename "${zips[@]}") attached)}"
+
+# 7. the GitHub Pages site, when the project's conf sets PAGES_BUILD (the command that builds the site from a
+# clean clone of the tag, e.g. "npm run build:pages") and PAGES_DIR (its output folder, e.g. "dist"): the
+# built folder gets the same scan as the release tree and goes to the public repository's gh-pages branch as
+# one commit, so each release updates the site.
+if [ -n "${PAGES_BUILD:-}" ]; then
+  ptmp=$(mktemp -d)
+  git clone -q --branch "$tag" "https://github.com/$public_repo.git" "$ptmp/repo"
+  ( cd "$ptmp/repo" && npm ci --silent --no-audit --no-fund >/dev/null && eval "$PAGES_BUILD" ) > "$RUNS/pages-$tag.log" 2>&1 \
+    || die "the Pages build failed (log: $RUNS/pages-$tag.log); the release is published, the site is not updated"
+  site="$ptmp/repo/${PAGES_DIR:-dist}"
+  [ -f "$site/index.html" ] || die "the Pages build wrote no ${PAGES_DIR:-dist}/index.html (log: $RUNS/pages-$tag.log)"
+  shits=$(grep -rlF -e "$HOME" -e "/$USER/" "$site" | head -5)
+  shits+=$(grep -rlE 'BEGIN (RSA|OPENSSH|EC|PGP|PRIVATE)|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}' "$site" | head -5)
+  [ -z "$shits" ] || die "the Pages build holds home paths or keys (first files):
+$shits"
+  touch "$site/.nojekyll"
+  git -C "$site" init -q -b gh-pages
+  git -C "$site" add -A
+  git -C "$site" -c user.name="$pub_name" -c user.email="$pub_email" commit -qm "${public_repo##*/} $version site"
+  git -C "$site" push -q -f "https://github.com/$public_repo.git" gh-pages 2>&1 | grep -v "^remote:" || true
+  rm -rf "$ptmp"
+  owner=${public_repo%%/*}; name=${public_repo##*/}
+  echo "site $tag: https://$owner.github.io/$name/ (gh-pages; GitHub rebuilds it in a minute or two)"
+fi

@@ -4,6 +4,8 @@ Versions of Crafting Guild. `ws version` prints the current one.
 
 ## 2.5.4
 
+- `ws release` authors the public commit and tag as GitHub's no-reply address for the public repository's owner (or `RELEASE_NAME`/`RELEASE_EMAIL` from the conf), so the private repository's e-mail never reaches the public history.
+- `ws release` publishes a GitHub Pages site when the conf sets `PAGES_BUILD` (and `PAGES_DIR`, default `dist`): it builds from a clean clone of the new tag, scans the output for home paths and keys, and pushes it to the public repository's `gh-pages` branch.
 - `ws release`: the e-mail check skips third-party licence texts, manifests and lockfiles (as the attribution check already did), so a dependency author's address in `THIRD_PARTY_LICENSES` or `package-lock.json` no longer stops a first release.
 - `ws merge` takes a per-project lock (`runs/<project>/merge.lock`), so two lanes that finish together merge one after the other instead of both working in the same main checkout. A second merge says it is waiting.
 - `ws review`: when the reviewer model has reached its usage limit, the review runs once more on the light-track model (`WS_REVIEW_MODEL_LIGHT`) instead of failing, so a chain doesn't stop on it.
