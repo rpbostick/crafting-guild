@@ -14,7 +14,7 @@ Track: full
 `docs/research/skate-levels.md`; SMB level editors' handling of the area object format (ideas only). Build on the existing patches.
 
 ## Commands
-`npx vitest *`, `npx tsc *`, `npx tsx *`, `npm run *`, `npm test`, `node *`, `firefox --headless *`, `sha256sum *`, `diff *`, `grep *`, `git add`, `git commit`. One command per Bash call. Run bot searches in the foreground.
+`npx vitest *`, `npx tsc *`, `npx tsx *`, `npm run *`, `npm test`, `node *`, `firefox --headless *`, `sha256sum *`, `diff *`, `grep *`, `git add`, `git commit`, `git merge *`. One command per Bash call. Run bot searches in the foreground. Another builder is changing `patches/smb/super-skate-bros.diff`, `harness/superSkateBros*` and the README's Super Skate Bros. section: do not touch them.
 
 ## Done when
 - The width table from the bot runs is in the result (logs); the chosen width's movie tests pass; the bot finishes the level on the board and on foot.
