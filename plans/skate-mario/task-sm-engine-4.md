@@ -17,4 +17,4 @@ This is a refactor: the game must behave exactly as before. Every existing test 
 
 ## Done when
 - The step above is done; every check in the second paragraph passes, with the byte-for-byte RAM comparison (logs).
-- `npm test`, `npm run e2e:tune` (this repo's SMB version) and `npm run build` pass in full (logs).
+- `npm test` and `npm run e2e:tune` (this repo's SMB version) pass in full (logs); this repo has no build script.

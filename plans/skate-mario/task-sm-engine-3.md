@@ -18,3 +18,8 @@ This is a refactor: the game must behave exactly as before. Every existing test 
 ## Done when
 - The step above is done; every check in the second paragraph passes, with the byte-for-byte RAM comparison (logs).
 - `npm test`, `npm run e2e:tune` (this repo's SMB version) and `npm run build` pass in full (logs).
+
+## Carried from the sm-engine-2 review (suggestions; do them where the code is yours to touch)
+- `README.md:59`: Rule 3 wording: "harness/smbRamCompare.test.ts checks that tuning each ground tunable changes the speed" overstates the test. SkateGround also reads slideStart, tapsToTop, topSpeed, pushStyle and pushFrames, which the it.each list leaves out (it covers ten). Either add rows for slideStart (on the powerslide movie, raised above the post-push speed), tapsToTop and topSpeed (on the brake movie, which pushes in B-taps style), or say "ten of the ground tunables".
+- `harness/smbRamCompare.test.ts:46`: Rule 2: runs.tsv shows the first run of this test failed (exit 1) before the movies were adjusted, which is the proof the test can fail, but that log was overwritten by the passing run under the same label. Keep failing runs under their own label (after-ramcompare-test-1) so the before/after pair survives.
+- `harness/smbRamCompare.test.ts:37`: The tunables file is parsed the same way here and in ramMovies (smbRamCompare.ts:39); a small exported helper (skatePedalTunables()) would keep the two from drifting.
