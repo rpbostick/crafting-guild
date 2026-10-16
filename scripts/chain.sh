@@ -56,8 +56,11 @@ for i in "${!steps[@]}"; do
   status running "$name"
   wt="$(worktree_dir "$name")"
   if running "$name"; then log "$name: a run is going; waiting for it"
-  elif [ -d "$wt" ] && [ -f "$RUNS/$name.result.txt" ]; then log "$name: worktree and result exist; going to review"
-  elif [ -d "$wt" ]; then stop "$name" "worktree exists with no run and no result (a stopped run?); resume it with a task that says so"
+  # A "NO RESULT" file is what a stopped run leaves: no result, not a failed one.
+  elif [ -d "$wt" ] && [ -f "$RUNS/$name.result.txt" ] && ! grep -q '^NO RESULT' "$RUNS/$name.result.txt"; then log "$name: worktree and result exist; going to review"
+  elif [ -d "$wt" ] && grep -q '^Resume:' "$task"; then log "$name: stopped run; its task has a Resume note, dispatching it again"
+    ws dispatch "${flags[@]}" "$name" "$task" 2>&1 | tee -a "$tee_to" | tail -1; running "$name" || stop "$name" "resume dispatch failed (see $logf)"
+  elif [ -d "$wt" ]; then stop "$name" "worktree exists with no run and no result (a stopped run?); add a line starting 'Resume:' to its task and run the chain again"
   else ws dispatch "${flags[@]}" "$name" "$task" 2>&1 | tee -a "$tee_to" | tail -1; running "$name" || stop "$name" "dispatch failed (see $logf)"; fi
   fix=0
   while :; do
