@@ -1,0 +1,3 @@
+# Toward the next demo (Patrick, 2026-10-16: "open another demo a little later when you have more"): the homebrew level skates. Engine step merges on evidence; the skating level is gated (Patrick looks).
+sm-engine-7 plans/skate-mario/task-sm-engine-7.md --budget 18
+sm-homebrew-skate plans/skate-mario/task-sm-homebrew-skate.md gate --budget 20
