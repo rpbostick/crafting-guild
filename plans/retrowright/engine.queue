@@ -1,5 +1,0 @@
-# Fork step 1 (Patrick, 2026-10-15: "Start the fork: skate engine split"). Pure refactors: merge on evidence.
-rw-engine-1 plans/retrowright/task-rw-engine-1.md --budget 12
-rw-engine-2 plans/retrowright/task-rw-engine-2.md --budget 15
-rw-engine-3 plans/retrowright/task-rw-engine-3.md --budget 15
-rw-engine-4 plans/retrowright/task-rw-engine-4.md --budget 15

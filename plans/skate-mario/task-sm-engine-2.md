@@ -2,7 +2,7 @@
 
 Track: full
 
-Read `docs/research/skate-engine.md` in full (section 3.2 is the order, section 2 the interface this leads to), the README's SMB and Super Skate Bros. sections, `patches/smb/skate-pedal.diff`, `patches/smb/super-skate-bros.diff` and `harness/smbSkate.test.ts` first. Build with the untracked config in `.ws-evidence/scratch/` (`RETROWRIGHT_SMB_SRC`, `RETROWRIGHT_ASM6F`, as earlier SMB tasks set it up); never keep SMBDIS source, even emptied, in `.ws-evidence/` or the repository.
+Read `docs/research/skate-engine.md` in full (section 3.2 is the order, section 2 the interface this leads to), the README's SMB and Super Skate Bros. sections, `patches/smb/skate-pedal.diff`, `patches/smb/super-skate-bros.diff` and `harness/smbSkate.test.ts` first. This is the skate-mario repository (split out of retrowright; retrowright is a sibling checkout at `../retrowright`, imported as the `retrowright` package). Set `RETROWRIGHT_ROMS=/home/patrickb/retrowright/roms`, `RETROWRIGHT_SMB_SRC=/home/patrickb/retrowright-smb/smb1` and `RETROWRIGHT_ASM6F=/home/patrickb/retrowright-smb/asm6f-bin/asm6f` for the SMB tests and CLIs (in an untracked `.env.local` or on each command); never keep SMBDIS source, even emptied, in `.ws-evidence/` or the repository.
 
 This is a refactor: the game must behave exactly as before. Every existing test passes unchanged: `harness/smbSkate.test.ts` (no lag frames), the Super Skate Bros. tests (with the SMBDIS tree named), `npm run fuzz:falls` on its quick count and once on 200 cases, and `npm run bot -- skate-pedal --mode board` finishes 1-1. Add a byte-for-byte check where it fits: for a set of the movie tests, RAM after every frame equals the RAM of the build before this step (excluding the bytes this step moves on purpose, which the result lists). Update the README's byte counts (the test checks them).
 
@@ -17,4 +17,4 @@ This is a refactor: the game must behave exactly as before. Every existing test 
 
 ## Done when
 - The step above is done; every check in the second paragraph passes, with the byte-for-byte RAM comparison (logs).
-- `npm test`, `npm run e2e:tune` and `npm run build` pass in full (logs).
+- `npm test`, `npm run e2e:tune` (this repo's SMB version) and `npm run build` pass in full (logs).

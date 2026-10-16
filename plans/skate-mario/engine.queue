@@ -1,0 +1,4 @@
+# Skate engine split steps 2-4 (moved from retrowright after the repo split, 2026-10-16). Pure refactors: merge on evidence.
+sm-engine-2 plans/skate-mario/task-sm-engine-2.md --budget 15
+sm-engine-3 plans/skate-mario/task-sm-engine-3.md --budget 15
+sm-engine-4 plans/skate-mario/task-sm-engine-4.md --budget 15
