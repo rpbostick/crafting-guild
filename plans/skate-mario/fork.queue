@@ -1,3 +1,4 @@
 # Fork next steps (Patrick, 2026-10-16: "all of these. have them running in queue"). Merge on evidence.
-sm-engine-5 plans/skate-mario/task-sm-engine-5.md --budget 15
+sm-engine-5 plans/skate-mario/task-sm-engine-5-fix.md --budget 4
 sm-homebrew-spike plans/skate-mario/task-sm-homebrew-spike.md --budget 10
+sm-engine-6 plans/skate-mario/task-sm-engine-6.md --budget 15
