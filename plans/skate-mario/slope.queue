@@ -1,0 +1,4 @@
+# The homebrew's first slopes, docs/research/smb3-model.md section 7 steps 1-3 (Patrick, 2026-10-16: gate only step 3, $20 each). Steps 1-2 merge on evidence; step 3 (the pull, feel) is gated.
+sm-slope-1 plans/skate-mario/task-sm-slope-1.md --budget 20
+sm-slope-2 plans/skate-mario/task-sm-slope-2.md --budget 20
+sm-slope-3 plans/skate-mario/task-sm-slope-3.md gate --budget 20
