@@ -85,7 +85,11 @@ fi
 # 3. audit the added lines
 added=$(git_ diff "$base" "$rel_tree" | grep -E '^\+[^+]' || true)
 hits=$(printf '%s\n' "$added" | grep -nF -e "$HOME" -e "/$USER/" -e "-of-$USER" | head -5)
-hits+=$(printf '%s\n' "$added" | grep -nE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' | grep -viE 'noreply@|@example\.|@users\.noreply|git@github\.com' | head -5)
+# Third-party licence texts, manifests and lockfiles carry other authors' addresses; the e-mail check skips them,
+# as the attribution check does.
+mapfile -t mail_exempt < <(attribution_exempt)
+added_own=$(git_ diff "$base" "$rel_tree" -- . "${mail_exempt[@]}" | grep -E '^\+[^+]' || true)
+hits+=$(printf '%s\n' "$added_own" | grep -nE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' | grep -viE 'noreply@|@example\.|@users\.noreply|git@github\.com' | head -5)
 hits+=$(printf '%s\n' "$added" | grep -nE 'BEGIN (RSA|OPENSSH|EC|PGP|PRIVATE)|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}' | head -5)
 if [ -n "${WS_ATTRIBUTION_RE:-}" ]; then
   mapfile -t exempt < <(attribution_exempt)

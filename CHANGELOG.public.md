@@ -4,6 +4,7 @@ Versions of Crafting Guild. `ws version` prints the current one.
 
 ## 2.5.4
 
+- `ws release`: the e-mail check skips third-party licence texts, manifests and lockfiles (as the attribution check already did), so a dependency author's address in `THIRD_PARTY_LICENSES` or `package-lock.json` no longer stops a first release.
 - `ws merge` takes a per-project lock (`runs/<project>/merge.lock`), so two lanes that finish together merge one after the other instead of both working in the same main checkout. A second merge says it is waiting.
 - `ws review`: when the reviewer model has reached its usage limit, the review runs once more on the light-track model (`WS_REVIEW_MODEL_LIGHT`) instead of failing, so a chain doesn't stop on it.
 - `ws chain`: an automatic fix round's task keeps the original task's `## Commands` section, so the fix builder gets the same grants and can re-run its tests. Before, the section was demoted with the rest of the original task, the fix round got none of those grants, and it ended partial.
