@@ -21,3 +21,11 @@ A new `harness/homebrewFoot.test.ts`: holding Right on flat ground reaches the w
 ## Done when
 - The new cases fail on main and pass on the branch (logs); `harness/homebrew*.test.ts` pass (logs).
 - The result lists each value, its SMB3 source line and its converted number.
+
+## Facts from the disassembly (read by the orchestrator; builders cannot fetch it)
+- `PRG/prg000.asm` `Slope_PlayerVel_Effect`: 3 per frame on the 45-degree shapes (`$01`, `$02`), 2 on the 22.5-degree shapes (`$0C`-`$0F`), applied to `Player_Slide` (`prg008.asm` around `PRG008_BBE0`), capped at `$40`. The board's gentle pull stays 112 (half of 224) because it rides well; SMB3's ratio is two-thirds. Record both in smb3-model.md step 4's entry.
+
+## Carried from the sm-slope-4 review (suggestions; do them where the code is yours to touch)
+- `docs/research/smb3-model.md:121`: the prose after the table says load_cmaps() takes 4,715 cycles against a mean of 88; the table and summary say 4,817 and 91. Re-measure on your build and make them agree.
+- `docs/research/smb3-model.md:132`: section 4.2 gives slope_floor()'s peak as 1,047 and snap_down() as 377 and 500; the table in 4.1 has 1,146 and 532. Same.
+- `harness/homebrewSlope.test.ts:380`: the comment calls room 2's platform at X 704-751 the low one; it is the higher (row 9, Y 144); the lower (row 10, Y 160) is at X 640-671. Fix the comment and smb3-model.md step 4.
