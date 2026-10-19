@@ -22,3 +22,7 @@ In `harness/homebrewSlope.test.ts`, frame by frame against the tunable pull: coa
 ## Done when
 - The new cases fail on main and pass on the branch (logs); `harness/homebrew*.test.ts` pass (logs).
 - The result names the starting pull and slope top speed and why.
+
+## Carried from the sm-slope-2 review (suggestions; do them where the code is yours to touch)
+- `docs/research/smb3-model.md:167`: Step 2's Built entry keeps the old plan sentences ('A falling-right shape. While on the ground the frame before...') after the new description of snap_down, so the snap is described twice in one item; trim the repeat.
+- `harness/homebrewSkate.test.ts:242`: The five skate-pedal comparison cases were skipped in after-final-others.log (no ROM environment), so the 'homebrew*.test.ts pass' item rests on inference for them. The inference holds for standing on flat ground, but a landing at sub-pixel fall speed with the feet 1-4 px above a block top now snaps a frame earlier than before; run this file with RETROWRIGHT_ROMS set at the merge gate to confirm the comparison is unchanged.

@@ -90,8 +90,8 @@ for i in "${!steps[@]}"; do
       while :; do
         ws review "$name" >> "$logf" 2>&1; [ -f "$rv" ] && [ "$(jq -r .reviewed_sha "$rv")" = "$tip" ] && break
         if [ "$(jq -r '.api_error_status // empty' "$rv.raw" 2>/dev/null)" = 429 ]; then
-          msg=$(jq -r '.result // ""' "$rv.raw"); when=$(printf '%s' "$msg" | sed -nE 's/.*resets ([0-9]{1,2}(:[0-9]{2})? ?[ap]m).*/\1/p'); tz=$(printf '%s' "$msg" | sed -nE 's/.*resets [^(]*\(([^)]+)\).*/\1/p')
-          ep=""; [ -n "$when" ] && ep=$(TZ="${tz:-${WS_TZ:-}}" date -d "$when" +%s 2>/dev/null); [ -n "$ep" ] && [ "$ep" -le "$(date +%s)" ] && ep=$((ep + 86400))
+          msg=$(jq -r '.result // ""' "$rv.raw"); when=$(printf '%s' "$msg" | sed -nE 's/.*resets ([A-Z][a-z]{2} [0-9]{1,2}, )?([0-9]{1,2}(:[0-9]{2})? ?[ap]m).*/\1\2/p' | tr -d ,); dated=$(printf '%s' "$when" | grep -c '^[A-Z]'); tz=$(printf '%s' "$msg" | sed -nE 's/.*resets [^(]*\(([^)]+)\).*/\1/p')
+          ep=""; [ -n "$when" ] && ep=$(TZ="${tz:-${WS_TZ:-}}" date -d "$when" +%s 2>/dev/null); [ -n "$ep" ] && [ "$dated" = 0 ] && [ "$ep" -le "$(date +%s)" ] && ep=$((ep + 86400))
           case "$ep" in ''|*[!0-9]*) stop "$name" "the review hit the usage limit, reset time unknown: $msg" ;; esac
           rlimits=$((rlimits+1)); [ "$rlimits" -le 3 ] || stop "$name" "the review hit the usage limit 3 times"
           wake=$((ep + 120)); status waiting "$name: review hit the usage limit, retrying at $(date -d "@$wake" '+%H:%M')"; log "$name: review hit the usage limit; retrying at $(date -d "@$wake" '+%H:%M')"

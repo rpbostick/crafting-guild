@@ -29,3 +29,9 @@ The homebrew (`homebrew/`) gets its first slope, as `docs/research/smb3-model.md
 - `homebrew/README.md:25`: the NESdev wiki page titles ("PPU scrolling", "Tile-based scrolling") were cited from memory; check each page exists (WebFetch) or cite the one that does.
 - `harness/homebrewScroll.test.ts:48`: the screen-tile check (screenMismatches) has never been seen failing; show it failing once on a deliberately broken build (for example the column drawn on the wrong side), keep that log, then restore.
 - `homebrew/src/main.c:174`: `scroll_x = 0` after `load_room()` is redundant now that `load_room` sets it; remove it.
+
+## Carried from the sm-smb3-spike review (suggestions; do them where the code is yours to touch)
+- `harness/homebrewCycles.test.ts:12`: Rule 2/15: at the tip the test was skipped in this worktree (cycles-test-tip.log and after-cycles-test.log: 2 skipped) because the toolchain link is missing. Its assertions only ran from a scratch copy on the earlier build (draw_screen_R). Run it once with homebrew/.tools present on the tip before or at merge. No failing run is on record either; for a budget guard that is acceptable.
+- `docs/research/smb3-model.md:86`: Rule 4: the tracked doc points to .ws-evidence/frame-budget-tip.log. That file is untracked and will not exist after merge. It is labeled as not in the repository, but `npm run homebrew:cycles` alone is enough as the reproduction pointer.
+- `docs/research/smb3-model.md:171`: Wording: step 1 refers to the player as 'his feet' and 'he' (also in steps 1-2). Neutral wording ('the player's feet') matches the rest of the doc.
+- `harness/homebrewCycles.ts:82`: The section 4.1 claim that the busiest pass is the room-map copy is inferred, because load_cmaps is not timed. Adding _load_cmaps to TIMED_ROUTINES would measure it directly and back the PRG-RAM estimate in section 4.2.
