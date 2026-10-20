@@ -31,6 +31,18 @@ scripts/rollback.sh     `ws rollback`: restores the published files to a public 
 scripts/site.sh         `ws site`: copies a project's SITE_SYNC files (or its GitHub release) into its SITE_PROJECT,
                         checks each copy byte for byte, runs the site's tests, commits, pushes, waits until live.
 scripts/audit.py        `ws audit`: repeated hand work in the run logs. Writes runs/<slug>/audit.last for cold-start.
+scripts/transcript.py   reads a run log (runs/<slug>/<name>.jsonl): its events, and a run's turns, peak and mean
+                        context (once per message id), output tokens, cache reads, cost, minutes, denied calls.
+scripts/bench.sh        `ws bench`: replays merged tasks from their base commit under two or more arms of builder
+                        instructions (a workspace git ref, or a directory with agents/builder.md and lessons/builder*.md).
+                        `add` builds the corpus (plans/<slug>/bench/: the task as first dispatched, from this repo's
+                        history at its start time, and corpus.tsv); `run` dispatches each task x arm x trial under an
+                        opaque bench-<8 hex> name (dispatch --base --instructions), waits while any project's merge lock
+                        is held, reviews blind, tests the tip with `merge.sh --test-only`, records the run in
+                        runs/<slug>/bench/runs.tsv, removes the worktree and branch, keeps evidence/<run>/; resumable.
+scripts/bench.py        the bench's tables (corpus.tsv, runs.tsv, locked writes) and `ws bench report`: per arm, quality
+                        (tests passed, done-when met, merge verdicts, blocking findings) before cost; "quality drop" when
+                        an arm's rate is below the baseline's by more than the trial spread; several slugs and a total.
 scripts/statusline.sh   the Claude Code status line: each running builder (elapsed time, tool calls, seconds since
                         its last output, budget), then preview servers. No git calls.
 scripts/lessons-check.py pairs each lessons/<role>.local.md bullet with the shared bullet it restates (difflib
@@ -72,6 +84,7 @@ state/current           the last project opened with `ws <slug>`; what a termina
 | Change what runs without the orchestrator | `scripts/chain.sh`: what stops a chain, the automatic fix round (`WS_CHAIN_FIX_ROUNDS`), how suggestions carry forward. |
 | Check another rule mechanically | `scripts/precheck.sh`; print `FLAG  rule N:` lines. A rule a script checks reliably can leave the reviewer's attention. |
 | Change what the audit looks for | `scripts/audit.py` (the command patterns and the findings). |
+| Measure a change to what builders are told | `ws bench`: `ws --project <slug> bench add <name>...` for merged runs, write the new rules in a directory (`agents/builder.md`, `lessons/builder.md`), then `ws bench run <slug> --trials 2 --arm current=HEAD --arm new=<dir>` (`--dry-run` first) and `ws bench report <slug> [<slug2>]`. Adopt it only with no quality drop. A project whose `TEST_CMD` installs dependencies sets `BENCH_TEST_CMD` to its tests alone. |
 | Add a subcommand | a `case` arm in `bin/ws`, calling a script in `scripts/`. Use `load_project "$proj"` so a leading `--project <slug>` works; the scripts take `--project` themselves. |
 
 ## Design decisions worth knowing before you change them
@@ -86,6 +99,6 @@ state/current           the last project opened with `ws <slug>`; what a termina
 
 ## Testing a change
 
-`scripts/selftest.sh` checks syntax and exercises, against a throwaway repo: init (including `--dry-run` and `--force`), dispatch (dry run, prompt contents, grants), the resume path, cold-start and its In flight block, the result check's done-when rules, the review prompt, doctor, the chain's merged-step skip, and release (audit, `RELEASE_PATHS`, private-file refusal). For a real end-to-end check, register a scratch repo and run a small task with `--model haiku --budget 1`; a full dispatch, review and merge costs under twenty cents.
+`scripts/selftest.sh` checks syntax and exercises, against a throwaway repo: init (including `--dry-run` and `--force`), dispatch (dry run, prompt contents, grants), the resume path, cold-start and its In flight block, the result check's done-when rules, the review prompt, doctor, the chain's merged-step skip, the bench (corpus, `dispatch --base`/`--instructions`, transcript metrics, a replay run with a stand-in `claude` on PATH, the merge-lock wait, the report's quality-drop flag), and release (audit, `RELEASE_PATHS`, private-file refusal). For a real end-to-end check, register a scratch repo and run a small task with `--model haiku --budget 1`; a full dispatch, review and merge costs under twenty cents.
 
 - `scripts/release.sh` (`ws release`): also tags the private commit it published (`released-vX.Y.Z`), creates the GitHub release page (notes from the published CHANGELOG, marked Latest), and with `RELEASE_MAJOR_BRANCHES=1` moves the public branch `v<major>` to the release. with `RELEASE_PATHS` in the project's conf, only those paths (and `source=dest` renames) go public. Publishes main as a release of the project's public repository (remote `public`, local branch `public-release`); audit, plumbing commit of main's tree, tag, clean-clone asset build, GitHub release. Covered by `scripts/selftest.sh`.

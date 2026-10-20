@@ -1,12 +1,30 @@
 #!/usr/bin/env bash
 # Merge a reviewed branch into the main branch, run the tests, push on green, clean up.
 # Usage: merge.sh [--project slug] [--no-review] <name> <reviewed-sha>
+#        merge.sh [--project slug] --test-only <name>
+# --test-only runs the project's tests (BENCH_TEST_CMD, else TEST_CMD) on the branch tip in its worktree and stops:
+# no lock, no merge, nothing in the main checkout. Log: .ws-evidence/test-only.log in the worktree. ws bench uses it.
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
-slug="" need_review=true
-while [ $# -gt 0 ]; do case "$1" in --project) slug="$2"; shift 2 ;; --no-review) need_review=false; shift ;; *) break ;; esac; done
-name="${1:?usage: merge.sh [flags] <name> <reviewed-sha>}"; pin="${2:?missing the reviewed SHA}"
+slug="" need_review=true test_only=false
+while [ $# -gt 0 ]; do case "$1" in --project) slug="$2"; shift 2 ;; --no-review) need_review=false; shift ;; --test-only) test_only=true; shift ;; *) break ;; esac; done
+name="${1:?usage: merge.sh [flags] <name> <reviewed-sha>}"
 load_project "$slug"; wt="$(worktree_dir "$name")"; br="$(branch_of "$name")"
+if $test_only; then
+  [ -d "$wt" ] || die "no worktree for $name"
+  tcmd="${BENCH_TEST_CMD:-$TEST_CMD}"; [ -n "$tcmd" ] || die "no TEST_CMD for $SLUG; nothing to test"
+  # Deliberate: a worktree's node_modules is a link to the main checkout's, and npm ci or install through it would
+  # rebuild the main checkout's dependencies. Such a project sets BENCH_TEST_CMD to its tests without the install.
+  if grep -qE 'npm +(ci|install|i)( |$)' <<< "$tcmd" && [ -n "$(find "$wt" -maxdepth 2 -name node_modules -type l -print -quit)" ]; then
+    die "the test command installs dependencies and $wt links node_modules from the main checkout; set BENCH_TEST_CMD in projects/$SLUG.conf to the tests alone"
+  fi
+  mkdir -p "$wt/.ws-evidence"; log="$wt/.ws-evidence/test-only.log"
+  echo "running tests on $(git -C "$wt" rev-parse --short HEAD) in $wt: $tcmd"
+  ( cd "$wt" && bash -c "$tcmd" ) > "$log" 2>&1; rc=$?; echo "exit $rc" >> "$log"
+  if [ "$rc" -eq 0 ]; then echo "tests passed (log: $log)"; else tail -n 20 "$log"; echo "tests failed, exit $rc (log: $log)"; fi
+  exit "$rc"
+fi
+pin="${2:?missing the reviewed SHA}"
 # One merge at a time per project: two lanes can finish together, and both merge in the same main checkout.
 exec 9>"$RUNS/merge.lock"; flock -n 9 || { echo "waiting for another merge of $SLUG to finish"; flock -w 3600 9 || die "another merge of $SLUG held the lock for an hour"; }
 tip=$(git -C "$PROJECT_PATH" rev-parse "$br" 2>/dev/null) || die "no branch $br"

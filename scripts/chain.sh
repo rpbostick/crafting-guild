@@ -119,7 +119,8 @@ for i in "${!steps[@]}"; do
     if [ -f "$nt" ] && ! [ -d "$(worktree_dir "${nf[0]}")" ] && ! grep -q "^## Carried from the $name review" "$nt"; then
       if ! carry=$(carry_suggestions "$rv" "$name" "$nt" "$WS" 2>&1); then
         log "$name: committing the carried suggestions failed: $carry"
-        stop "${nf[0]}" "the suggestions carried into $nt could not be committed in the workspace; commit it, then run the chain again"
+        # The section is in the file now, so the next run's guard skips the carry: the commit is left to the reader.
+        stop "${nf[0]}" "the suggestions carried into $nt could not be committed in the workspace; fix the cause above, run: git -C $WS commit -m 'chain: suggestions from the $name review carried into $(basename "$nt")' -- $(realpath "$nt"); then run the chain again"
       fi
       [ -n "$carry" ] && log "$name: suggestions carried into $nt and committed"
     fi
