@@ -24,3 +24,9 @@ Anthropic, "Demystifying evals for AI agents" and "Writing tools for agents" (fi
 ## Done when
 - The selftest checks above fail before and pass after (logs); `bash scripts/selftest.sh` passes (log).
 - A dry run of `ws bench run skate-mario --trials 2 --arm current=HEAD --arm current2=HEAD sm-slope-3` prints the four runs it would dispatch, with their base SHA and budget, and dispatches nothing (log).
+
+## Carried from the cg-chain-commit review (suggestions; do them where the code is yours to touch)
+- `scripts/selftest.sh:171`: Rule 15/hygiene: the scratch repo comes from a bare `mktemp -d` and is removed only on success, so a failed run leaves it in /tmp. Make it under $T (e.g. R="$T/carry-repo") so the existing cleanup on exit removes it.
+- `scripts/selftest.sh:181`: Rule 2: the failed-commit case has no GIT_AUTHOR/COMMITTER identity, unlike the first call. On a machine with no git identity the commit fails for that reason, so the test passes even if the hook is never reached. Pass the same identity env and check the output mentions the hook, or check that HEAD did not move and the file is still modified.
+- `scripts/chain.sh:120`: Rule 15: the chain's call site, its stop branch and its log line are reasoned, not run (the builder's unknowns say so). A small selftest case that sources chain.sh's carry block, or a stand-in dispatch/review/merge, would cover it.
+- `scripts/chain.sh:122`: After a failed commit the section is already in the task file, so on the next chain run the `grep -q '^## Carried from'` guard skips the carry and never retries the commit. The stop message does tell the user to commit by hand. Either name the exact `git -C <ws> commit -- <file>` command in the message, or have the guard check whether the file has uncommitted changes.
