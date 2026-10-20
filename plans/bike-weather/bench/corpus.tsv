@@ -1,0 +1,11 @@
+name	base	budget	track	cost	turns	peak_context	flags
+bw-timeline-temperature	c312e2818c53d8f9b0e843fd9f8298c6ac415275	8	full	3.3418	134	143615	
+bw-timeline-followups	206909509220b156eb97ee49789094e0e74b33b7	5	light	1.1721	53	73362	
+bw-timeline-views	afc8bcd92f46452a0e7ba53db9b406403cb84496	15	full	3.7896	108	162570	
+bw-shelves-followups	07932b21e1d3dc61091e292eabff8ab94758d9fb	5	light	0.5706	38	48439	
+bw-carried-shelves	3c3f13783326f03cfb7151137a128fe9cef3778a	15	full	7.6293	202	240914	
+bw-recommend-carried	5b0d7b9ffd6495ec4257c180aa00fa341fde57c4	8	light	3.8771	119	184848	--budget 8
+bw-today-followups	00a52e5495c6b281094ebabd0fecf0aa2b6b6917	8	light	5.1594	203	211685	--budget 8
+bw-heat	3bee118c8d6d824e944299b8a45cdd98c3f28812	15	full	4.1153	83	175912	
+bw-templates	afd9f03419465976612f10f6bace4958be90e39b	15	full	8.7003	251	304120	--budget 15
+bw-recommend-core	40e8dc2854428520bce07a0534b79d7f1df3e024	20	full	6.3948	102	233457	
