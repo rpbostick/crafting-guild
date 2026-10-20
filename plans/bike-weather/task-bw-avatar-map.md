@@ -11,6 +11,12 @@ Track: light
 3. Tests: every template in `TEMPLATES` has a row, and every `garmentId` exists in figurewright. Across the recommender's worked examples (`src/recommend/examples.test.ts` builds them), the drawn list follows our layer-role order, and for each covered span the outermost drawn garment is the outermost worn one that is drawn.
 4. `docs/avatar-gaps.md`: the `nearest` and `none` templates grouped as figurewright's next garment groups (warmers; vests and shells; hands and feet; head and neck), with what each needs drawn.
 
+## From the hands-on reports
+`docs/research/avatar-cozybuilder-handson.md` §6 and `avatar-characterstudio-handson.md` §5 (read both):
+- One row per template in the map: the figurewright garment, its layer role, and per sub-region (upper arm, forearm, hand, torso, thigh, shin, foot, head, neck) whether it **replaces** what is under it (a long sleeve hides the arm) or **overlays** it (a gilet over a jersey, the jersey still drawn).
+- The layer key comes from the template's layer role in `src/model/templates.ts`, never set per garment.
+- The every-outfit test also checks that each covered sub-region shows the outermost garment and the body shows only where nothing covers it.
+
 ## Prior art
 - `docs/research/avatar-cozybuilder.md` §5: hiding rules as data, and a test that walks every outfit the recommender can produce.
 - `docs/research/avatar-characterstudio.md`: an integer layer per garment, where the higher layer hides the lower.

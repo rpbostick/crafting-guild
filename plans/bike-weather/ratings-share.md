@@ -2,6 +2,8 @@
 
 **In flight right now**
 
+**DECIDED (2026-10-20 15:30 MDT, Patrick):** Köppen grid at 0.1° (312 KB); the server lives in a `server/` folder in bike-weather. Steps 2-5 get task files from these; not dispatched this week (budget goes to the avatar).
+
 **STEP 1 MERGED (2026-10-20 15:19 MDT):** bw-share-research 0ab63b7 ($2.70 + review $0.46), report docs/research/ratings-sharing.md. Open for Patrick: Köppen grid at 0.1° (312 KB, 3.73% of city population in the wrong zone) or 0.25° (77 KB, 6.46%), recommended 0.1°; the server in a server/ folder (touches the root tsconfig exclude, the test and typecheck scripts, worktree links) or its own repository. Carry forward: review suggestions on lines 47, 83, 129 (wording) and pinning skywright references to a commit.
 
 **APPROVED (2026-10-09, Patrick), nothing dispatched.** Step 1 (research spike, $8) runs after the budget reset on 2026-10-12, beside or after the avatar build (`avatar-build.md`). Steps 2 to 5 get task files from the spike's findings.
