@@ -6,7 +6,7 @@ for f in "$WS"/bin/ws "$WS"/scripts/*.sh; do bash -n "$f" && echo "syntax ok  ${
 if command -v shellcheck >/dev/null; then shellcheck -S warning "$WS"/bin/ws "$WS"/scripts/*.sh && echo "shellcheck ok" || { echo "shellcheck FAILED"; exit 1; }; fi
 T=$(mktemp -d); slug=$(basename "$T" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')
 # Cleanup runs on every exit (a failed check, a kill, a crash), so the scratch project never outlives the test.
-trap 'rm -rf "$T" "$WS/plans/$slug" "$WS/runs/$slug" "$WS/plans/$slug-b" "$WS/runs/$slug-b"; rm -f "$WS/projects/$slug.conf" "$WS/projects/$slug-b.conf"' EXIT
+trap '[ -n "${srvpid:-}" ] && kill "$srvpid" 2>/dev/null; rm -rf "$T" "$WS/plans/$slug" "$WS/runs/$slug" "$WS/plans/$slug-b" "$WS/runs/$slug-b"; rm -f "$WS/projects/$slug.conf" "$WS/projects/$slug-b.conf"' EXIT
 git -C "$T" init -q -b main; echo hi > "$T/a.txt"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm init
 printf '#!/bin/sh\nexit 0\n' > "$T/t.sh"; chmod +x "$T/t.sh"
 printf 'n\n' | "$WS/bin/ws" init "$T" --tests "sh t.sh" >/dev/null && echo "init ok (non-interactive path)"
@@ -206,6 +206,59 @@ grep -q 'stopped .*setup: ws doctor' "$WS/runs/$slug/chain.status" && echo "chai
 printf '%s\n' '{"type":"result","is_error":true,"api_error_status":429,"result":"You'"'"'ve hit your session limit \u00b7 resets 3:50pm (America/Denver)"}' > "$WS/runs/$slug/demo.jsonl"
 cr=$("$WS/scripts/check-result.sh" --project "$slug" demo 2>&1 || true)
 grep -q '^LIMIT' <<< "$cr" && grep -qE '^reset_epoch=[0-9]+$' <<< "$cr" && echo "usage-limit result ok" || { echo "usage-limit result FAILED:"; echo "$cr"; exit 1; }
+# web: a result with two web requests (a URL and a search) is printed by check-result and listed by ws web; the chain
+# stops on it; approving the URL fetches it from a local server into the worktree's .ws-evidence/given/web/ with a
+# sidecar; a non-http(s) URL and a file over WS_WEB_MAX_MB are refused; a search is not fetched; a denial is recorded;
+# resume writes a task naming the file and the denial, with the original's Commands. Every check runs and the section
+# fails at its end, so a missing piece shows each check it breaks.
+wf=0; wfail() { echo "$1 FAILED:"; printf '%s\n' "${2:-}" | sed -n 1,25p; wf=1; }
+WV="$T/web/srv"; mkdir -p "$WV"; printf 'source marker\n' > "$WV/spec.txt"; head -c 2097152 /dev/zero > "$WV/big.bin"
+python3 -u -m http.server 0 --bind 127.0.0.1 --directory "$WV" > "$T/web/srv.log" 2>&1 & srvpid=$!
+port=""; for _ in $(seq 100); do port=$(sed -n 's/.* port \([0-9]*\).*/\1/p' "$T/web/srv.log" | head -1); [ -n "$port" ] && break; sleep 0.1; done
+[ -n "$port" ] || { echo "web test server did not start:"; cat "$T/web/srv.log"; exit 1; }
+WW="$T/.worktrees/webrun"; git -C "$T" worktree add -q -b agent/webrun "$WW" main; RW="$WS/runs/$slug"
+printf '# web task\n\nRead the spec.\n\n## Commands\n`shellcheck *`, `bash tests/*`\n\n## Done when\n- the spec is read\n' > "$T/webtask.md"
+printf 'task=%s\n' "$T/webtask.md" > "$RW/webrun.task.txt"
+wreq="[{\"url\":\"http://127.0.0.1:$port/spec.txt\",\"why\":\"the format\",\"needed\":\"the header layout\"},{\"query\":\"smb3 disassembly\",\"why\":\"the routines\",\"needed\":\"the run meter\"}]"
+printf '{"type":"result","total_cost_usd":0.1,"duration_ms":60000,"usage":{},"permission_denials":[],"structured_output":{"status":"partial",%s,"done_when":[{"item":"the spec is read","status":"open","basis":"inferred","evidence":"no source"}],"web_requests":%s}}\n' "$base" "$wreq" > "$RW/webrun.jsonl"
+out=$("$WS/scripts/check-result.sh" --project "$slug" webrun 2>&1) && x=0 || x=1; printf '%s\n' "$out" > "$RW/webrun.result.txt"
+[ "$x" = 0 ] && grep -q "^web   request 1: http://127.0.0.1:$port/spec.txt" <<< "$out" && grep -q '^web   request 2: search: smb3 disassembly' <<< "$out" \
+  && echo "check-result prints web requests ok" || wfail "check-result web requests" "$out"
+out=$(cr "{\"status\":\"done\",$base,\"done_when\":[],\"web_requests\":$wreq}") && x=0 || x=1
+[ "$x" = 1 ] && grep -q 'FAIL  status done, but the result asks for 2 web source(s)' <<< "$out" && echo "check-result refuses done with web requests ok" || wfail "check-result done with web requests" "$out"
+out=$("$WS/bin/ws" --project "$slug" web webrun 2>&1) && x=0 || x=1
+[ "$x" = 0 ] && grep -q "1  url    http://127.0.0.1:$port/spec.txt" <<< "$out" && grep -q '2  search smb3 disassembly' <<< "$out" && grep -q 'needed: the header layout' <<< "$out" \
+  && grep -q 'needed: the run meter' <<< "$out" && echo "ws web lists requests ok" || wfail "ws web list" "$out"
+printf 'webrun %s\n' "$T/webtask.md" > "$T/web.queue"
+out=$(timeout 60 "$WS/bin/ws" --project "$slug" chain "$T/web.queue" 2>&1 || true)
+grep -q 'stopped .*webrun: web requests' "$RW/chain.status" 2>/dev/null && echo "chain stops on web requests ok" || wfail "chain web requests" "$out
+$(cat "$RW/chain.status" 2>/dev/null)"
+G="$WW/.ws-evidence/given/web"
+out=$("$WS/bin/ws" --project "$slug" web webrun approve 1 --url file:///etc/passwd 2>&1) && x=0 || x=1
+[ "$x" = 1 ] && grep -q 'not an http(s) URL' <<< "$out" && [ -z "$(ls -A "$G" 2>/dev/null)" ] && echo "ws web refuses a non-http scheme ok" || wfail "ws web scheme refusal" "$out"
+out=$(WS_WEB_MAX_MB=1 "$WS/bin/ws" --project "$slug" web webrun approve 1 --url "http://127.0.0.1:$port/big.bin" 2>&1) && x=0 || x=1
+[ "$x" = 1 ] && grep -q 'over the 1 MB cap' <<< "$out" && [ -z "$(ls -A "$G" 2>/dev/null)" ] && echo "ws web refuses an oversize file ok" || wfail "ws web size refusal" "$out
+$(ls -la "$G" 2>&1)"
+out=$("$WS/bin/ws" --project "$slug" web webrun approve 1 2>&1) && x=0 || x=1; sc="$G/1-spec.txt.source.txt"
+[ "$x" = 0 ] && [ "$(cat "$G/1-spec.txt" 2>/dev/null)" = "source marker" ] && grep -qx "url=http://127.0.0.1:$port/spec.txt" "$sc" && grep -qx 'bytes=14' "$sc" \
+  && grep -qx "sha256=$(sha256sum "$WV/spec.txt" | cut -d' ' -f1)" "$sc" && grep -qE '^fetched=[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$sc" && [ ! -x "$G/1-spec.txt" ] \
+  && echo "ws web fetches an approved URL with its sidecar ok" || wfail "ws web fetch" "$out
+$(cat "$sc" 2>&1)"
+out=$("$WS/bin/ws" --project "$slug" web webrun approve 2 2>&1) && x=0 || x=1
+[ "$x" = 1 ] && grep -q 'a search is not fetched' <<< "$out" && echo "ws web does not fetch a search ok" || wfail "ws web search" "$out"
+out=$("$WS/bin/ws" --project "$slug" web webrun resume --dry-run 2>&1) && x=0 || x=1
+[ "$x" = 1 ] && grep -q 'request(s) 2 have no fetched file and no denial' <<< "$out" && [ ! -e "$T/webtask-web-1.md" ] && echo "ws web resume waits for every answer ok" || wfail "ws web resume open" "$out"
+out=$("$WS/bin/ws" --project "$slug" web webrun deny 2 "the spec covers the run meter" 2>&1) && x=0 || x=1
+lo=$("$WS/bin/ws" --project "$slug" web webrun 2>&1 || true)
+[ "$x" = 0 ] && grep -q 'denied: the spec covers the run meter' <<< "$lo" && grep -q 'fetched: .ws-evidence/given/web/1-spec.txt' <<< "$lo" && echo "ws web deny records its reason ok" || wfail "ws web deny" "$out
+$lo"
+out=$("$WS/bin/ws" --project "$slug" web webrun resume --dry-run 2>&1) && x=0 || x=1; rt="$T/webtask-web-1.md"
+[ "$x" = 0 ] && grep -qF '`.ws-evidence/given/web/1-spec.txt`' "$rt" && grep -q 'the spec covers the run meter' "$rt" && grep -qx '## Commands' "$rt" && grep -qF '`shellcheck *`, `bash tests/*`' "$rt" \
+  && grep -qF 'Bash(shellcheck*)' <<< "$(grep '^tools:' <<< "$out")" && grep -qF 'Bash(bash*)' <<< "$(grep '^tools:' <<< "$out")" && [ -f "$RW/webrun.web.tsv" ] \
+  && echo "ws web resume writes a task with the files and the Commands ok" || wfail "ws web resume" "$out
+$(cat "$rt" 2>&1)"
+kill "$srvpid" 2>/dev/null || true; srvpid=""; git -C "$T" worktree remove --force "$WW"; git -C "$T" branch -q -D agent/webrun
+[ "$wf" = 0 ] || exit 1
 # bench: replays of a merged task under two arms of builder instructions. A second scratch project holds the replays;
 # a merge lock held in the first makes the run wait. Every check here runs and the section fails at its end, so a
 # missing piece shows each check it breaks.
@@ -304,7 +357,7 @@ grep -q "^== $slug2" <<< "$out" && grep -q "^== $slug " <<< "$out" && grep -q '^
 [ "$bf" = 0 ] || exit 1
 # What the checks above made inside $T stays out of its commits below: a nested repo is added as a gitlink that stays
 # dirty, and the stand-in's saved prompts hold home paths the release audit refuses.
-printf '%s/\n' carry-repo hist "$slug2" stub stub-log arm-beta locks >> "$T/.git/info/exclude"
+printf '%s/\n' carry-repo hist "$slug2" stub stub-log arm-beta locks web >> "$T/.git/info/exclude"
 # release: a first release, a refused existing version, a caught home path, a second release on top, a refused
 # dirty checkout; the public main always has exactly the project's main tree.
 git -C "$T" worktree remove --force "$T/.worktrees/demo"

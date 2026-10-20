@@ -76,5 +76,11 @@ if [ -n "$since" ]; then
 fi
 d=$(git -C "$wt" status --short -uno | wc -l); u=$(git -C "$wt" status --short | grep -c "^??" || true); [ "$d" -gt 0 ] && echo "note  $d modified tracked file(s) left uncommitted"; [ "$u" -gt 0 ] && echo "note  $u untracked file(s) in the worktree (logs, caches)"
 nq=$(printf '%s' "$so" | jq '.open_questions | length'); [ "$nq" -gt 0 ] && echo "note  open questions: $(printf '%s' "$so" | jq -c '.open_questions')"
+# Web sources the builder asked for (builders have no web access): ws chain stops on these lines, ws web answers them.
+nweb=$(printf '%s' "$so" | jq '.web_requests // [] | length')
+[ "$nweb" -gt 0 ] && [ "$(printf '%s' "$so" | jq -r '.status')" = "done" ] && flag "status done, but the result asks for $nweb web source(s)"
+printf '%s' "$so" | jq -r '.web_requests // [] | to_entries[] | .value as $r
+  | "web   request \(.key + 1): \(if ($r.url // "") != "" then $r.url else "search: \($r.query // "(no url or query)")" end); why: \($r.why // ""); needed: \($r.needed // "")"
+  | gsub("[\t\n]"; " ") | .[0:400]'
 echo "cost=\$$cost ${dur}min $tok tip=$(git -C "$wt" rev-parse --short HEAD)"
 [ "$problems" -eq 0 ]

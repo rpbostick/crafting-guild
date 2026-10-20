@@ -198,7 +198,7 @@ Files: delete a tracked file with \`git rm <path>\` and an untracked one (a scra
 $(cat "$task")
 
 # Result
-Your final answer is validated against a JSON schema: status (done|partial|blocked), summary, files_changed, commits (SHAs you made), tests (command, passed, failed, log_path, or null), denied (every denied call), open_questions."
+Your final answer is validated against a JSON schema: status (done|partial|blocked), summary, files_changed, commits (SHAs you made), tests (command, passed, failed, log_path, or null), denied (every denied call), open_questions, and web_requests when you need web sources you do not have."
 
 cmd=(claude -p "$prompt" --allowedTools "${TOOLS[@]}" --disallowedTools "${DENY[@]}"
   --permission-prompts none --json-schema "$(cat "$WS/schema/result.json")"
