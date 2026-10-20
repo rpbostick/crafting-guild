@@ -24,4 +24,9 @@ PREVIEW_CMD="npx serve -l {port} dist"
 # In the site project's own conf: where it is served and which folder is the web root.
 # SITE_URL="https://example.org"
 # SITE_ROOT="public"
-# RELEASE_MAJOR_BRANCHES=1           # ws release moves a public branch v<major> to each new release of that major version
+# Environment for builders' test runs (they cannot run `env VAR=... <cmd>`): ws dispatch writes these KEY=value
+# lines into this file in each new or reused worktree. It refuses when git does not ignore the file there, and
+# backs up a file with other content under .ws-evidence/ with a warning before replacing it.
+# WORKTREE_ENV_FILE=".env.local"
+# WORKTREE_ENV=("DATA_DIR=/absolute/path/to/data")
+# RELEASE_MAJOR_BRANCHES=1          # ws release moves a public branch v<major> to each new release of that major version
