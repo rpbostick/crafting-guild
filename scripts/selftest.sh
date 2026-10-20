@@ -223,7 +223,8 @@ case " $* " in
 esac
 STUB
 chmod +x "$T/stub/claude"
-wsb() { PATH="$T/stub:$PATH" STUB_LOG="$T/stub-log" WS_BENCH_POLL=1 WS_TASK_HISTORY="${H:-}" timeout 300 "$WS/bin/ws" "$@" 2>&1; }
+# The bench waits on scratch locks: this suite runs inside ws merge's test gate, whose own lock is held meanwhile.
+wsb() { PATH="$T/stub:$PATH" STUB_LOG="$T/stub-log" WS_BENCH_POLL=1 WS_BENCH_LOCKS="$T/locks/runs/*/merge.lock" WS_TASK_HISTORY="${H:-}" timeout 300 "$WS/bin/ws" "$@" 2>&1; }
 # ws: a word that is neither a command nor a project fails; it once opened a session on the pinned project.
 out=$(WS_PROJECT="$slug" wsb no-such-word) && x=0 || x=1
 [ "$x" = 1 ] && grep -q "unknown project 'no-such-word'" <<< "$out" && [ -z "$(ls "$T/stub-log")" ] && echo "unknown word starts no session ok" || bfail "unknown word" "$out"
@@ -283,10 +284,10 @@ benchrun() { wsb bench run "$slug2" "$@"; }
 out=$(benchrun --trials 1 --arm armalpha=HEAD --arm "armbeta=$A" bx --dry-run) || true
 [ "$(grep -c "^would dispatch bench-[0-9a-f]\{8\} .*base $base2 budget \$7" <<< "$out")" = 2 ] && [ -z "$(ls "$T/stub-log")" ] && [ ! -e "$WS/runs/$slug2/bench/runs.tsv" ] \
   && echo "bench run --dry-run dispatches nothing ok" || bfail "bench run --dry-run" "$out"
-( flock 9; touch "$T/locked"; sleep 4 ) 9>"$WS/runs/$slug/merge.lock" & lk=$!
+mkdir -p "$T/locks/runs/$slug"; ( flock 9; touch "$T/locked"; sleep 4 ) 9>"$T/locks/runs/$slug/merge.lock" & lk=$!
 for _ in $(seq 100); do [ -f "$T/locked" ] && break; sleep 0.1; done
 out=$(benchrun --trials 1 --arm armalpha=HEAD --arm "armbeta=$A" bx) && x=0 || x=1; wait "$lk" || true
-grep -q "waiting for a merge to finish (runs/$slug/merge.lock" <<< "$out" && echo "bench waits on another project's merge ok" || bfail "bench merge wait" "$out"
+grep -qF "waiting for a merge to finish ($T/locks/runs/$slug/merge.lock is held)" <<< "$out" && echo "bench waits on another project's merge ok" || bfail "bench merge wait" "$out"
 rt="$WS/runs/$slug2/bench/runs.tsv"
 [ "$x" = 0 ] && [ "$(awk -F'\t' 'NR>1 && $6=="done" && $7=="pass" && $8==2 && $9==2 && $10=="merge" && $11==0 && $12==1 && $13==100 && $17==0.25' "$rt" 2>/dev/null | wc -l)" = 2 ] \
   && echo "bench run records both arms ok" || bfail "bench run records" "$out
@@ -303,7 +304,7 @@ grep -q "^== $slug2" <<< "$out" && grep -q "^== $slug " <<< "$out" && grep -q '^
 [ "$bf" = 0 ] || exit 1
 # What the checks above made inside $T stays out of its commits below: a nested repo is added as a gitlink that stays
 # dirty, and the stand-in's saved prompts hold home paths the release audit refuses.
-printf '%s/\n' carry-repo hist "$slug2" stub stub-log arm-beta >> "$T/.git/info/exclude"
+printf '%s/\n' carry-repo hist "$slug2" stub stub-log arm-beta locks >> "$T/.git/info/exclude"
 # release: a first release, a refused existing version, a caught home path, a second release on top, a refused
 # dirty checkout; the public main always has exactly the project's main tree.
 git -C "$T" worktree remove --force "$T/.worktrees/demo"

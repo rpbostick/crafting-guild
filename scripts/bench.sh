@@ -80,12 +80,13 @@ bench_add() {
 }
 
 # Wait while any project's merge holds its lock (merge.sh keeps the lock file afterwards, so the lock is tested, not
-# the file): a replay's builder and tests would slow that merge's test gate.
+# the file): a replay's builder and tests would slow that merge's test gate. WS_BENCH_LOCKS (a glob) lets the selftest
+# point the wait at scratch locks, since it runs inside a merge's test gate while that merge holds its own lock.
 wait_for_merges() {
-  local f held said=""
+  local f held said="" locks="${WS_BENCH_LOCKS:-$WS/runs/*/merge.lock}"
   while :; do
     held=""
-    for f in "$WS"/runs/*/merge.lock; do [ -f "$f" ] || continue; flock -n "$f" true 2>/dev/null || { held="$f"; break; }; done
+    while IFS= read -r f; do [ -f "$f" ] || continue; flock -n "$f" true 2>/dev/null || { held="$f"; break; }; done < <(compgen -G "$locks" || true)
     [ -z "$held" ] && return 0
     [ "$said" = "$held" ] || { echo "bench: waiting for a merge to finish (${held#"$WS"/} is held)"; said="$held"; }
     sleep "${WS_BENCH_POLL:-30}"
