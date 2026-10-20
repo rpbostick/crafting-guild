@@ -117,9 +117,11 @@ for i in "${!steps[@]}"; do
   if [ $((i+1)) -lt ${#steps[@]} ] && [ "$(jq '.suggestions|length' "$rv")" -gt 0 ]; then
     set -f; eval "nf=( ${steps[$((i+1))]} )"; set +f; nt="${nf[1]:-}"
     if [ -f "$nt" ] && ! [ -d "$(worktree_dir "${nf[0]}")" ] && ! grep -q "^## Carried from the $name review" "$nt"; then
-      carry=$(jq -r '.suggestions[] | "- `\(.file):\(.line)`: \(.why)"' "$rv")
-      [ -n "${WS_ATTRIBUTION_RE:-}" ] && carry=$(printf '%s\n' "$carry" | grep -viE "$WS_ATTRIBUTION_RE" || true)
-      [ -n "$carry" ] && printf '\n## Carried from the %s review (suggestions; do them where the code is yours to touch)\n%s\n' "$name" "$carry" >> "$nt" && log "$name: suggestions carried into $nt"
+      if ! carry=$(carry_suggestions "$rv" "$name" "$nt" "$WS" 2>&1); then
+        log "$name: committing the carried suggestions failed: $carry"
+        stop "${nf[0]}" "the suggestions carried into $nt could not be committed in the workspace; commit it, then run the chain again"
+      fi
+      [ -n "$carry" ] && log "$name: suggestions carried into $nt and committed"
     fi
   fi
 done
