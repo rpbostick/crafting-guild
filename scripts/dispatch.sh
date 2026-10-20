@@ -78,11 +78,32 @@ else
 fi
 mkdir -p "$wt/.ws-evidence"   # untracked; logs and renders go here, never into the branch (ws merge keeps it under runs/)
 
+# WORKTREE_ENV (KEY=value lines) goes into WORKTREE_ENV_FILE in the worktree, for tests that read their
+# environment from a file (Vite's loadEnv reads .env.local): builders cannot run `env VAR=... <cmd>`.
+if [ ${#WORKTREE_ENV[@]} -gt 0 ] || [ -n "$WORKTREE_ENV_FILE" ]; then
+  refuse() { if $fresh_wt; then git -C "$PROJECT_PATH" worktree remove --force "$wt"; $fresh_br && git -C "$PROJECT_PATH" branch -q -D "$br"; fi; die "$1"; }
+  [ -n "$WORKTREE_ENV_FILE" ] || refuse "WORKTREE_ENV is set in projects/$SLUG.conf but WORKTREE_ENV_FILE is not"
+  [ ${#WORKTREE_ENV[@]} -gt 0 ] || refuse "WORKTREE_ENV_FILE is set in projects/$SLUG.conf but WORKTREE_ENV has no lines"
+  case "$WORKTREE_ENV_FILE" in /*|*..*) refuse "WORKTREE_ENV_FILE '$WORKTREE_ENV_FILE' must be a path inside the worktree" ;; esac
+  for line in "${WORKTREE_ENV[@]}"; do
+    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || refuse "WORKTREE_ENV line '$line' is not KEY=value"
+    case "$line" in *$'\n'*) refuse "WORKTREE_ENV line '${line%%$'\n'*}...' has an embedded newline" ;; esac
+  done
+  # Deliberate: an ignored file only, so the values (machine paths) are never committed from the branch.
+  git -C "$wt" check-ignore -q -- "$WORKTREE_ENV_FILE" || refuse "$WORKTREE_ENV_FILE is not git-ignored in $wt; add it to the project's .gitignore before dispatching"
+  envf="$wt/$WORKTREE_ENV_FILE" want="$(printf '%s\n' "${WORKTREE_ENV[@]}")"
+  if [ -e "$envf" ] && [ "$(cat "$envf")" != "$want" ]; then
+    keep="$wt/.ws-evidence/$(basename "$WORKTREE_ENV_FILE").before-$(date -u +%Y%m%dT%H%M%SZ)"; cp "$envf" "$keep"
+    echo "ws: warning: $WORKTREE_ENV_FILE in the worktree had other content; replaced from projects/$SLUG.conf, the old file is at $keep" >&2
+  fi
+  mkdir -p "$(dirname "$envf")"; printf '%s\n' "$want" > "$envf"
+fi
+
 # Grant: edit inside the worktree, read anything, commit on this branch, run the project's tests. No push, no config.
 TOOLS=(Read Grep Glob "Edit(./**)"
   "Bash(git status*)" "Bash(git diff*)" "Bash(git log*)" "Bash(git show*)" "Bash(git rev-parse*)" "Bash(git ls-files*)"
   "Bash(git add *)" "Bash(git commit *)" "Bash(git branch --show-current)" "Bash(git checkout -- *)" "Bash(git merge $PROJECT_BRANCH)" "Bash(git merge $PROJECT_BRANCH --no-edit)"
-  "Bash(git restore *)" "Bash(git clean -f -- *)" "Bash(git ls-tree*)" "Bash(git check-ignore *)" "Bash(stat *)" "Bash(sha256sum *)" "Bash(file *)"
+  "Bash(git restore *)" "Bash(git clean -f -- *)" "Bash(git ls-tree*)" "Bash(git check-ignore*)" "Bash(stat *)" "Bash(sha256sum *)" "Bash(file *)"
   "Bash(git rm *)" "Bash(git mv *)" "Bash(ls *)" "Bash(cat *)" "Bash(grep *)" "Bash(wc *)" "Bash(head *)" "Bash(tail *)"
   "Bash(mkdir *)" "Bash(cp *)" "Bash(chmod *)" "Bash(expr *)" "Bash(date *)" "Bash(diff *)" "Bash(bash -n *)" "Bash(git grep *)")
 [ -n "$TEST_CMD" ] && TOOLS+=("Bash($TEST_CMD)" "Bash($TEST_CMD *)")
