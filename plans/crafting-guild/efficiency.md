@@ -21,3 +21,6 @@ Anthropic, context engineering: just-in-time retrieval, context rot; tools post:
 4. cg-web-relay: builders request fetches in their result; `ws web` shows them, fetches what the orchestrator approves into the worktree, and resumes the run.
 5. sm-budget-doc (skate-mario): the frame-budget table generated between markers, a test fails when stale. Light.
 6. cg-lean-reads (after 1): builder rule "find, then read by section; whole files only for files you edit"; benched against the current rules, 10 tasks x 2 arms x 2 trials, adopted only with no quality drop.
+
+## Bench corpus
+- skate-mario first (10 merged tasks). Then bike-weather's merged tasks too (Patrick, 2026-10-20: "i'm also good if the bench evaluates bike-weather once it runs out of skate-mario tasks to compare. there are some compute heavy tasks there too."). A second project also serves as a held-out set, so a rule tuned on skate-mario is checked where it was not tuned. Bike-weather replays run Expo/Metro and jest: one at a time, never beside a bike-weather merge (the bench waits on any project's merge lock), jest with `--runInBand`, Metro with `--max-workers 2`.
