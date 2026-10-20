@@ -1,0 +1,11 @@
+name	base	budget	track	cost	turns	peak_context	flags
+sm-slope-1	1b03a659077479719c4cf6a910ce03bf32031894	20	full	5.7813	128	249505	--budget 20
+sm-slope-3	c671296145c80f0868203b543f1da01a6c27533a	20	full	5.6882	123	224013	--budget 20
+sm-slope-4	c47e8cf6cf18f8b9bc85630280bd538b914fd2f2	20	full	6.1422	119	242202	--budget 20
+sm-foot-5	e79608d0fb9c07e49ec2f1e38b3caa75ef047193	20	full	8.5611	178	292899	--budget 20
+sm-pmeter-6	52181987bc1983a06531d5c43b58591f90a5654f	20	full	5.3793	122	231210	--budget 20
+sm-ramp-launch	2455798ea730e1fd811775b3a939f3f5f1d5a3b4	20	full	8.9856	171	328788	--budget 20
+sm-homebrew-scroll	0ff7ab511905313d6d79a2b5f4969a9344f26639	15	full	5.3262	132	209029	--budget 15
+sm-homebrew-skate	d19046f3882e537a778b0f516e5e6c0a65f32157	20	full		59	327954	--budget 20
+sm-budget-doc	1bbe11918fb9dcc37115de01a5d200ea08ae8ac7	8	light	1.6183	48	100402	--budget 8
+sm-split-smbskate	f47353c8c8c224d5addcbb6ee9d910154d123fa1	8	light	4.3645	154	196858	--budget 8
