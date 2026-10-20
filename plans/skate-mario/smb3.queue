@@ -1,6 +1,7 @@
-# smb3-model.md section 7 steps 4, 5, 6, 8, plus the board's SMB3/Skate Mario blend (Patrick, 2026-10-19: all, $20 each, gate each: feel and look are his to judge).
+# smb3-model.md section 7 steps 4, 5, 6, 8, plus ramp launches and the board's SMB3/Skate Mario blend (Patrick, 2026-10-19: all, $20 each, gate each: feel and look are his to judge).
 sm-slope-4 plans/skate-mario/task-sm-slope-4.md gate --budget 20
 sm-foot-5 plans/skate-mario/task-sm-foot-5-fix-1.md gate --budget 12
+sm-ramp-launch plans/skate-mario/task-sm-ramp-launch.md gate --budget 20
 sm-pmeter-6 plans/skate-mario/task-sm-pmeter-6.md gate --budget 20
 sm-board-mix-7 plans/skate-mario/task-sm-board-mix-7.md gate --budget 20
 sm-vcam-8 plans/skate-mario/task-sm-vcam-8.md gate --budget 20 --timeout 180
