@@ -33,6 +33,9 @@ scripts/site.sh         `ws site`: copies a project's SITE_SYNC files (or its Gi
 scripts/audit.py        `ws audit`: repeated hand work in the run logs. Writes runs/<slug>/audit.last for cold-start.
 scripts/statusline.sh   the Claude Code status line: each running builder (elapsed time, tool calls, seconds since
                         its last output, budget), then preview servers. No git calls.
+scripts/lessons-check.py pairs each lessons/<role>.local.md bullet with the shared bullet it restates (difflib
+                        similarity) and fails on one that adds no date, number or name of its own; selftest runs it.
+                        `--removed <old> <new> <shared>` shows where each sentence of a pruned file still lives.
 bin/ws-run              the builders' evidence runner: one granted command, its log, its exit code, a row in runs.tsv.
 scripts/selftest.sh     syntax checks plus a dry run against a scratch repo. Run it after any change here.
 agents/*.md             the three roles. Plain prose, pasted into prompts.
@@ -60,7 +63,7 @@ state/current           the last project opened with `ws <slug>`; what a termina
 | Change what a review checks | `checklist.md`. Add a rule only by removing one. `agents/reviewer.md` sets the reviewer's posture (what blocks, what is a suggestion). `ws review --print-prompt <name>` shows the reviewer's whole prompt. |
 | Change what counts as a valid result | `schema/result.json`; then update the checks in `scripts/check-result.sh`. |
 | Change what cold-start shows | `scripts/cold-start.sh`. Keep it under half a minute; it runs on every session start and after every compaction. Never put a test run in it. |
-| Change the merge gate | `scripts/merge.sh`. Today: pinned SHA, review on record, clean trees, no home paths or username in lines the branch adds (`home_path_leaks` in `scripts/lib.sh`, which precheck rule 18 shares; exempt: only the project's `ATTRIBUTION_EXEMPT`, its private files), no attribution in them (`WS_ATTRIBUTION_RE` in `config.sh`; exempt: LICENSE, manifests, license lists, the project's `CREDIT_PATHS`), tests via `TEST_CMD` (timed; warns over `WS_SUITE_WARN_S`), push on green, evidence moved to `runs/`. |
+| Change the merge gate | `scripts/merge.sh`. Today: pinned SHA, review on record, clean trees, no home paths or username in lines the branch adds (`home_path_leaks` in `scripts/lib.sh`, which precheck rule 18 shares; exempt: only the project's `ATTRIBUTION_EXEMPT`, its private files, so a home path in a LICENSE, manifest or `CREDIT_PATHS` file is flagged by review and refused by merge), no attribution in them (`WS_ATTRIBUTION_RE` in `config.sh`; exempt: LICENSE, manifests, license lists, the project's `CREDIT_PATHS`), tests via `TEST_CMD` (timed; warns over `WS_SUITE_WARN_S`), push on green, evidence moved to `runs/`. |
 | Change where evidence goes | `.ws-evidence/` is created by `scripts/dispatch.sh`, named in `agents/builder.md` and `agents/reviewer.md`, excluded via `.git/info/exclude`, and moved by `scripts/merge.sh`. |
 | Change the timeouts | `WS_DEFAULT_TIMEOUT` and `WS_LIGHT_TIMEOUT` in `config.sh`; `scripts/dispatch.sh` picks the light one when the task says `Track: light`. |
 | Change the builder memory cap | `WS_BUILDER_MEM` in `config.sh` (systemd `MemoryMax` form, empty = none); `scripts/dispatch.sh` wraps the run in `systemd-run --user --scope` when systemd is there. |
