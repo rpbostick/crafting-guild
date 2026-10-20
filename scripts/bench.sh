@@ -102,10 +102,21 @@ timeout_for() { # <task> -> minutes: the corpus flags' --timeout, else the track
   echo "${tmo%m}"
 }
 
+# Dispatch run_one's $run from the base commit, discarding any earlier attempt's worktree, branch and result.
+start_run() {
+  [ -d "$wt" ] && git -C "$PROJECT_PATH" worktree remove --force "$wt"
+  git -C "$PROJECT_PATH" branch -q -D "$(branch_of "$run")" 2>/dev/null
+  rm -f "$RUNS/$run.result.txt"
+  wait_for_merges
+  set -f; eval "fl=( $(corpus_field "$task" flags) )"; set +f
+  "$WS/scripts/dispatch.sh" --project "$SLUG" "${fl[@]}" --budget "$budget" --base "$base" --instructions "$dir" "$run" "$WS/plans/$SLUG/bench/$task.md" >> "$log" 2>&1 \
+    || { echo "bench: dispatch of $run failed; see runs/$SLUG/bench/logs/$run.log"; return 1; }
+}
+
 # One replay: dispatch under the opaque name, wait, review (blind: the reviewer sees the run name only), test the
 # tip in the worktree, record, then remove the worktree and branch and keep the evidence.
 run_one() { # <task> <arm> <trial>
-  local task="$1" arm="$2" trial="$3" got run state wt log base budget mins dir tests rc; local -a fl
+  local task="$1" arm="$2" trial="$3" got run state wt log base budget mins dir tests rc ep wake limits=0; local -a fl
   base=$(corpus_field "$task" base); budget=$(corpus_field "$task" budget); dir="$BENCH/arms/$arm"
   got=$(python3 "$PY" runs-get "$TSV" "$task" "$arm" "$trial"); run="${got%%$'\t'*}"; state="${got#*$'\t'}"
   [ "$state" = "done" ] && return 0
@@ -119,16 +130,20 @@ run_one() { # <task> <arm> <trial>
   elif [ -d "$wt" ] && [ -f "$RUNS/$run.result.txt" ]; then echo "bench: $run finished before the bench stopped; grading it"
   else
     # An interrupted start: begin again from the base commit.
-    [ -d "$wt" ] && git -C "$PROJECT_PATH" worktree remove --force "$wt"
-    git -C "$PROJECT_PATH" branch -q -D "$(branch_of "$run")" 2>/dev/null
-    rm -f "$RUNS/$run.result.txt"
-    wait_for_merges
-    set -f; eval "fl=( $(corpus_field "$task" flags) )"; set +f
-    "$WS/scripts/dispatch.sh" --project "$SLUG" "${fl[@]}" --budget "$budget" --base "$base" --instructions "$dir" "$run" "$WS/plans/$SLUG/bench/$task.md" >> "$log" 2>&1 \
-      || { echo "bench: dispatch of $run failed; see runs/$SLUG/bench/logs/$run.log"; return 1; }
+    start_run || return 1
   fi
   mins=$(( $(timeout_for "$task") + 15 ))
-  "$WS/bin/ws" --project "$SLUG" wait "$run" "$mins" >> "$log" 2>&1; rc=$?
+  while :; do
+    "$WS/bin/ws" --project "$SLUG" wait "$run" "$mins" >> "$log" 2>&1; rc=$?
+    grep -q '^LIMIT' "$RUNS/$run.result.txt" 2>/dev/null || break
+    # A run stopped by the usage limit measures nothing: wait for the reset, then replay it from the base commit.
+    ep=$(sed -n 's/^reset_epoch=//p' "$RUNS/$run.result.txt")
+    case "$ep" in ''|*[!0-9]*) echo "bench: $run hit the usage limit, reset time unknown; run the bench again after the reset"; return 1 ;; esac
+    limits=$((limits + 1)); [ "$limits" -le 3 ] || { echo "bench: $run hit the usage limit 3 times; run the bench again later"; return 1; }
+    wake=$((ep + 120)); echo "bench: $run hit the usage limit; replaying it from the base at $(date -d "@$wake" '+%H:%M')"
+    while [ "$(date +%s)" -lt "$wake" ]; do sleep "${WS_BENCH_POLL:-60}"; done
+    start_run || return 1
+  done
   [ "$rc" -eq 3 ] && { echo "bench: $run still running after $mins minutes; run the bench again to resume"; return 1; }
   "$WS/scripts/review.sh" --project "$SLUG" "$run" >> "$log" 2>&1
   if "$WS/scripts/merge.sh" --project "$SLUG" --test-only "$run" >> "$log" 2>&1; then tests=pass; else tests=fail; fi

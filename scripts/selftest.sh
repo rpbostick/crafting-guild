@@ -269,6 +269,9 @@ mkdir -p "$T/stub" "$T/stub-log"; cat > "$T/stub/claude" <<'STUB'
 case " $* " in
   *" stream-json "*)
     printf '%s\n' "$@" > "$STUB_LOG/build-$(date +%s%N).args"
+    # One build stopped by the usage limit, its reset already past (a dated reset is never rolled to tomorrow).
+    if [ -f "$STUB_LOG/../limit-once" ]; then rm -f "$STUB_LOG/../limit-once"
+      printf '{"type":"result","is_error":true,"api_error_status":429,"num_turns":1,"total_cost_usd":0,"duration_ms":1,"result":"You'"'"'ve hit your session limit \u00b7 resets %s (UTC)"}\n' "$(date -u -d '-1 hour' '+%b %-d, %-I%P')"; exit 0; fi
     echo x > bench-out.txt; git add bench-out.txt; git -c user.name=t -c user.email=t@t commit -qm "bench stub"; sha=$(git rev-parse HEAD)
     echo '{"type":"assistant","message":{"id":"m1","content":[],"usage":{"input_tokens":1,"cache_read_input_tokens":99,"cache_creation_input_tokens":0,"output_tokens":4}}}'
     printf '{"type":"result","num_turns":1,"total_cost_usd":0.25,"duration_ms":60000,"usage":{"output_tokens":4,"cache_read_input_tokens":99},"permission_denials":[],"structured_output":{"status":"done","summary":"s","files_changed":["bench-out.txt"],"commits":["%s"],"tests":null,"denied":[],"done_when":[{"item":"one","status":"met","basis":"inferred","evidence":"r"},{"item":"two","status":"met","basis":"inferred","evidence":"r"}],"unknowns":[],"open_questions":[]}}\n' "$sha" ;;
@@ -352,6 +355,11 @@ p=$(cat "$T"/stub-log/build-*.args 2>/dev/null || true); ran=$(awk -F'\t' 'NR>1{
   && [ "$(ls "$WS/runs/$slug2/bench/evidence/"*/test-only.log 2>/dev/null | wc -l)" = 2 ] && echo "bench runs are opaque and cleaned up ok" || bfail "bench opaque names and cleanup" "$ran"
 n0=$(ls "$T/stub-log" | wc -l); out=$(benchrun --trials 1 --arm armalpha=HEAD --arm "armbeta=$A" bx) || true
 [ "$(ls "$T/stub-log" | wc -l)" = "$n0" ] && grep -q '2 of 2 runs already done' <<< "$out" && echo "bench run resumes ok" || bfail "bench resume" "$out"
+touch "$T/limit-once"; out=$(benchrun --trials 2 --arm armalpha=HEAD --arm "armbeta=$A" bx) && x=0 || x=1
+[ "$x" = 0 ] && grep -q 'hit the usage limit; replaying it from the base' <<< "$out" && [ ! -e "$T/limit-once" ] \
+  && [ "$(awk -F'\t' 'NR>1 && $6=="done" && $7=="pass" && $10=="merge" && $17==0.25' "$rt" | wc -l)" = 4 ] \
+  && echo "bench replays a run stopped by the usage limit ok" || bfail "bench usage limit" "$out
+$(cat "$rt" 2>/dev/null)"
 out=$(wsb bench report "$slug" "$slug2" || true)
 grep -q "^== $slug2" <<< "$out" && grep -q "^== $slug " <<< "$out" && grep -q '^== total' <<< "$out" && echo "bench report over several projects ok" || bfail "bench report several" "$out"
 [ "$bf" = 0 ] || exit 1

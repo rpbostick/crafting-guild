@@ -108,6 +108,9 @@ def done_when_from_check(result_txt):
 
 
 def runs_finish(path, run, tests, result_txt, review_json, jsonl, task_md):
+    # A run stopped by the usage limit did nothing; recording it would score an empty branch as a passing run.
+    if os.path.exists(result_txt) and open(result_txt).read().startswith("LIMIT"):
+        sys.exit(f"bench: {run} stopped at the usage limit; not recorded (run the bench again after the reset)")
     met, reported = done_when_from_check(result_txt)
     verdict, blocking = "none", ""
     if os.path.exists(review_json):
