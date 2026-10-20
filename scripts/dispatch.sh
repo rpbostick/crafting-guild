@@ -87,6 +87,7 @@ if [ ${#WORKTREE_ENV[@]} -gt 0 ] || [ -n "$WORKTREE_ENV_FILE" ]; then
   case "$WORKTREE_ENV_FILE" in /*|*..*) refuse "WORKTREE_ENV_FILE '$WORKTREE_ENV_FILE' must be a path inside the worktree" ;; esac
   for line in "${WORKTREE_ENV[@]}"; do
     [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || refuse "WORKTREE_ENV line '$line' is not KEY=value"
+    case "$line" in *$'\n'*) refuse "WORKTREE_ENV line '${line%%$'\n'*}...' has an embedded newline" ;; esac
   done
   # Deliberate: an ignored file only, so the values (machine paths) are never committed from the branch.
   git -C "$wt" check-ignore -q -- "$WORKTREE_ENV_FILE" || refuse "$WORKTREE_ENV_FILE is not git-ignored in $wt; add it to the project's .gitignore before dispatching"

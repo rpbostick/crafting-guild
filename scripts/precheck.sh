@@ -50,7 +50,8 @@ future=$(printf '%s\n' "$added" | grep -oE '\b20[0-9]{2}-[01][0-9]-[0-3][0-9]\b'
 
 # Rule 18: secrets, home paths, the username.
 secrets=$(printf '%s\n' "$added" | grep -nE 'AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{10,}|(api[_-]?key|secret|password|token)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"'][A-Za-z0-9/+_-]{16,}' | cut -c1-120 | head -3)
-homes=$(printf '%s\n' "$added" | grep -F -e "$HOME" -e "/$USER/" | cut -c1-120 | head -3)
+# The same check as the merge's, so review and merge agree on what is a leak.
+homes=$(home_path_leaks "$PROJECT_PATH" "$base" "$tip" | cut -c1-120 | head -3)
 [ -n "$secrets" ] && flag 18 "possible secrets in added lines: $(echo "$secrets" | paste -sd'|')" || ok 18 "no secret patterns in added lines"
 [ -n "$homes" ] && flag 18 "home paths or the username in added lines: $(echo "$homes" | paste -sd'|')"
 

@@ -41,6 +41,17 @@ attribution_exempt() {
   # Generated files (bundles that inline third-party code) whose sources are checked instead.
   for p in "${ATTRIBUTION_EXEMPT[@]}"; do printf ':!%s\n' "$p"; done
 }
+# Pathspecs exempt from the home-path check: ATTRIBUTION_EXEMPT alone, the files that are private by design or
+# generated (a project conf holds its PROJECT_PATH). Licences, manifests and CREDIT_PATHS are still checked.
+private_exempt() {
+  local p; for p in "${ATTRIBUTION_EXEMPT[@]}"; do printf ':!%s\n' "$p"; done
+}
+# The first 5 lines that <tip> adds over <base> in <repo> naming the home directory or the username, outside
+# private_exempt. Only added lines count, so old evidence already on the main branch can't block.
+home_path_leaks() {
+  local exempt; mapfile -t exempt < <(private_exempt)
+  git -C "$1" diff -U0 "$2...$3" -- . "${exempt[@]}" | grep -E '^\+[^+]' | grep -nF -e "$HOME" -e "-of-$USER" -e "/$USER/" | head -5 || true
+}
 # A role's lessons as pasted into its prompt: lessons/<role>.md, then lessons/<role>.local.md when it exists
 # (private, operator-specific lessons that a published copy leaves out).
 lessons_for() {
