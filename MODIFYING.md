@@ -24,6 +24,12 @@ scripts/review.sh       diff on stdin to a read-only reviewer; writes runs/<slug
 scripts/merge.sh        pinned-SHA merge, test gate, push, cleanup.
 scripts/chain.sh        runs a queue of steps (dispatch, wait, review, one automatic fix round, merge, next); stops on
                         anything that needs a person. State in runs/<slug>/chain.{pid,status,log}.
+scripts/web.sh          `ws web`: the web sources a run asked for (`web_requests` in its result; builders have no web
+                        access). `approve` fetches a URL with curl (http(s) only, at most WS_WEB_MAX_MB) into the
+                        worktree's .ws-evidence/given/web/ beside a <file>.source.txt sidecar (URL, time, size, SHA-256);
+                        a search is answered with `--url`; `deny` records a reason; `resume` writes <task>-web-<k>.md
+                        (the files, the denials, the original's Commands) and re-dispatches the same name. The ledger is
+                        runs/<slug>/<name>.web.tsv. check-result.sh prints each request; chain.sh stops on them.
 scripts/precheck.sh     the checklist rules a script can check; review.sh runs it and puts the result in the prompt.
 scripts/doctor.sh       `ws doctor`: required and optional tools, the SessionStart hook, the selected project's conf.
 scripts/rollback.sh     `ws rollback`: restores the published files to a public release (its `public-vX.Y.Z` tag)
@@ -99,6 +105,6 @@ state/current           the last project opened with `ws <slug>`; what a termina
 
 ## Testing a change
 
-`scripts/selftest.sh` checks syntax and exercises, against a throwaway repo: init (including `--dry-run` and `--force`), dispatch (dry run, prompt contents, grants), the resume path, cold-start and its In flight block, the result check's done-when rules, the review prompt, doctor, the chain's merged-step skip, the bench (corpus, `dispatch --base`/`--instructions`, transcript metrics, a replay run with a stand-in `claude` on PATH, the merge-lock wait, the report's quality-drop flag), and release (audit, `RELEASE_PATHS`, private-file refusal). For a real end-to-end check, register a scratch repo and run a small task with `--model haiku --budget 1`; a full dispatch, review and merge costs under twenty cents.
+`scripts/selftest.sh` checks syntax and exercises, against a throwaway repo: init (including `--dry-run` and `--force`), dispatch (dry run, prompt contents, grants), the resume path, cold-start and its In flight block, the result check's done-when rules, the review prompt, doctor, the chain's merged-step skip, `ws web` (requests listed and printed, a fetch from a local `http.server` with its sidecar, scheme and size refusals, deny, resume, the chain's stop on requests), the bench (corpus, `dispatch --base`/`--instructions`, transcript metrics, a replay run with a stand-in `claude` on PATH, the merge-lock wait, the report's quality-drop flag), and release (audit, `RELEASE_PATHS`, private-file refusal). For a real end-to-end check, register a scratch repo and run a small task with `--model haiku --budget 1`; a full dispatch, review and merge costs under twenty cents.
 
 - `scripts/release.sh` (`ws release`): also tags the private commit it published (`released-vX.Y.Z`), creates the GitHub release page (notes from the published CHANGELOG, marked Latest), and with `RELEASE_MAJOR_BRANCHES=1` moves the public branch `v<major>` to the release. with `RELEASE_PATHS` in the project's conf, only those paths (and `source=dest` renames) go public. Publishes main as a release of the project's public repository (remote `public`, local branch `public-release`); audit, plumbing commit of main's tree, tag, clean-clone asset build, GitHub release. Covered by `scripts/selftest.sh`.

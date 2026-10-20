@@ -16,7 +16,8 @@ WS_MODEL="opus"                   # builder model alias ("sonnet", "opus", ...);
 WS_REVIEW_MODEL="fable"         # reviewer model alias; empty = default
 WS_REVIEW_MODEL_LIGHT="opus"    # reviewer for a branch whose task is marked `Track: light`; empty = WS_REVIEW_MODEL
 WS_EFFORT=""                    # builder effort (low|medium|high|xhigh|max); empty = default
-WS_LESSONS_CAP="40"             # cold-start warns when a lessons/ file (shared or .local.md) passes this many lines
+WS_WEB_MAX_MB="${WS_WEB_MAX_MB:-20}"   # ws web refuses a file larger than this many MB (the environment may set it for one call)
+WS_LESSONS_CAP="40"            # cold-start warns when a lessons/ file (shared or .local.md) passes this many lines
 # Words that attribute work to people or to this process. ws merge refuses a branch that adds a line
 # matching them (case-insensitive ERE), and ws dispatch refuses a task file that contains them: repos
 # state reasons, the workspace's plans keep who and when. Exempt: LICENSE*, package manifests, license

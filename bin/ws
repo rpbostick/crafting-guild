@@ -20,6 +20,11 @@ ws merge <name> <sha>           merge a reviewed branch, test, push, clean up
 ws chain <queue-file>           run a queue of steps: dispatch, wait, review (one automatic fix round), merge, next;
                                 stops on a failure, a gate or a judgment call (run it under run_in_background)
 ws chain-wait                   wait on the project's running chain (from any session) and print where it stopped
+ws web <name>                   the web sources a run asked for (builders have no web access) and what was done with each
+ws web <name> approve <n|all> [--url <url>]   fetch each approved URL (curl, http(s) only, at most WS_WEB_MAX_MB) into
+                                the worktree's .ws-evidence/given/web/ with a sidecar; a search is answered with --url
+ws web <name> deny <n> "<reason>"   record why a request is not given (the resume task says so)
+ws web <name> resume [dispatch flags]   write a resume task naming the files, then re-dispatch the same builder name
 ws precheck <name>              the checklist rules a script can check (ws review runs it first)
 ws audit [days]                 what builders keep doing by hand, from the run logs (default 30 days)
 ws bench add <name>...          add merged runs to the project's replay corpus (plans/<slug>/bench/)
@@ -142,6 +147,7 @@ case "$cmd" in
     grep -E "review at|merged \(|STOP|fix round|carried|chain (start|done)" "$RUNS/chain.log" 2>/dev/null | tail -20
     st=$(cat "$RUNS/chain.status" 2>/dev/null || echo "no status"); echo "status: $st"
     case "$st" in done*) exit 0 ;; *gated*) exit 4 ;; *) exit 1 ;; esac ;;
+  web) "$WS/scripts/web.sh" ${proj:+--project "$proj"} "$@" ;;
   precheck) "$WS/scripts/precheck.sh" ${proj:+--project "$proj"} "$@" ;;
   bench) "$WS/scripts/bench.sh" ${proj:+--project "$proj"} "$@" ;;
   audit) load_project "$proj"; python3 "$WS/scripts/audit.py" "$SLUG" "$PROJECT_PATH" "$TEST_CMD" "$RUNS" "$WS/plans/$SLUG" "${1:-30}" ;;

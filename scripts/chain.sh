@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run a queue of plan steps end to end: dispatch, wait, review, merge, next. Stops and says why when a step
-# needs a person or a judgment: a failed or partial run, a review that is not `merge` after the automatic fix
+# needs a person or a judgment: a failed or partial run, a run asking for web sources (ws web), a review that is not `merge` after the automatic fix
 # rounds, a step marked `gate` (shown to the operator before its merge), a failed merge. Run it in the background
 # and act on the stop; running it again resumes where the queue stands (merged steps are skipped).
 # Usage: chain.sh [--project slug] <queue-file>
@@ -80,6 +80,9 @@ for i in "${!steps[@]}"; do
       status running "$name"; continue
     fi
     [ "$rc" -eq 0 ] || stop "$name" "the run's result did not check out (runs/$SLUG/$name.result.txt)"
+    # A builder asking for web sources waits on a decision only the orchestrator makes: what to fetch.
+    nweb=$(grep -c '^web   request' "$RUNS/$name.result.txt" 2>/dev/null || true)
+    [ "${nweb:-0}" -gt 0 ] && stop "$name" "web requests: the builder asked for $nweb source(s); list them with ws web $name, approve or deny each, then ws web $name resume and run the chain again"
     grep -q '^done:' "$RUNS/$name.result.txt" || stop "$name" "the builder did not finish (status $(head -1 "$RUNS/$name.result.txt" | cut -d: -f1)); see its open questions"
     tip=$(git -C "$wt" rev-parse HEAD)
     rv="$RUNS/$name.review.json"

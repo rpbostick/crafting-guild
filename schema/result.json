@@ -113,6 +113,35 @@
       "items": {
         "type": "string"
       }
+    },
+    "web_requests": {
+      "type": "array",
+      "description": "Web sources the task needs that you do not have (no WebFetch or WebSearch granted). Omit when none. With requests, status is partial; the orchestrator fetches what it approves and resumes the task with the files.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The http(s) URL of the raw file (a raw source, not a page that renders it). Empty when you know no URL: give a query."
+          },
+          "query": {
+            "type": "string",
+            "description": "A web search that would find the source, when you know no URL."
+          },
+          "why": {
+            "type": "string",
+            "description": "Why the task needs it."
+          },
+          "needed": {
+            "type": "string",
+            "description": "What is needed from it (a routine, a table, a section)."
+          }
+        },
+        "required": [
+          "why",
+          "needed"
+        ]
+      }
     }
   },
   "required": [
