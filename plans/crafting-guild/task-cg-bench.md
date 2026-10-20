@@ -1,0 +1,25 @@
+# Crafting Guild: `ws bench`, a replay A/B of builder instructions
+
+Track: full
+
+Every change to what builders are told (instructions, lessons, grants, compaction settings) must be shown not to lower the quality of their work before it is adopted. `ws bench` replays past merged tasks from their base commit under two "arms" of builder instructions, several trials each, and compares the outcomes. Read `scripts/dispatch.sh` (how the prompt is assembled from `agents/builder.md`, `lessons/builder*.md`, `checklist.md` and the task), `scripts/review.sh`, `scripts/merge.sh` (the test gate), `scripts/check-result.sh`, `scripts/chain.sh` and `scripts/audit.py` (how it reads run transcripts) first, by section.
+
+## Build
+- **Corpus.** `ws bench add <name> [...]` for a merged run: finds the merge commit `Merge agent/<name>` in the project, records its first parent as the base SHA, and copies the original task file (the first dispatch's, not a fix round's; `runs/<slug>/<name>.task.txt` names it, and the file's content at the time of that dispatch comes from the workspace's git history) to `plans/<slug>/bench/<name>.md`, with a row in `plans/<slug>/bench/corpus.tsv` (name, base SHA, budget, track, original cost/turns/peak context from the run's transcript).
+- **Arms.** An arm is a label plus where its builder instructions come from: a workspace git ref (`--arm current=HEAD`) or a directory overriding `agents/builder.md` and `lessons/builder*.md` (`--arm lean=plans/crafting-guild/arms/lean`). Dispatch gains `--base <sha>` (branch the worktree from that commit) and `--instructions <dir>` (take builder.md and builder lessons from there); both covered by selftest.
+- **Run.** `ws bench run <slug> [--trials N] [--parallel P] --arm A --arm B [task names...]`: for each task x arm x trial, dispatch under an opaque run name (`bench-<8 hex>`; the mapping to task/arm/trial is kept in `runs/<slug>/bench/runs.tsv`, never in the branch or the prompt), with the task's budget and track timeout. Then `ws review` it (blind: the reviewer sees only the opaque name), then run the project's `TEST_CMD` on the branch tip in the worktree without merging (a `--test-only` path in merge.sh or a helper; it must not touch main). Record per run: tests pass/fail, done-when items met/total (from check-result), review verdict and blocking count, turns, peak and mean context, output tokens, cache reads, cost, minutes, denied calls. Then remove the worktree and branch; keep its evidence under `runs/<slug>/bench/evidence/<run>/`. Default `--parallel 1`; wait while `runs/<slug>/merge.lock` is held or a merge is running, so a bench never slows a merge gate. Resumable: rerunning skips finished rows.
+- **Report.** `ws bench report <slug>`: per arm, quality first (tests passed %, done-when met %, merge verdicts %, blocking findings per run), then cost (turns, peak context, tokens, $, minutes), with each task's per-arm values and the spread between trials. Print "quality drop" when an arm's tests-passed, done-when-met or merge-verdict rate is lower than the baseline arm's by more than the trial spread, and say plainly that n is small.
+- `MODIFYING.md` and `bin/ws help` describe it.
+
+## Tests
+`scripts/selftest.sh` (the project's test command) gains, with no real `claude` call (dry-run or a stub on PATH): `bench add` on a scratch repo with a merge commit records the right base SHA and task; `dispatch --base` branches from that SHA and `--instructions` puts the override text in the printed prompt; opaque names carry no arm label into the prompt or branch; metrics parsed from a fixture transcript (turns, peak context, tokens) match hand-counted values; the report flags a constructed quality drop and does not flag equal arms; a held merge lock makes `bench run` wait. Show the new checks failing before the code (log).
+
+## Prior art
+Anthropic, "Demystifying evals for AI agents" and "Writing tools for agents" (fixed tasks, isolated trials, grade outcomes, several trials, track tokens beside accuracy); SWE-bench / SWE-agent's ablation method (same tasks from the same base commit, settings varied); JetBrains "The Complexity Trap" (arXiv 2508.21433) for the same design. `scripts/audit.py` already parses transcripts; reuse its parsing.
+
+## Commands
+`bash scripts/selftest.sh`, `bash -n *`, `shellcheck *`, `python3 *`, `bash *`, `git add`, `git commit`, `git log *`, `git show *`, `git worktree *`, `git rev-parse *`. One command per Bash call.
+
+## Done when
+- The selftest checks above fail before and pass after (logs); `bash scripts/selftest.sh` passes (log).
+- A dry run of `ws bench run skate-mario --trials 2 --arm current=HEAD --arm current2=HEAD sm-slope-3` prints the four runs it would dispatch, with their base SHA and budget, and dispatches nothing (log).
