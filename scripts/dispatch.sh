@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # Run one builder on one task, headless, in its own worktree on branch agent/<name>.
 # Usage: dispatch.sh [--project slug] [--budget USD] [--model M] [--effort E] [--timeout 90m]
-#                    [--allow "Bash(cmd *)"]... [--dry-run] [--print-prompt] [--names-ok] <name> <task-file>
+#                    [--allow "Bash(cmd *)"]... [--dry-run] [--print-prompt] [--names-ok]
+#                    [--base <sha>] [--instructions <dir>] <name> <task-file>
 # --print-prompt is a dry run that also prints the builder's whole prompt.
+# --base branches a fresh worktree from that commit instead of the main branch (a replay, ws bench); the builder
+# then gets no grant to merge the main branch in, which would bring in the work the replay is measured on.
+# --instructions takes the builder sheet from <dir>/agents/builder.md and the lessons from <dir>/lessons/ (builder.md,
+# and builder.local.md when present), each where the directory has it, the workspace's otherwise.
 # The builder gets: the builder sheet, lessons/builder.md (and builder.local.md), the task file, a grant to edit inside its
 # worktree and commit on its branch plus the project's test command and EXTRA_TOOLS, a budget, a timeout,
 # and a JSON result schema. Logs to runs/<slug>/<name>.jsonl; the result check lands in <name>.result.txt.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
-slug="" budget="$WS_DEFAULT_BUDGET" model="$WS_MODEL" effort="$WS_EFFORT" tmo="" dry=false show_prompt=false names_ok=false; extra=()
+slug="" budget="$WS_DEFAULT_BUDGET" model="$WS_MODEL" effort="$WS_EFFORT" tmo="" dry=false show_prompt=false names_ok=false from="" instr=""; extra=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --project) slug="$2"; shift 2 ;;
@@ -20,6 +25,8 @@ while [ $# -gt 0 ]; do
     --dry-run) dry=true; shift ;;
     --print-prompt) dry=true; show_prompt=true; shift ;;
     --names-ok) names_ok=true; shift ;;
+    --base) from="$2"; shift 2 ;;
+    --instructions) instr="$2"; shift 2 ;;
     -*) die "unknown flag $1" ;;
     *) break ;;
   esac
@@ -40,6 +47,19 @@ if [ -z "$tmo" ]; then if grep -qi 'track: *light' "$task"; then tmo="$WS_LIGHT_
 case "$tmo" in *[!0-9]*) ;; *) tmo="${tmo}m" ;; esac
 load_project "$slug"
 [ -z "$(git -C "$PROJECT_PATH" rev-parse --verify "$PROJECT_BRANCH" 2>/dev/null)" ] && die "no branch $PROJECT_BRANCH in $PROJECT_PATH"
+start_point="$PROJECT_BRANCH"
+if [ -n "$from" ]; then start_point=$(git -C "$PROJECT_PATH" rev-parse --verify -q "$from^{commit}") || die "no commit $from in $PROJECT_PATH"; fi
+sheet="$WS/agents/builder.md"
+if [ -n "$instr" ]; then
+  [ -d "$instr" ] || die "no instructions directory $instr"
+  [ -f "$instr/agents/builder.md" ] || [ -d "$instr/lessons" ] || die "$instr has neither agents/builder.md nor lessons/"
+  [ -f "$instr/agents/builder.md" ] && sheet="$instr/agents/builder.md"
+  if [ -d "$instr/lessons" ]; then
+    [ -f "$instr/lessons/builder.md" ] || die "$instr/lessons has no builder.md"
+    # shellcheck disable=SC2034  # read by lessons_for (lib.sh)
+    WS_LESSONS_DIR="$instr/lessons"
+  fi
+fi
 wt="$(worktree_dir "$name")"; br="$(branch_of "$name")"
 if [ -f "$RUNS/$name.pid" ] && kill -0 "$(cat "$RUNS/$name.pid")" 2>/dev/null; then die "a run named $name is still going (pid $(cat "$RUNS/$name.pid"))"; fi
 
@@ -52,7 +72,7 @@ if [ ! -d "$wt" ]; then
   if git -C "$PROJECT_PATH" show-ref --verify --quiet "refs/heads/$br"; then
     git -C "$PROJECT_PATH" worktree add -q "$wt" "$br"
   else
-    git -C "$PROJECT_PATH" worktree add -q -b "$br" "$wt" "$PROJECT_BRANCH"; fresh_br=true
+    git -C "$PROJECT_PATH" worktree add -q -b "$br" "$wt" "$start_point"; fresh_br=true
   fi
   # Share gitignored environments and data with the main checkout instead of rebuilding them.
   for src in "$PROJECT_PATH"/.venv "$PROJECT_PATH"/node_modules "$PROJECT_PATH"/*/.venv "$PROJECT_PATH"/*/node_modules; do
@@ -102,10 +122,11 @@ fi
 # Grant: edit inside the worktree, read anything, commit on this branch, run the project's tests. No push, no config.
 TOOLS=(Read Grep Glob "Edit(./**)"
   "Bash(git status*)" "Bash(git diff*)" "Bash(git log*)" "Bash(git show*)" "Bash(git rev-parse*)" "Bash(git ls-files*)"
-  "Bash(git add *)" "Bash(git commit *)" "Bash(git branch --show-current)" "Bash(git checkout -- *)" "Bash(git merge $PROJECT_BRANCH)" "Bash(git merge $PROJECT_BRANCH --no-edit)"
+  "Bash(git add *)" "Bash(git commit *)" "Bash(git branch --show-current)" "Bash(git checkout -- *)"
   "Bash(git restore *)" "Bash(git clean -f -- *)" "Bash(git ls-tree*)" "Bash(git check-ignore*)" "Bash(stat *)" "Bash(sha256sum *)" "Bash(file *)"
   "Bash(git rm *)" "Bash(git mv *)" "Bash(ls *)" "Bash(cat *)" "Bash(grep *)" "Bash(wc *)" "Bash(head *)" "Bash(tail *)"
   "Bash(mkdir *)" "Bash(cp *)" "Bash(chmod *)" "Bash(expr *)" "Bash(date *)" "Bash(diff *)" "Bash(bash -n *)" "Bash(git grep *)")
+[ -z "$from" ] && TOOLS+=("Bash(git merge $PROJECT_BRANCH)" "Bash(git merge $PROJECT_BRANCH --no-edit)")
 [ -n "$TEST_CMD" ] && TOOLS+=("Bash($TEST_CMD)" "Bash($TEST_CMD *)")
 # Per-project extras from projects/<slug>.conf (EXTRA_TOOLS), then this dispatch's --allow flags.
 [ ${#EXTRA_TOOLS[@]} -gt 0 ] && TOOLS+=("${EXTRA_TOOLS[@]}")
@@ -159,7 +180,7 @@ fi
 prompt="You are a headless builder launched by Crafting Guild. Working directory: $wt (a git worktree of $PROJECT_PATH on branch $br). Do only the task below, then answer with the JSON result.
 
 # Your role
-$(cat "$WS/agents/builder.md")
+$(cat "$sheet")
 
 # Review checklist (the reviewer applies it to your whole branch)
 $(cat "$WS/checklist.md")
@@ -188,7 +209,7 @@ cmd=(claude -p "$prompt" --allowedTools "${TOOLS[@]}" --disallowedTools "${DENY[
 printf '%s\n' "${TOOLS[@]}" | sed -n 's/^Bash(\(.*\))$/\1/p' | grep -v '/bin/ws-run ' > "$RUN_GRANTS"
 if $dry; then
   echo "cwd: $wt"; echo "tools: ${TOOLS[*]}"; echo "deny: ${DENY[*]}"; echo "budget: \$$budget timeout: $tmo model: ${model:-default} memory cap: ${WS_BUILDER_MEM:-none}"
-  echo "prompt bytes: ${#prompt}"; echo "evidence: $wt/.ws-evidence"
+  echo "prompt bytes: ${#prompt}"; echo "evidence: $wt/.ws-evidence"; echo "base: $(git -C "$wt" rev-parse HEAD)"
   if $show_prompt; then echo "--- prompt ---"; printf '%s\n' "$prompt"; fi
   # A dry run leaves nothing behind: a worktree (and branch) it made goes again, so a later dispatch branches from
   # the main branch as it is then. One that existed before (a resume) stays.

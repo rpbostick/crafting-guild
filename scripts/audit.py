@@ -5,7 +5,8 @@ Usage: audit.py <slug> <project_path> <test_cmd> <runs_dir> <plans_dir> [days]
 Prints the findings, most repeated first, and writes <runs_dir>/audit.last (cold-start reminds when it is old).
 Each finding is something a script could do instead: turn the top one into the next tool fix or light task.
 """
-import collections, glob, json, os, re, subprocess, sys, time
+import collections, glob, os, re, subprocess, sys, time
+from transcript import events
 
 slug, path, test_cmd, runs_dir, plans_dir = sys.argv[1:6]
 days = int(sys.argv[6]) if len(sys.argv) > 6 else 30
@@ -24,9 +25,7 @@ cat = collections.Counter(); per_script = collections.defaultdict(set); probes_p
 wrappers = collections.Counter(); wsrun_runs = 0; denied = collections.Counter(); minutes = 0.0
 for f in runs:
     name = os.path.basename(f)[:-6]; probes = 0; used_wsrun = False
-    for line in open(f, errors="replace"):
-        try: e = json.loads(line)
-        except ValueError: continue
+    for e in events(f):
         if e.get("type") == "result":
             minutes += (e.get("duration_ms") or 0) / 60000
             for d in e.get("permission_denials") or []:

@@ -6,7 +6,7 @@ for f in "$WS"/bin/ws "$WS"/scripts/*.sh; do bash -n "$f" && echo "syntax ok  ${
 if command -v shellcheck >/dev/null; then shellcheck -S warning "$WS"/bin/ws "$WS"/scripts/*.sh && echo "shellcheck ok" || { echo "shellcheck FAILED"; exit 1; }; fi
 T=$(mktemp -d); slug=$(basename "$T" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')
 # Cleanup runs on every exit (a failed check, a kill, a crash), so the scratch project never outlives the test.
-trap 'rm -rf "$T" "$WS/plans/$slug" "$WS/runs/$slug"; rm -f "$WS/projects/$slug.conf"' EXIT
+trap 'rm -rf "$T" "$WS/plans/$slug" "$WS/runs/$slug" "$WS/plans/$slug-b" "$WS/runs/$slug-b"; rm -f "$WS/projects/$slug.conf" "$WS/projects/$slug-b.conf"' EXIT
 git -C "$T" init -q -b main; echo hi > "$T/a.txt"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm init
 printf '#!/bin/sh\nexit 0\n' > "$T/t.sh"; chmod +x "$T/t.sh"
 printf 'n\n' | "$WS/bin/ws" init "$T" --tests "sh t.sh" >/dev/null && echo "init ok (non-interactive path)"
@@ -168,7 +168,7 @@ pc_pub=$("$WS/scripts/precheck.sh" --project "$slug" demo 2>&1 || true)
 cp "$T/conf.env.keep" "$cf"
 # chain: suggestions carried into the next task are committed in the workspace repo, that file only (an uncommitted
 # carry once made the next merge of a workspace-as-project refuse a dirty checkout).
-R=$(mktemp -d); mkdir -p "$R/plans/p"; git -C "$R" init -q -b main; printf '# next\n' > "$R/plans/p/next.md"; echo o > "$R/other.txt"
+R="$T/carry-repo"; mkdir -p "$R/plans/p"; git -C "$R" init -q -b main; printf '# next\n' > "$R/plans/p/next.md"; echo o > "$R/other.txt"
 git -C "$R" add -A; git -C "$R" -c user.name=t -c user.email=t@t commit -qm init; echo staged > "$R/other.txt"; git -C "$R" add other.txt
 printf '{"suggestions":[{"file":"a.sh","line":7,"why":"carried marker"}]}\n' > "$T/sugg.json"
 out=$( . "$WS/scripts/lib.sh"; GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t carry_suggestions "$T/sugg.json" prev-step "$R/plans/p/next.md" "$R" 2>&1 ) && x=0 || x=1
@@ -176,9 +176,11 @@ st=$(git -C "$R" status --short -uno -- plans); shown=$(git -C "$R" show HEAD --
 [ "$x" = 0 ] && [ -z "$st" ] && grep -q '^+## Carried from the prev-step review' <<< "$shown" && grep -q 'carried marker' <<< "$shown" \
   && [ "$(git -C "$R" show --name-only --format= HEAD)" = plans/p/next.md ] && [ "$(git -C "$R" diff --cached --name-only)" = other.txt ] \
   && echo "chain commits carried suggestions ok" || { echo "chain carry commit FAILED: exit $x status [$st]"; echo "$out"; echo "$shown"; exit 1; }
-printf '#!/bin/sh\nexit 1\n' > "$R/.git/hooks/pre-commit"; chmod +x "$R/.git/hooks/pre-commit"
-( . "$WS/scripts/lib.sh"; carry_suggestions "$T/sugg.json" again "$R/plans/p/next.md" "$R" >/dev/null 2>&1 ) && x=0 || x=1
-[ "$x" = 1 ] && echo "chain carry reports a failed commit ok" || { echo "chain carry failed-commit FAILED: returned 0"; exit 1; }; rm -rf "$R"
+# The same identity as above, so only the hook can stop the commit; HEAD stays and the hook's words come back.
+printf '#!/bin/sh\necho hook-said-no >&2\nexit 1\n' > "$R/.git/hooks/pre-commit"; chmod +x "$R/.git/hooks/pre-commit"; h0=$(git -C "$R" rev-parse HEAD)
+out=$( . "$WS/scripts/lib.sh"; GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t carry_suggestions "$T/sugg.json" again "$R/plans/p/next.md" "$R" 2>&1 ) && x=0 || x=1
+[ "$x" = 1 ] && grep -q 'hook-said-no' <<< "$out" && [ "$(git -C "$R" rev-parse HEAD)" = "$h0" ] && [ -n "$(git -C "$R" status --short -- plans/p/next.md)" ] \
+  && echo "chain carry reports a failed commit ok" || { echo "chain carry failed-commit FAILED: exit $x"; echo "$out"; exit 1; }
 # chain: a merged step is skipped on a long history (grep -q under pipefail once re-dispatched one).
 python3 - "$T" <<'PY'
 import subprocess, sys, time
@@ -204,6 +206,104 @@ grep -q 'stopped .*setup: ws doctor' "$WS/runs/$slug/chain.status" && echo "chai
 printf '%s\n' '{"type":"result","is_error":true,"api_error_status":429,"result":"You'"'"'ve hit your session limit \u00b7 resets 3:50pm (America/Denver)"}' > "$WS/runs/$slug/demo.jsonl"
 cr=$("$WS/scripts/check-result.sh" --project "$slug" demo 2>&1 || true)
 grep -q '^LIMIT' <<< "$cr" && grep -qE '^reset_epoch=[0-9]+$' <<< "$cr" && echo "usage-limit result ok" || { echo "usage-limit result FAILED:"; echo "$cr"; exit 1; }
+# bench: replays of a merged task under two arms of builder instructions. A second scratch project holds the replays;
+# a merge lock held in the first makes the run wait. Every check here runs and the section fails at its end, so a
+# missing piece shows each check it breaks.
+bf=0; bfail() { echo "$1 FAILED:"; printf '%s\n' "${2:-}" | sed -n 1,25p; bf=1; }
+# Every ws call below runs with a stand-in claude first on PATH, so no check can start a real session.
+mkdir -p "$T/stub" "$T/stub-log"; cat > "$T/stub/claude" <<'STUB'
+#!/bin/bash
+case " $* " in
+  *" stream-json "*)
+    printf '%s\n' "$@" > "$STUB_LOG/build-$(date +%s%N).args"
+    echo x > bench-out.txt; git add bench-out.txt; git -c user.name=t -c user.email=t@t commit -qm "bench stub"; sha=$(git rev-parse HEAD)
+    echo '{"type":"assistant","message":{"id":"m1","content":[],"usage":{"input_tokens":1,"cache_read_input_tokens":99,"cache_creation_input_tokens":0,"output_tokens":4}}}'
+    printf '{"type":"result","num_turns":1,"total_cost_usd":0.25,"duration_ms":60000,"usage":{"output_tokens":4,"cache_read_input_tokens":99},"permission_denials":[],"structured_output":{"status":"done","summary":"s","files_changed":["bench-out.txt"],"commits":["%s"],"tests":null,"denied":[],"done_when":[{"item":"one","status":"met","basis":"inferred","evidence":"r"},{"item":"two","status":"met","basis":"inferred","evidence":"r"}],"unknowns":[],"open_questions":[]}}\n' "$sha" ;;
+  *) printf '%s\n' "$@" > "$STUB_LOG/other-$(date +%s%N).args"; cat >/dev/null; echo '{"total_cost_usd":0,"structured_output":{"verdict":"merge","summary":"stand-in","blocking":[],"suggestions":[]}}' ;;
+esac
+STUB
+chmod +x "$T/stub/claude"
+wsb() { PATH="$T/stub:$PATH" STUB_LOG="$T/stub-log" WS_BENCH_POLL=1 WS_TASK_HISTORY="${H:-}" timeout 300 "$WS/bin/ws" "$@" 2>&1; }
+# ws: a word that is neither a command nor a project fails; it once opened a session on the pinned project.
+out=$(WS_PROJECT="$slug" wsb no-such-word) && x=0 || x=1
+[ "$x" = 1 ] && grep -q "unknown project 'no-such-word'" <<< "$out" && [ -z "$(ls "$T/stub-log")" ] && echo "unknown word starts no session ok" || bfail "unknown word" "$out"
+slug2="$slug-b"; B="$T/$slug2"; mkdir -p "$B"; git -C "$B" init -q -b main; printf '#!/bin/sh\nexit 0\n' > "$B/t.sh"; echo a > "$B/a.txt"
+git -C "$B" add -A; git -C "$B" -c user.name=t -c user.email=t@t commit -qm init; printf 'n\n' | "$WS/bin/ws" init "$B" --tests "sh t.sh" >/dev/null
+base2=$(git -C "$B" rev-parse HEAD); git -C "$B" checkout -q -b agent/bx; echo b > "$B/b.txt"; git -C "$B" add b.txt; git -C "$B" -c user.name=t -c user.email=t@t commit -qm b
+git -C "$B" checkout -q main; git -C "$B" -c user.name=t -c user.email=t@t merge -q --no-ff agent/bx -m "Merge agent/bx: a step (reviewed at abc)"
+echo c > "$B/c.txt"; git -C "$B" add c.txt; git -C "$B" -c user.name=t -c user.email=t@t commit -qm later
+# The task as dispatched is version one: version two was committed after the first dispatch started.
+H="$T/hist"; mkdir -p "$H/plans/$slug2"; git -C "$H" init -q -b main; now=$(date +%s)
+printf '# bx task\n\nversion one\n\n## Done when\n- one\n- two\n' > "$H/plans/$slug2/task-bx.md"; git -C "$H" add -A
+GIT_COMMITTER_DATE="$((now-7200)) +0000" GIT_AUTHOR_DATE="$((now-7200)) +0000" git -C "$H" -c user.name=t -c user.email=t@t commit -qm v1
+printf '# bx task\n\nversion two\n' > "$H/plans/$slug2/task-bx.md"
+GIT_COMMITTER_DATE="$((now-3600)) +0000" GIT_AUTHOR_DATE="$((now-3600)) +0000" git -C "$H" -c user.name=t -c user.email=t@t commit -qam v2
+# The first dispatch's record was moved aside by a fix round (<name>.<stamp>.task.txt); its transcript is hand-counted:
+# message contexts 1000 (m1, logged twice), 3000 and 2000, so peak 3000 and mean 2000.
+RB="$WS/runs/$slug2"; mkdir -p "$RB"
+printf 'task=%s\nstarted=%s\nbudget=7\ntimeout=120m\n' "$H/plans/$slug2/task-bx.md" "$(date -d "@$((now-5400))" '+%Y-%m-%d %H:%M %Z')" > "$RB/bx.20260101T000000Z.task.txt"
+printf 'task=%s\nstarted=%s\nbudget=3\ntimeout=120m\n' "$H/plans/$slug2/task-bx-fix-auto-1.md" "$(date '+%Y-%m-%d %H:%M %Z')" > "$RB/bx.task.txt"
+cat > "$RB/bx.20260101T000000Z.jsonl" <<'JSONL'
+{"type":"system","subtype":"init"}
+{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"a"}],"usage":{"input_tokens":10,"cache_read_input_tokens":900,"cache_creation_input_tokens":90,"output_tokens":5}}}
+{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}],"usage":{"input_tokens":10,"cache_read_input_tokens":900,"cache_creation_input_tokens":90,"output_tokens":40}}}
+{"type":"user","message":{"content":[{"type":"tool_result","content":"a.txt"}]}}
+{"type":"assistant","message":{"id":"m2","content":[{"type":"text","text":"b"}],"usage":{"input_tokens":5,"cache_read_input_tokens":2900,"cache_creation_input_tokens":95,"output_tokens":7}}}
+{"type":"assistant","message":{"id":"m3","content":[{"type":"text","text":"c"}],"usage":{"input_tokens":1,"cache_read_input_tokens":1999,"cache_creation_input_tokens":0,"output_tokens":3}}}
+{"type":"result","num_turns":3,"total_cost_usd":0.5,"duration_ms":150000,"usage":{"output_tokens":55,"cache_read_input_tokens":5799},"permission_denials":[{"tool_name":"Bash","tool_input":{"command":"rm x"}}]}
+JSONL
+printf '# a cut-off line follows\n{"type":"assist\n' >> "$RB/bx.20260101T000000Z.jsonl"
+printf 'bx plans/elsewhere.md gate --allow "Bash(make *)"\n' > "$WS/plans/$slug2/steps.queue"
+out=$(wsb --project "$slug2" bench add bx) && x=0 || x=1
+row=$(awk -F'\t' '$1=="bx"' "$WS/plans/$slug2/bench/corpus.tsv" 2>/dev/null || true)
+[ "$x" = 0 ] && [ "$(cut -f2 <<< "$row")" = "$base2" ] && [ "$(cut -f3-7 <<< "$row")" = "$(printf '7\tfull\t0.5\t3\t3000')" ] && [ "$(cut -f8 <<< "$row")" = '--allow Bash\(make\ \*\)' ] \
+  && [ "$(cat "$WS/plans/$slug2/bench/bx.md" 2>/dev/null)" = "$(git -C "$H" show "HEAD~1:plans/$slug2/task-bx.md")" ] && echo "bench add ok" || bfail "bench add" "$out
+row: $row"
+m=$(python3 "$WS/scripts/bench.py" metrics "$RB/bx.20260101T000000Z.jsonl" 2>&1 || true)
+[ "$m" = "turns=3 peak_context=3000 mean_context=2000 output_tokens=55 cache_reads=5799 cost=0.5 minutes=2.5 denied=1" ] && echo "bench metrics ok" || bfail "bench metrics" "$m"
+# dispatch --base branches from that commit and drops the merge-main grant; --instructions replaces the sheet and lessons.
+A="$T/arm-beta"; mkdir -p "$A/agents" "$A/lessons"; printf '# beta sheet marker\n' > "$A/agents/builder.md"; printf -- '- beta lesson marker\n' > "$A/lessons/builder.md"
+printf '# t\nDo it.\n' > "$T/bt.md"
+out=$("$WS/scripts/dispatch.sh" --project "$slug2" --print-prompt --base "$base2" --instructions "$A" dbase "$T/bt.md" 2>&1 || true)
+grep -qx "base: $base2" <<< "$out" && grep -q 'beta sheet marker' <<< "$out" && grep -q 'beta lesson marker' <<< "$out" && ! grep -q '^## How you work' <<< "$out" \
+  && ! grep -qF 'Bash(git merge main)' <<< "$(grep '^tools:' <<< "$out")" && [ ! -e "$B/.worktrees/dbase" ] && echo "dispatch --base and --instructions ok" || bfail "dispatch --base/--instructions" "$out"
+# report: a constructed drop (lean fails what base passes, the same in both trials) is flagged; equal arms are not.
+RA="$WS/runs/$slug/bench"; mkdir -p "$RA"
+fx() { printf 'run\ttask\tarm\ttrial\tbase\tstate\ttests\tdw_met\tdw_total\tverdict\tblocking\tturns\tpeak_context\tmean_context\toutput_tokens\tcache_reads\tcost\tminutes\tdenied\n'
+  for t in t1 t2; do for tr in 1 2; do printf 'r%s%s\t%s\tbase\t%s\tb\tdone\tpass\t2\t2\tmerge\t0\t10\t1000\t500\t10\t100\t1.0\t5\t0\n' "$t" "$tr" "$t" "$tr"; printf 'l%s%s\t%s\tlean\t%s\tb\tdone\t%s\n' "$t" "$tr" "$t" "$tr" "$1"; done; done; }
+fx "$(printf 'fail\t1\t2\tfix-first\t2\t8\t900\t400\t9\t90\t0.8\t4\t0')" > "$RA/runs.tsv"
+out=$(wsb bench report "$slug" || true)
+grep -q 'quality drop: lean' <<< "$out" && grep -q 'n is small' <<< "$out" && echo "bench report flags a quality drop ok" || bfail "bench report drop" "$out"
+fx "$(printf 'pass\t2\t2\tmerge\t0\t8\t900\t400\t9\t90\t0.8\t4\t0')" > "$RA/runs.tsv"
+out=$(wsb bench report "$slug" || true)
+! grep -qi 'quality drop' <<< "$out" && grep -q 'lean' <<< "$out" && echo "bench report equal arms ok" || bfail "bench report equal arms" "$out"
+# run: the stand-in claude builds (one commit, done-when met) and reviews (merge); a held merge lock in the first
+# project makes the run wait; prompts carry no arm label; worktrees and branches go, evidence stays.
+benchrun() { wsb bench run "$slug2" "$@"; }
+out=$(benchrun --trials 1 --arm armalpha=HEAD --arm "armbeta=$A" bx --dry-run) || true
+[ "$(grep -c "^would dispatch bench-[0-9a-f]\{8\} .*base $base2 budget \$7" <<< "$out")" = 2 ] && [ -z "$(ls "$T/stub-log")" ] && [ ! -e "$WS/runs/$slug2/bench/runs.tsv" ] \
+  && echo "bench run --dry-run dispatches nothing ok" || bfail "bench run --dry-run" "$out"
+( flock 9; touch "$T/locked"; sleep 4 ) 9>"$WS/runs/$slug/merge.lock" & lk=$!
+for _ in $(seq 100); do [ -f "$T/locked" ] && break; sleep 0.1; done
+out=$(benchrun --trials 1 --arm armalpha=HEAD --arm "armbeta=$A" bx) && x=0 || x=1; wait "$lk" || true
+grep -q "waiting for a merge to finish (runs/$slug/merge.lock" <<< "$out" && echo "bench waits on another project's merge ok" || bfail "bench merge wait" "$out"
+rt="$WS/runs/$slug2/bench/runs.tsv"
+[ "$x" = 0 ] && [ "$(awk -F'\t' 'NR>1 && $6=="done" && $7=="pass" && $8==2 && $9==2 && $10=="merge" && $11==0 && $12==1 && $13==100 && $17==0.25' "$rt" 2>/dev/null | wc -l)" = 2 ] \
+  && echo "bench run records both arms ok" || bfail "bench run records" "$out
+$(cat "$rt" 2>/dev/null)"
+p=$(cat "$T"/stub-log/build-*.args 2>/dev/null || true); ran=$(awk -F'\t' 'NR>1{print "agent/"$1}' "$rt" 2>/dev/null | sort | paste -sd' ' || true)
+[ -n "$ran" ] && [ "$(grep -oE 'agent/bench-[0-9a-f]{8}' <<< "$p" | sort -u | paste -sd' ')" = "$ran" ] && ! grep -qE 'armalpha|armbeta|arm-beta' <<< "$p" \
+  && grep -q 'beta sheet marker' <<< "$p" && grep -q '^## How you work' <<< "$p" && grep -qxF 'Bash(make *)' <<< "$p" \
+  && [ -z "$(git -C "$B" branch --list 'agent/bench-*')" ] && ! ls -d "$B"/.worktrees/bench-* >/dev/null 2>&1 \
+  && [ "$(ls "$WS/runs/$slug2/bench/evidence/"*/test-only.log 2>/dev/null | wc -l)" = 2 ] && echo "bench runs are opaque and cleaned up ok" || bfail "bench opaque names and cleanup" "$ran"
+n0=$(ls "$T/stub-log" | wc -l); out=$(benchrun --trials 1 --arm armalpha=HEAD --arm "armbeta=$A" bx) || true
+[ "$(ls "$T/stub-log" | wc -l)" = "$n0" ] && grep -q '2 of 2 runs already done' <<< "$out" && echo "bench run resumes ok" || bfail "bench resume" "$out"
+out=$(wsb bench report "$slug" "$slug2" || true)
+grep -q "^== $slug2" <<< "$out" && grep -q "^== $slug " <<< "$out" && grep -q '^== total' <<< "$out" && echo "bench report over several projects ok" || bfail "bench report several" "$out"
+[ "$bf" = 0 ] || exit 1
+# What the checks above made inside $T stays out of its commits below: a nested repo is added as a gitlink that stays
+# dirty, and the stand-in's saved prompts hold home paths the release audit refuses.
+printf '%s/\n' carry-repo hist "$slug2" stub stub-log arm-beta >> "$T/.git/info/exclude"
 # release: a first release, a refused existing version, a caught home path, a second release on top, a refused
 # dirty checkout; the public main always has exactly the project's main tree.
 git -C "$T" worktree remove --force "$T/.worktrees/demo"

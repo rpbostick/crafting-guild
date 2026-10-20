@@ -22,6 +22,11 @@ ws chain <queue-file>           run a queue of steps: dispatch, wait, review (on
 ws chain-wait                   wait on the project's running chain (from any session) and print where it stopped
 ws precheck <name>              the checklist rules a script can check (ws review runs it first)
 ws audit [days]                 what builders keep doing by hand, from the run logs (default 30 days)
+ws bench add <name>...          add merged runs to the project's replay corpus (plans/<slug>/bench/)
+ws bench run <slug> --arm L=<git-ref|dir> --arm L2=... [--trials N] [--parallel P] [--dry-run] [tasks...]
+                                replay corpus tasks from their base commit under each arm of builder instructions,
+                                blind-review and test each run, record it (runs/<slug>/bench/runs.tsv); resumable
+ws bench report [--baseline L] <slug>...   quality first, then cost, per arm and task; flags a quality drop
 ws stop <name>                  stop a running builder
 ws serve <name|main> [port]     start the project's preview server from a worktree (or the main checkout)
 ws serve stop [name|main]       stop it;  ws serve list
@@ -138,6 +143,7 @@ case "$cmd" in
     st=$(cat "$RUNS/chain.status" 2>/dev/null || echo "no status"); echo "status: $st"
     case "$st" in done*) exit 0 ;; *gated*) exit 4 ;; *) exit 1 ;; esac ;;
   precheck) "$WS/scripts/precheck.sh" ${proj:+--project "$proj"} "$@" ;;
+  bench) "$WS/scripts/bench.sh" ${proj:+--project "$proj"} "$@" ;;
   audit) load_project "$proj"; python3 "$WS/scripts/audit.py" "$SLUG" "$PROJECT_PATH" "$TEST_CMD" "$RUNS" "$WS/plans/$SLUG" "${1:-30}" ;;
   wait)
     name="${1:?ws wait <name> [minutes]}"; mins="${2:-150}"; load_project "$proj"
@@ -202,7 +208,8 @@ case "$cmd" in
     name="${1:?ws stop <name>}"; load_project "$proj"; pf="$RUNS/$name.pid"; [ -f "$pf" ] || die "no running $name"
     pkill -TERM -P "$(cat "$pf")" 2>/dev/null; sleep 2; pkill -KILL -P "$(cat "$pf")" 2>/dev/null; echo "stopped $name; its worktree is untouched" ;;
   *)
-    slug="$(resolve_slug "$cmd")"; load_project "$slug"
+    # die inside $(...) ends only the subshell: without the exit, an unknown word opened a session on the pinned project.
+    slug="$(resolve_slug "$cmd")" || exit 1; load_project "$slug"
     echo "$slug" > "$WS/state/current"
     cd "$WS" && WS_PROJECT="$slug" exec claude --add-dir "$PROJECT_PATH" --name "ws $slug" "$@" ;;
 esac
