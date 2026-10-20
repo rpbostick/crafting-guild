@@ -166,6 +166,19 @@ pc_pub=$("$WS/scripts/precheck.sh" --project "$slug" demo 2>&1 || true)
 [ -z "$priv" ] && grep -qF "$HOME/x" <<< "$pub" && ! grep -q 'home paths' <<< "$pc_priv" && grep -q 'FLAG  rule 18: home paths' <<< "$pc_pub" \
   && echo "home-path check skips private files ok" || { echo "home-path check FAILED: private=[$priv] public=[$pub]"; grep 'rule 18' <<< "$pc_priv$pc_pub"; exit 1; }
 cp "$T/conf.env.keep" "$cf"
+# chain: suggestions carried into the next task are committed in the workspace repo, that file only (an uncommitted
+# carry once made the next merge of a workspace-as-project refuse a dirty checkout).
+R=$(mktemp -d); mkdir -p "$R/plans/p"; git -C "$R" init -q -b main; printf '# next\n' > "$R/plans/p/next.md"; echo o > "$R/other.txt"
+git -C "$R" add -A; git -C "$R" -c user.name=t -c user.email=t@t commit -qm init; echo staged > "$R/other.txt"; git -C "$R" add other.txt
+printf '{"suggestions":[{"file":"a.sh","line":7,"why":"carried marker"}]}\n' > "$T/sugg.json"
+out=$( . "$WS/scripts/lib.sh"; GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t carry_suggestions "$T/sugg.json" prev-step "$R/plans/p/next.md" "$R" 2>&1 ) && x=0 || x=1
+st=$(git -C "$R" status --short -uno -- plans); shown=$(git -C "$R" show HEAD -- plans/p/next.md 2>&1)
+[ "$x" = 0 ] && [ -z "$st" ] && grep -q '^+## Carried from the prev-step review' <<< "$shown" && grep -q 'carried marker' <<< "$shown" \
+  && [ "$(git -C "$R" show --name-only --format= HEAD)" = plans/p/next.md ] && [ "$(git -C "$R" diff --cached --name-only)" = other.txt ] \
+  && echo "chain commits carried suggestions ok" || { echo "chain carry commit FAILED: exit $x status [$st]"; echo "$out"; echo "$shown"; exit 1; }
+printf '#!/bin/sh\nexit 1\n' > "$R/.git/hooks/pre-commit"; chmod +x "$R/.git/hooks/pre-commit"
+( . "$WS/scripts/lib.sh"; carry_suggestions "$T/sugg.json" again "$R/plans/p/next.md" "$R" >/dev/null 2>&1 ) && x=0 || x=1
+[ "$x" = 1 ] && echo "chain carry reports a failed commit ok" || { echo "chain carry failed-commit FAILED: returned 0"; exit 1; }; rm -rf "$R"
 # chain: a merged step is skipped on a long history (grep -q under pipefail once re-dispatched one).
 python3 - "$T" <<'PY'
 import subprocess, sys, time

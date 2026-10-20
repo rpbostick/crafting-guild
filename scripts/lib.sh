@@ -89,6 +89,22 @@ write_fix_task() { # <task> <review.json> <round> <reviewed-sha> <out>
     echo; echo "## The original task (for context)"; sed 's/^#/##/' "$task"
   } > "$out"
 }
+# Append a merged step's review suggestions to the next step's task and commit that file alone in <repo> (the
+# workspace), so plans stay committed: when the project is the workspace, an uncommitted carry makes the next merge
+# refuse a dirty checkout. Prints the carried lines; nothing to carry (none, or all filtered by WS_ATTRIBUTION_RE)
+# prints nothing and leaves the file alone. A failed commit (a hook, another commit in progress) returns 1.
+carry_suggestions() { # <review.json> <from-name> <next-task> <repo>
+  local rv="$1" name="$2" nt="$3" repo="$4" carry abs
+  carry=$(jq -r '.suggestions[] | "- `\(.file):\(.line)`: \(.why)"' "$rv")
+  [ -n "${WS_ATTRIBUTION_RE:-}" ] && carry=$(printf '%s\n' "$carry" | grep -viE "$WS_ATTRIBUTION_RE" || true)
+  [ -n "$carry" ] || return 0
+  printf '\n## Carried from the %s review (suggestions; do them where the code is yours to touch)\n%s\n' "$name" "$carry" >> "$nt"
+  abs=$(realpath "$nt")
+  # add first: a task file never committed is unknown to `git commit -- <path>`. The pathspec commit leaves
+  # anything else staged in the workspace out of it.
+  git -C "$repo" add -- "$abs" && git -C "$repo" commit -q -m "chain: suggestions from the $name review carried into $(basename "$nt")" -- "$abs" || return 1
+  printf '%s\n' "$carry"
+}
 # Git-ignored files a builder made in its worktree (a generated recording, a download) vanish with the
 # worktree at merge. Copy the small ones to <dest>, keeping their paths, and print what was kept and what was
 # too big; dependency, build and cache folders, .ws-evidence and links (.worktree-links) are skipped.
