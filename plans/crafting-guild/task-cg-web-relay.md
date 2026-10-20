@@ -21,3 +21,10 @@ Claude Code's own permission model (deny by default, a human approves); curl's `
 
 ## Done when
 - The new selftest checks fail before and pass after (logs); `bash scripts/selftest.sh` passes (log).
+
+## Carried from the cg-bench review (suggestions; do them where the code is yours to touch)
+- `scripts/bench.sh:142`: Rule 1: when merge.sh --test-only refuses a misconfigured project (npm ci with a linked node_modules, or no TEST_CMD), the run is recorded as tests=fail, the same as a real test failure. The bench then spends money on every run, and every arm shows 0% tests passed. Run the same refusal check once in bench_run before dispatching (and in --dry-run), so a config error stops the bench instead of being recorded as quality data.
+- `scripts/bench.sh:166`: A git-ref arm copies only the builder*.md files tracked at that commit, so a gitignored lessons/builder.local.md never reaches a `current=HEAD` arm. A directory arm, by contrast, carries whatever its directory holds. If the live workspace uses builder.local.md, the baseline arm isn't what builders get today. Say so in the usage text or MODIFYING.md, or copy the workspace's local file into ref arms.
+- `scripts/bench.sh:141`: review.sh's exit status is ignored. A review that crashes or hits a limit is recorded as verdict 'none' and counted as a non-merge in 'merge verdicts', which can produce a spurious quality drop. Record a review failure separately (state, or a 'review-failed' verdict that the report leaves out).
+- `projects/skate-mario.conf:4`: Rule 18 (existing before this branch, not added here): PROJECT_PATH and TEST_CMD in this tracked conf already hold /home/patrickb paths. The new BENCH_TEST_CMD line rightly doesn't repeat them. Consider making project confs untracked, or reading these paths from the environment, in a separate change.
+- `scripts/chain.sh:123`: This change to the chain's stop message (and the selftest's carry-repo hook test) is outside the bench task's scope. It looks correct, but it belongs in its own commit or a note in the task log.
