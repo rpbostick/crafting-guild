@@ -16,6 +16,9 @@ PREVIEW_CMD="npx serve -l {port} dist"
 # ATTRIBUTION_EXEMPT=("dist/*")
 # Flags for ws merge's `npm ci` (default --ignore-scripts); empty for git dependencies that build in `prepare`.
 # MERGE_NPM_FLAGS=""
+# ws bench: the tests run on a replay's tip in its worktree (default TEST_CMD). A worktree's node_modules links to
+# the main checkout's, so a TEST_CMD that runs npm ci or install sets this to its tests alone.
+# BENCH_TEST_CMD="npm test"
 # ws release: only these paths go public; `source=dest` publishes a file under another name.
 # RELEASE_PATHS=("src" "package.json" "README.md" "LICENSE" "CHANGELOG.public.md=CHANGELOG.md")
 # ws site, in the project that publishes: the site project and what goes where (see scripts/site.sh).
