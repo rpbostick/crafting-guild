@@ -27,7 +27,7 @@ resolve_slug() {
 # shellcheck disable=SC2034  # the conf's variables are read by the scripts that call load_project
 load_project() {
   SLUG="$(resolve_slug "${1:-}")"
-  PROJECT_PATH="" PROJECT_BRANCH="master" TEST_CMD="" PREVIEW_CMD=""; EXTRA_TOOLS=(); CREDIT_PATHS=(); ATTRIBUTION_EXEMPT=(); RELEASE_PATHS=(); RELEASE_MAJOR_BRANCHES=""; SITE_SYNC=(); SITE_PROJECT="" SITE_URL="" SITE_ROOT=""; unset MERGE_NPM_FLAGS
+  PROJECT_PATH="" PROJECT_BRANCH="master" TEST_CMD="" PREVIEW_CMD=""; EXTRA_TOOLS=(); CREDIT_PATHS=(); ATTRIBUTION_EXEMPT=(); RELEASE_PATHS=(); RELEASE_MAJOR_BRANCHES=""; SITE_SYNC=(); SITE_PROJECT="" SITE_URL="" SITE_ROOT=""; WORKTREE_ENV_FILE=""; WORKTREE_ENV=(); unset MERGE_NPM_FLAGS
   # shellcheck disable=SC1090
   . "$WS/projects/$SLUG.conf"
   [ -d "$PROJECT_PATH/.git" ] || [ -f "$PROJECT_PATH/.git" ] || die "project path $PROJECT_PATH is not a git repo"
@@ -40,6 +40,17 @@ attribution_exempt() {
   local p; for p in "${CREDIT_PATHS[@]}"; do printf ':!%s\n' "$p"; done
   # Generated files (bundles that inline third-party code) whose sources are checked instead.
   for p in "${ATTRIBUTION_EXEMPT[@]}"; do printf ':!%s\n' "$p"; done
+}
+# Pathspecs exempt from the home-path check: ATTRIBUTION_EXEMPT alone, the files that are private by design or
+# generated (a project conf holds its PROJECT_PATH). Licences, manifests and CREDIT_PATHS are still checked.
+private_exempt() {
+  local p; for p in "${ATTRIBUTION_EXEMPT[@]}"; do printf ':!%s\n' "$p"; done
+}
+# The first 5 lines that <tip> adds over <base> in <repo> naming the home directory or the username, outside
+# private_exempt. Only added lines count, so old evidence already on the main branch can't block.
+home_path_leaks() {
+  local exempt; mapfile -t exempt < <(private_exempt)
+  git -C "$1" diff -U0 "$2...$3" -- . "${exempt[@]}" | grep -E '^\+[^+]' | grep -nF -e "$HOME" -e "-of-$USER" -e "/$USER/" | head -5 || true
 }
 # A role's lessons as pasted into its prompt: lessons/<role>.md, then lessons/<role>.local.md when it exists
 # (private, operator-specific lessons that a published copy leaves out).

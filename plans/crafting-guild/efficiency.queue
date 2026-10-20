@@ -1,5 +1,5 @@
 # Quality-safe efficiency (plans/crafting-guild/efficiency.md). Tooling: merges on test evidence, no gates. Sequential: they share dispatch.sh, selftest.sh and MODIFYING.md.
-cg-grants-env plans/crafting-guild/task-cg-grants-env.md --budget 8
+cg-grants-env plans/crafting-guild/task-cg-grants-env-fix-1.md --budget 8
 cg-lessons-dedupe plans/crafting-guild/task-cg-lessons-dedupe.md --budget 6
 cg-bench plans/crafting-guild/task-cg-bench.md --budget 30 --timeout 180
 cg-web-relay plans/crafting-guild/task-cg-web-relay.md --budget 20
