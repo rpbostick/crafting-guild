@@ -105,6 +105,7 @@ timeout_for() { # <task> -> minutes: the corpus flags' --timeout, else the track
 # WS_BENCH_HOURS="22-07": inside those hours (WS_TZ, else local time) replays run back to back; outside them, during
 # regular development work, the bench waits as long as the last replay took before starting the next, so it runs about
 # half as many and leaves the rest of the usage limit to that work. Empty = back to back at any hour.
+# WS_BENCH_OUTSIDE=wait: outside the hours no replay starts at all; the bench waits for the window (night only).
 in_bench_hours() { # <hour> -> 0 inside the window
   local h=$((10#$1)) from to
   [ -n "${WS_BENCH_HOURS:-}" ] || return 0
@@ -115,7 +116,10 @@ bench_hour() { TZ="${WS_TZ:-}" date +%H; }
 bench_last_start=""
 wait_for_hours() {
   local now wake; now=$(date +%s)
-  if [ -n "$bench_last_start" ] && ! in_bench_hours "$(bench_hour)"; then
+  if [ "${WS_BENCH_OUTSIDE:-half}" = wait ] && ! in_bench_hours "$(bench_hour)"; then
+    echo "bench: outside the bench hours ($WS_BENCH_HOURS): waiting for them"
+    until in_bench_hours "$(bench_hour)"; do sleep "${WS_BENCH_POLL:-60}"; done
+  elif [ -n "$bench_last_start" ] && ! in_bench_hours "$(bench_hour)"; then
     wake=$((now + now - bench_last_start))
     echo "bench: outside the bench hours ($WS_BENCH_HOURS): half pace, next replay at $(date -d "@$wake" '+%H:%M')"
     while [ "$(date +%s)" -lt "$wake" ] && ! in_bench_hours "$(bench_hour)"; do sleep "${WS_BENCH_POLL:-60}"; done

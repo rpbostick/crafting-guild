@@ -2,6 +2,8 @@
 
 **In flight right now**
 
+**HEAT (2026-10-21 16:32 MDT, Patrick):** on a mild, dry, sunny day in Denver (air 16-25 °C, 19-52% RH, wind 1-15 km/h) the app showed a heat caution and "high" by midday. Cause: the strictest ACSM thresholds (caution 18.4 °C WBGT, high 22.3) for every effort, judged on the high end of the estimate while the sun is estimated, and near-calm wind with high-altitude sun. Offered effort-based thresholds on the best estimate; Patrick: "just leave it. let's have a few heat indexes, and we'll give links for people to read about them." So the WBGT rule stays; next to it the app shows a few heat indexes, each with a link to read about it. Needs a short prior-art pass (which indexes: NWS heat index, Humidex, apparent temperature, UTCI; their formulas, licences and reading pages) and a task; not dispatched.
+
 **PLANNED (2026-10-09 16:26 MDT, Patrick):** avatar prior art: research spikes on CozyBuilder (no licence: read for ideas only) and CharacterStudio (MIT, web VRM avatars), then a decision talk on 2D or 3D, the slot and layer model, and figurewright's body work. Plan `avatar-prior-art.md`, queue `avatar-prior-art.queue`; not dispatched, waits for the 2026-10-12 budget reset (about $19).
 **RATINGS-EXPORT DECIDED (2026-10-09 18:06 MDT, round 2):** see Decisions 2026-10-09 (ratings-export talk round 2). Next: a build plan (file export/import, then upload to Workers + D1 with the server-side scrub).
 

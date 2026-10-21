@@ -29,6 +29,14 @@ bash -c "$hrs"'
   WS_BENCH_HOURS=22-07; in_bench_hours 23 && in_bench_hours 3 && ! in_bench_hours 7 && ! in_bench_hours 12 || exit 1
   WS_BENCH_HOURS=09-17; in_bench_hours 09 && ! in_bench_hours 17 && ! in_bench_hours 2 || exit 1
   WS_BENCH_HOURS=; in_bench_hours 12' && echo "bench hours ok" || { echo "bench hours FAILED"; exit 1; }
+# WS_BENCH_OUTSIDE=wait holds a replay outside the hours until they start (the clock reads 12, then 12, then 23).
+wfh=$(sed -n '/^wait_for_hours()/,/^}/p' "$WS/scripts/bench.sh")
+out=$(bash -c "$hrs
+$wfh"'
+  c=$(mktemp); echo 0 > "$c"  # bench_hour runs in $(...), so its call count lives in a file
+  bench_hour() { local n=$(( $(cat "$c") + 1 )); echo "$n" > "$c"; [ "$n" -lt 3 ] && echo 12 || echo 23; }; bench_last_start=""
+  WS_BENCH_HOURS=22-07 WS_BENCH_OUTSIDE=wait WS_BENCH_POLL=0; wait_for_hours; echo "calls=$(cat "$c")"; rm -f "$c"' 2>&1)
+grep -q "waiting for them" <<< "$out" && grep -q "calls=3" <<< "$out" && echo "bench night-only ok" || { echo "bench night-only FAILED: $out"; exit 1; }
 # dispatch: --input copies a file into the worktree's .ws-evidence/; a missing one is refused.
 echo grid > "$T/input.u8"
 "$WS/scripts/dispatch.sh" --project "$slug" --dry-run --input "$T/input.u8" demo "$T/task.md" >/dev/null 2>&1 && cmp -s "$T/input.u8" "$T/.worktrees/demo/.ws-evidence/input.u8" \
