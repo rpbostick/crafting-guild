@@ -2,6 +2,8 @@
 
 **In flight right now**
 
+**DISPATCHED (2026-10-20 22:23 MDT):** `bw-avatar-cleanup` ($3, light): the review suggestions from render, map and Today (Avatar memo key, drawFigure test helpers, the mapRow guard test, the nested accessibility label on Android). Left for Patrick: the segmented-choice font drop from 16 to 15 pt applies app-wide (SegmentedChoice.tsx:58).
+
 **FIGURE VIEW SEEN (2026-10-20 21:44 MDT, Patrick): "the figure looks ok. it doesn't look precisely like the outfit, it looks like a sweater, tights for pants, regular shoes, and an undershirt."** Approved; bw-avatar-today merged as ed1a168 (suite 110 s, pushed); the chain is done, steps 1-5 closed. His four mismatches are the nearest-shape stand-ins (docs/avatar-gaps.md), so they are step 6's done-when: each garment group's render must stop reading as those. Carry forward to the next task on src/avatar/: the bw-avatar-map review suggestions (garmentMap.test.ts:84 tests templateById's error instead of mapRow's guard).
 
 **STEPS 1-2 DONE (2026-10-20 15:45 MDT):** fw-package merged in figurewright as ed6dfff ($2.98 + review $1.04, tsup build, `defaultFigureArt` holds DEFAULT_HEAD only); `@rpbostick/figurewright@0.1.0` published to GitHub Packages, private (7 files: dist/, LICENSE, README.md, package.json; scanned: no raster images, BodyM data, home paths or tokens). **Next: steps 3-5, `NODE_AUTH_TOKEN=$(gh auth token) bin/ws --project bike-weather chain plans/bike-weather/avatar-build.queue` under run_in_background; not started 2026-10-20 because Patrick takes the machine offline at ~16:30.** About $26 of the week's bike-weather budget left (spent ~$25).

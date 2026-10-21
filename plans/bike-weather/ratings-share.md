@@ -2,6 +2,8 @@
 
 **In flight right now**
 
+**DISPATCHED (2026-10-20 22:23 MDT, Patrick ticked it):** step 2 as `bw-share-record` ($5, light): SharedRating, Region (zone through an injected lookup, country from the place, 500 m bands), normalisers, validation, "what is shared" text. The Köppen grid is split out as the next task, `bw-share-koppen`: the 0.1° grid already built by the research run sits at runs/bike-weather/evidence/bw-share-research/scratch/kg/grids/koppen_1991_2020_0p1deg.u8, to be turned into the 312 KB row-indexed asset.
+
 **DECIDED (2026-10-20 15:30 MDT, Patrick):** Köppen grid at 0.1° (312 KB); the server lives in a `server/` folder in bike-weather. Steps 2-5 get task files from these; not dispatched this week (budget goes to the avatar).
 
 **STEP 1 MERGED (2026-10-20 15:19 MDT):** bw-share-research 0ab63b7 ($2.70 + review $0.46), report docs/research/ratings-sharing.md. Open for Patrick: Köppen grid at 0.1° (312 KB, 3.73% of city population in the wrong zone) or 0.25° (77 KB, 6.46%), recommended 0.1°; the server in a server/ folder (touches the root tsconfig exclude, the test and typecheck scripts, worktree links) or its own repository. Carry forward: review suggestions on lines 47, 83, 129 (wording) and pinning skywright references to a commit.
