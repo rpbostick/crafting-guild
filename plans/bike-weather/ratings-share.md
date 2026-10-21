@@ -2,7 +2,7 @@
 
 **In flight right now**
 
-**BUILT, NOT REVIEWED (2026-10-20 22:45 MDT):** bw-share-record done at 40ba2f4 ($1.80), all done-when met (observed), 309 tests. Next: `ws review bw-share-record`, then merge (invisible). Its open questions: toSharedRating takes (rating, random, known) without garments (the rating keeps worn copies; agree); no screen passes a region yet (wiring goes with bw-share-koppen or step 3).
+**STEP 2 MERGED (2026-10-21 00:14 MDT):** bw-share-record e512821 ($1.80 + review $0.41, suite 116 s). Next: `task-bw-share-koppen.md` (written; the 0.1° asset, its lookup, the region wired into rateOutfit, the Beck credit, the review's three suggestions); copy runs/bike-weather/evidence/bw-share-research/scratch/kg/grids/koppen_1991_2020_0p1deg.u8 into its worktree's .ws-evidence/ before the builder starts.
 
 **DISPATCHED (2026-10-20 22:23 MDT, Patrick ticked it):** step 2 as `bw-share-record` ($5, light): SharedRating, Region (zone through an injected lookup, country from the place, 500 m bands), normalisers, validation, "what is shared" text. The Köppen grid is split out as the next task, `bw-share-koppen`: the 0.1° grid already built by the research run sits at runs/bike-weather/evidence/bw-share-research/scratch/kg/grids/koppen_1991_2020_0p1deg.u8, to be turned into the 312 KB row-indexed asset.
 
