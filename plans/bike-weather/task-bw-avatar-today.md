@@ -26,4 +26,4 @@ The Today screen shows the suggested outfit in one of several views (`src/screen
 - The Figure view is in `OUTFIT_VIEWS` and shows the worn outfit on the figure, with carried items listed.
 - Tests pass for render, the accessibility label and the carried list.
 - The evidence page exists with the screenshots described in step 4.
-- `npm test` and `npm run typecheck` pass.
+- `npm run typecheck` passes, and the jest files for `src/avatar/` and `src/screens/today/` pass with `--runInBand` (the merge gate runs the whole suite).

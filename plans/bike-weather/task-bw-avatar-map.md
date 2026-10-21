@@ -32,4 +32,4 @@ Track: light
 - Every template has a row, and every `garmentId` exists in figurewright (test).
 - The worked-examples test passes: layer order, and the outermost drawn garment per covered span.
 - `docs/avatar-gaps.md` lists every `nearest` and `none` template under a garment group.
-- `npm test` and `npm run typecheck` pass.
+- `npm run typecheck` passes, and the jest files under `src/avatar/` pass with `--runInBand` (the merge gate runs the whole suite).
