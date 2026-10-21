@@ -5,6 +5,7 @@ Read with CLAUDE.md; where they differ, this file wins. Not part of a public rel
 ## Asking
 - Decisions go to Patrick through AskUserQuestion, recommended option first and labelled, at most four per call, in rounds. Where several options can apply together, use multi-select checkboxes. He usually answers "all recommended".
 - Ask before any infrastructure change (replacing a layer, adding a service, changing how builders are launched).
+- Whenever work stops (a merge lands, a chain ends, a report comes back), end with an AskUserQuestion multi-select of what to run next: recommended options first and labelled, each with its cost and one-line consequence; his own suggestions go in the free-text field. Never end on a list of open items or a stated plan.
 
 ## Previews
 - Previews on :8801 and up (`WS_PREVIEW_PORT`), the live app on :8800 (`WS_PREVIEW_PORT_MAIN`), builders' own browser checks on 8790 to 8799.
