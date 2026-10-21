@@ -2,7 +2,7 @@
 
 **In flight right now**
 
-**STOPPED BY THE USAGE LIMIT (2026-10-20 22:45 MDT, resets 00:10):** bw-avatar-cleanup, partial work in its worktree. Next: resume it (same task) after the reset.
+**CLEANUP MERGED (2026-10-21 00:36 MDT):** bw-avatar-cleanup 979f3c7 (two runs, $0.40 after the limit; review $0.29). Carry forward: the pathPoints docstring overstates its bound for arcs (drawFigure.test.ts:49); note that Avatar's useMemo deps leave out `worn` on purpose (Avatar.tsx:21). Still for Patrick: the segmented-choice font drop (SegmentedChoice.tsx:58).
 
 **DISPATCHED (2026-10-20 22:23 MDT):** `bw-avatar-cleanup` ($3, light): the review suggestions from render, map and Today (Avatar memo key, drawFigure test helpers, the mapRow guard test, the nested accessibility label on Android). Left for Patrick: the segmented-choice font drop from 16 to 15 pt applies app-wide (SegmentedChoice.tsx:58).
 
