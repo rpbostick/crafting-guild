@@ -2,6 +2,8 @@
 
 **In flight right now**
 
+**STOPPED BY THE USAGE LIMIT (2026-10-20 22:45 MDT, resets 00:10):** bw-avatar-cleanup, partial work in its worktree. Next: resume it (same task) after the reset.
+
 **DISPATCHED (2026-10-20 22:23 MDT):** `bw-avatar-cleanup` ($3, light): the review suggestions from render, map and Today (Avatar memo key, drawFigure test helpers, the mapRow guard test, the nested accessibility label on Android). Left for Patrick: the segmented-choice font drop from 16 to 15 pt applies app-wide (SegmentedChoice.tsx:58).
 
 **FIGURE VIEW SEEN (2026-10-20 21:44 MDT, Patrick): "the figure looks ok. it doesn't look precisely like the outfit, it looks like a sweater, tights for pants, regular shoes, and an undershirt."** Approved; bw-avatar-today merged as ed1a168 (suite 110 s, pushed); the chain is done, steps 1-5 closed. His four mismatches are the nearest-shape stand-ins (docs/avatar-gaps.md), so they are step 6's done-when: each garment group's render must stop reading as those. Carry forward to the next task on src/avatar/: the bw-avatar-map review suggestions (garmentMap.test.ts:84 tests templateById's error instead of mapRow's guard).

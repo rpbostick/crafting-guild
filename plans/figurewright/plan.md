@@ -2,6 +2,8 @@
 
 **In flight right now**
 
+**STOPPED BY THE USAGE LIMIT (2026-10-20 22:45 MDT, resets 00:10):** fw-test-speed, partial work in its worktree. Next: resume it after the reset.
+
 **DISPATCHED (2026-10-20 22:23 MDT):** `fw-test-speed` ($3, light): the suite took 363 s at the fw-package merge; under 300 s, no test dropped.
 
 **GATE PASSED, fw-package DISPATCHED (2026-10-20 15:30 MDT, Patrick: start avatar-build steps 1-5):** the hands-on round merged in bike-weather (adc7f2b, 40a1307); its figurewright lists are §7 of docs/research/avatar-cozybuilder-handson.md and §6 of avatar-characterstudio-handson.md (a garment manifest validated before use, a garment-to-hidden-region rule table, sockets for rigid gear, single-surface garments, a covering pass recomputed from the original, fit to more than one body). fw-package merged ed6dfff and 0.1.0 published privately (2026-10-20 15:45 MDT). The merge suite took 367 s (over WS_SUITE_WARN_S 300): next light task here is speeding up the slowest test files. Open from the builder: ship more heads in a later version, or let the app supply its own HeadArt. fw-reproduction-measure still waits.
