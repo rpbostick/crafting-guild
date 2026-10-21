@@ -4,6 +4,8 @@
 
 **STEPS 1-2 DONE (2026-10-20 15:45 MDT):** fw-package merged in figurewright as ed6dfff ($2.98 + review $1.04, tsup build, `defaultFigureArt` holds DEFAULT_HEAD only); `@rpbostick/figurewright@0.1.0` published to GitHub Packages, private (7 files: dist/, LICENSE, README.md, package.json; scanned: no raster images, BodyM data, home paths or tokens). **Next: steps 3-5, `NODE_AUTH_TOKEN=$(gh auth token) bin/ws --project bike-weather chain plans/bike-weather/avatar-build.queue` under run_in_background; not started 2026-10-20 because Patrick takes the machine offline at ~16:30.** About $26 of the week's bike-weather budget left (spent ~$25).
 
+**CHAIN STARTED (2026-10-20 19:37 MDT):** avatar-build.queue (render $8, map $8, Today $10 gated) with NODE_AUTH_TOKEN from gh. The skate-mario bench runs beside it and waits on its merges.
+
 **EDITOR SEEN (2026-10-20 17:00 MDT, Patrick): "it looks good and interesting"; the hands-on round is closed.**
 
 **GO (2026-10-20 15:30 MDT, Patrick): steps 1-5, ~$37.** Issue draft: held, re-checked against their latest commit and batched with other upstream reports before posting. Next: publish 0.1.0, then avatar-build.queue with NODE_AUTH_TOKEN.
