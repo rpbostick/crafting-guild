@@ -27,3 +27,8 @@ The Today screen shows the suggested outfit in one of several views (`src/screen
 - Tests pass for render, the accessibility label and the carried list.
 - The evidence page exists with the screenshots described in step 4.
 - `npm run typecheck` passes, and the jest files for `src/avatar/` and `src/screens/today/` pass with `--runInBand` (the merge gate runs the whole suite).
+
+## Carried from the bw-avatar-map review (suggestions; do them where the code is yours to touch)
+- `src/avatar/garmentMap.test.ts:84`: Rule 2: mapRow('raincape') throws from templateById before reaching GARMENT_MAP, so this test checks templateById's error ('names no garment template'). It never reaches mapRow's own 'has no row in the garment map' guard at garmentMap.ts:107. The completeness test at line 53 covers the gap in practice. The test name could say it is about unknown templates, or the guard could be tested directly (e.g. a template that exists but has no row).
+- `src/avatar/garmentMap.ts:131`: wornFigure keeps the first of two same-role garments on one slot. Two same-role garments on different slots (e.g. tee and long-sleeve-jersey, both mid) are listed in insertion order rather than figurewright's depth. That does no harm, since drawFigure orders by drawOrder, but the docstring's 'inside out by layer role' does not say how ties are ordered.
+- `docs/avatar-gaps.md:3`: The exact list says 'trousers' where the template id is `jeans` (label 'Trousers or jeans'). Every other mention in the doc uses backticked ids. Naming `jeans` would make the list match the map exactly.
