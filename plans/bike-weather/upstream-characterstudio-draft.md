@@ -41,7 +41,7 @@ Hello, and thank you for CharacterStudio. While evaluating the editor at commit 
    - `src/components/WalletMenu.jsx:45` hard-codes a test wallet address, and `:50` redirects to `http://localhost:5000/auth/github`.
    - `.github/workflows/main.yml:43` runs `npm install` (not `npm ci`) in the deploy job, so install scripts run with an unpinned resolution. The job holds `contents: write` and a deploy key, and `peaceiris/actions-gh-pages@v3` is pinned by tag rather than by commit SHA (`:30-31`, `:49-51`).
    - `package.json:18` (`get-assets`) clones `loot-assets` at the head of `main`, unpinned.
-   - `npm audit --omit=dev` reports 59 production vulnerabilities (30 high) at this commit. Most are in the web3 tree; the high ones include `axios`, `ws`, `undici`, `vite`, `lodash`, `form-data` and `bigint-buffer`.
+   - `npm audit --omit=dev` reports 59 production vulnerabilities (30 high) at this commit. Most are in the web3 tree that #216 already tracks; the high ones include `axios`, `ws`, `undici`, `vite`, `lodash`, `form-data` and `bigint-buffer`.
 
 6. **Two behaviours seen while running the editor.**
    - Headless Chrome 148 with SwiftShader.
