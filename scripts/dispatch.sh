@@ -2,7 +2,9 @@
 # Run one builder on one task, headless, in its own worktree on branch agent/<name>.
 # Usage: dispatch.sh [--project slug] [--budget USD] [--model M] [--effort E] [--timeout 90m]
 #                    [--allow "Bash(cmd *)"]... [--dry-run] [--print-prompt] [--names-ok]
-#                    [--base <sha>] [--instructions <dir>] <name> <task-file>
+#                    [--base <sha>] [--instructions <dir>] [--input <file>]... <name> <task-file>
+# --input copies a file the builder needs but cannot fetch or write (a data file, a prebuilt grid) into the
+# worktree's .ws-evidence/ before the builder starts; the task names it there.
 # --print-prompt is a dry run that also prints the builder's whole prompt.
 # --base branches a fresh worktree from that commit instead of the main branch (a replay, ws bench); the builder
 # then gets no grant to merge the main branch in, which would bring in the work the replay is measured on.
@@ -13,7 +15,7 @@
 # and a JSON result schema. Logs to runs/<slug>/<name>.jsonl; the result check lands in <name>.result.txt.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
-slug="" budget="$WS_DEFAULT_BUDGET" model="$WS_MODEL" effort="$WS_EFFORT" tmo="" dry=false show_prompt=false names_ok=false from="" instr=""; extra=()
+slug="" budget="$WS_DEFAULT_BUDGET" model="$WS_MODEL" effort="$WS_EFFORT" tmo="" dry=false show_prompt=false names_ok=false from="" instr=""; extra=() inputs=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --project) slug="$2"; shift 2 ;;
@@ -27,6 +29,7 @@ while [ $# -gt 0 ]; do
     --names-ok) names_ok=true; shift ;;
     --base) from="$2"; shift 2 ;;
     --instructions) instr="$2"; shift 2 ;;
+    --input) [ -f "$2" ] || die "no input file $2"; inputs+=("$2"); shift 2 ;;
     -*) die "unknown flag $1" ;;
     *) break ;;
   esac
@@ -97,6 +100,7 @@ else
   note "reusing worktree $wt ($(git -C "$wt" status --short | wc -l) uncommitted files)"
 fi
 mkdir -p "$wt/.ws-evidence"   # untracked; logs and renders go here, never into the branch (ws merge keeps it under runs/)
+for i in ${inputs[@]+"${inputs[@]}"}; do cp "$i" "$wt/.ws-evidence/" && note "input $(basename "$i") copied into .ws-evidence/"; done
 
 # WORKTREE_ENV (KEY=value lines) goes into WORKTREE_ENV_FILE in the worktree, for tests that read their
 # environment from a file (Vite's loadEnv reads .env.local): builders cannot run `env VAR=... <cmd>`.

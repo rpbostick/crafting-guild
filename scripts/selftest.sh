@@ -23,6 +23,10 @@ out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>
 # The resume path: a worktree that exists before the dry run is reused and kept.
 git -C "$T" worktree add -q -b agent/demo "$T/.worktrees/demo" main
 out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>&1); grep -q "reusing worktree" <<< "$out" && [ -d "$T/.worktrees/demo" ] && echo "resume path ok" || { echo "resume path FAILED"; exit 1; }
+# dispatch: --input copies a file into the worktree's .ws-evidence/; a missing one is refused.
+echo grid > "$T/input.u8"
+"$WS/scripts/dispatch.sh" --project "$slug" --dry-run --input "$T/input.u8" demo "$T/task.md" >/dev/null 2>&1 && cmp -s "$T/input.u8" "$T/.worktrees/demo/.ws-evidence/input.u8" \
+  && ! "$WS/scripts/dispatch.sh" --project "$slug" --dry-run --input "$T/missing.u8" demo "$T/task.md" >/dev/null 2>&1 && echo "dispatch input ok" || { echo "dispatch input FAILED"; exit 1; }
 grep -qx '.worktrees' "$T/.git/info/exclude" && grep -qx '.ws-evidence' "$T/.git/info/exclude" && echo "exclude ok"
 [ -d "$T/.worktrees/demo/.ws-evidence" ] && echo "evidence dir ok"
 grep -q 'timeout: 120m' <<< "$out" && echo "full-track timeout ok"
