@@ -102,11 +102,33 @@ timeout_for() { # <task> -> minutes: the corpus flags' --timeout, else the track
   echo "${tmo%m}"
 }
 
+# WS_BENCH_HOURS="22-07": inside those hours (WS_TZ, else local time) replays run back to back; outside them, during
+# regular development work, the bench waits as long as the last replay took before starting the next, so it runs about
+# half as many and leaves the rest of the usage limit to that work. Empty = back to back at any hour.
+in_bench_hours() { # <hour> -> 0 inside the window
+  local h=$((10#$1)) from to
+  [ -n "${WS_BENCH_HOURS:-}" ] || return 0
+  from=$((10#${WS_BENCH_HOURS%-*})); to=$((10#${WS_BENCH_HOURS#*-}))
+  if [ "$from" -le "$to" ]; then [ "$h" -ge "$from" ] && [ "$h" -lt "$to" ]; else [ "$h" -ge "$from" ] || [ "$h" -lt "$to" ]; fi
+}
+bench_hour() { TZ="${WS_TZ:-}" date +%H; }
+bench_last_start=""
+wait_for_hours() {
+  local now wake; now=$(date +%s)
+  if [ -n "$bench_last_start" ] && ! in_bench_hours "$(bench_hour)"; then
+    wake=$((now + now - bench_last_start))
+    echo "bench: outside the bench hours ($WS_BENCH_HOURS): half pace, next replay at $(date -d "@$wake" '+%H:%M')"
+    while [ "$(date +%s)" -lt "$wake" ] && ! in_bench_hours "$(bench_hour)"; do sleep "${WS_BENCH_POLL:-60}"; done
+  fi
+  bench_last_start=$(date +%s)
+}
+
 # Dispatch run_one's $run from the base commit, discarding any earlier attempt's worktree, branch and result.
 start_run() {
   [ -d "$wt" ] && git -C "$PROJECT_PATH" worktree remove --force "$wt"
   git -C "$PROJECT_PATH" branch -q -D "$(branch_of "$run")" 2>/dev/null
   rm -f "$RUNS/$run.result.txt"
+  wait_for_hours
   wait_for_merges
   set -f; eval "fl=( $(corpus_field "$task" flags) )"; set +f
   "$WS/scripts/dispatch.sh" --project "$SLUG" "${fl[@]}" --budget "$budget" --base "$base" --instructions "$dir" "$run" "$WS/plans/$SLUG/bench/$task.md" >> "$log" 2>&1 \

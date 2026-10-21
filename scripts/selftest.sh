@@ -23,6 +23,12 @@ out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>
 # The resume path: a worktree that exists before the dry run is reused and kept.
 git -C "$T" worktree add -q -b agent/demo "$T/.worktrees/demo" main
 out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>&1); grep -q "reusing worktree" <<< "$out" && [ -d "$T/.worktrees/demo" ] && echo "resume path ok" || { echo "resume path FAILED"; exit 1; }
+# bench: WS_BENCH_HOURS gates when a replay may start, across midnight too.
+hrs=$(sed -n '/^in_bench_hours()/,/^}/p' "$WS/scripts/bench.sh")
+bash -c "$hrs"'
+  WS_BENCH_HOURS=22-07; in_bench_hours 23 && in_bench_hours 3 && ! in_bench_hours 7 && ! in_bench_hours 12 || exit 1
+  WS_BENCH_HOURS=09-17; in_bench_hours 09 && ! in_bench_hours 17 && ! in_bench_hours 2 || exit 1
+  WS_BENCH_HOURS=; in_bench_hours 12' && echo "bench hours ok" || { echo "bench hours FAILED"; exit 1; }
 # dispatch: --input copies a file into the worktree's .ws-evidence/; a missing one is refused.
 echo grid > "$T/input.u8"
 "$WS/scripts/dispatch.sh" --project "$slug" --dry-run --input "$T/input.u8" demo "$T/task.md" >/dev/null 2>&1 && cmp -s "$T/input.u8" "$T/.worktrees/demo/.ws-evidence/input.u8" \
@@ -284,7 +290,7 @@ esac
 STUB
 chmod +x "$T/stub/claude"
 # The bench waits on scratch locks: this suite runs inside ws merge's test gate, whose own lock is held meanwhile.
-wsb() { PATH="$T/stub:$PATH" STUB_LOG="$T/stub-log" WS_BENCH_POLL=1 WS_BENCH_LOCKS="$T/locks/runs/*/merge.lock" WS_TASK_HISTORY="${H:-}" timeout 300 "$WS/bin/ws" "$@" 2>&1; }
+wsb() { PATH="$T/stub:$PATH" STUB_LOG="$T/stub-log" WS_BENCH_POLL=1 WS_BENCH_HOURS='' WS_BENCH_LOCKS="$T/locks/runs/*/merge.lock" WS_TASK_HISTORY="${H:-}" timeout 300 "$WS/bin/ws" "$@" 2>&1; }
 # ws: a word that is neither a command nor a project fails; it once opened a session on the pinned project.
 out=$(WS_PROJECT="$slug" wsb no-such-word) && x=0 || x=1
 [ "$x" = 1 ] && grep -q "unknown project 'no-such-word'" <<< "$out" && [ -z "$(ls "$T/stub-log")" ] && echo "unknown word starts no session ok" || bfail "unknown word" "$out"
