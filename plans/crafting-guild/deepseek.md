@@ -2,6 +2,11 @@
 
 **In flight right now:** nothing. Patrick took the laptop offline (2026-10-22 16:56 MDT); start nothing until he is back. Conserve Claude usage until Monday (the weekly reset).
 
+## When Patrick is back (2026-10-22 16:59 MDT, his words: "2 and 1, let's start benchmarking DeepSeek and use our Crafting Guild orchestrator (you) to validate it as we go. i want to get the tools online so we can be using opencode tokens today or tomorrow to build everything out. then we'll get to the other parts.")
+1. VSCodium (he runs the apt commands, then settings and extensions).
+2. Hermes on DeepSeek, then benchmark DeepSeek, with the orchestrator checking every result by code.
+3. Get the OpenCode launcher online soon (Claude builders kept small) so OpenCode tokens do the build-out; the support email goes with it.
+
 ## Decided (2026-10-22 16:56 MDT, Patrick)
 - **One toolkit with a switch**, not a fork: the same bin/ws and scripts, a setting picks the builder agent (Claude Code or OpenCode + DeepSeek), and an AGENTS.md lets OpenCode orchestrate as CLAUDE.md does. Fork only if we run into issues.
 - **Start, in this order, when he is back:**
