@@ -3,3 +3,4 @@
 ratings-worker     plans/bike-weather/task-ratings-worker.md --budget 10
 bw-share-settings  plans/bike-weather/task-bw-share-settings.md gate --budget 5
 bw-share-upload    plans/bike-weather/task-bw-share-upload.md --budget 5
+bw-heat-indexes    plans/bike-weather/task-bw-heat-indexes.md gate --budget 6
