@@ -35,3 +35,10 @@ ECMWF thermofeel (Apache-2.0) implements all three and is the reference used to 
 - The heat advisory's own tests are unchanged and pass.
 - `npm run typecheck` passes; the jest files you touched pass with `--runInBand`.
 - A web export succeeds; the result names what to look at in a preview (a warm humid hour, a mild dry one, imperial units).
+
+## Carried from the bw-share-upload review (suggestions; do them where the code is yours to touch)
+- `src/share/nativeShareCrypto.test.ts:22`: Rule 2/3: 'native platforms use the native path' only checks the HMAC result. Under Jest, globalThis.crypto exists, so the test would still pass if shareCryptoFor returned webShareCrypto for ios/android. On Hermes that mistake would make every share fail with only a warning. Clear globalThis.crypto in this test, as the web test already does, so it proves the native path is taken.
+- `src/screens/today/RatingPanel.tsx:30`: Ratings held in `unshared` while the setting loads live in component state. If the panel unmounts before the setting arrives (for example the outing changes), they are dropped without a warning. This is unlikely since the setting loads fast; a ref or a provider-level hold would close the gap.
+- `src/sharing/SharingProvider.tsx:67`: stopSharing runs only on an on→off transition. If it fails (ratingUploads only warns), a queue and secret stay on the device while sharing is off, and nothing cleans them up later. Consider also calling stopSharing on start when the loaded setting is off.
+- `src/share/shareQueue.ts:257`: The POST has no timeout or AbortSignal. A fetch that hangs keeps the flush promise open. It does not block the queue's turn, but the outcome is never recorded until the app restarts. Consider an AbortController timeout.
+- `.ws-evidence/runs.tsv:12`: Evidence only: the whole-suite red run (before-today-open-handles, killed) and merge-gate-failure.log are not rows in runs.tsv. The only recorded red run is the single-file cold-cache probe. The orchestrator can tidy this.
