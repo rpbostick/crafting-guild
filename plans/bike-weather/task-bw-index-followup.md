@@ -24,3 +24,8 @@ The app (`src/`), behaviour of `server/src/`.
 - `queryPlan.test.ts` passes and does not compare whole plan strings.
 - RESULTS.md has both notes.
 - `npm --prefix server test` and `npm --prefix server run typecheck` pass.
+
+## Carried from the bw-weather-rename review (suggestions; do them where the code is yours to touch)
+- `docs/research/ratings-sharing.md:159`: Rules 4 and 6: precheck flag. This line still says `searchPlaces` is in `src/weather/skywrightService.ts`, which no longer exists after the rename. Point it at `src/weather/liveWeatherService.ts`. It is a research document outside the done-when's `src README.md` scope, so it does not block.
+- `src/suggest/outing.ts:31`: The doc comment says 18 km/h is "`RIDING_SPEEDS_KMH`'s for this activity", but the constant is DEFAULT_RIDE_ACTIVITY ('commuting'). "The `RIDING_SPEEDS_KMH` speed for this activity" would read more clearly. Wording only.
+- `README.md:291`: "rounded to 0.01° ... by `src/weather/sky/`" names a directory as the actor. "by the providers in `src/weather/sky/`" would match the comment in liveWeatherService.ts. Wording only.
