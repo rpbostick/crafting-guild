@@ -1,0 +1,4 @@
+# Before the upload endpoint goes live (product.md, PRIVACY POLICY): retention with an early flag, then the policy-change notice. Both merge on tests.
+# Run with: bin/ws --project bike-weather chain plans/bike-weather/endpoint-prep.queue   (under run_in_background)
+bw-retention plans/bike-weather/task-bw-retention.md --budget 8
+bw-policy-notice plans/bike-weather/task-bw-policy-notice.md --budget 4
