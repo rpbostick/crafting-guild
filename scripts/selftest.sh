@@ -6,7 +6,7 @@ for f in "$WS"/bin/ws "$WS"/scripts/*.sh; do bash -n "$f" && echo "syntax ok  ${
 if command -v shellcheck >/dev/null; then shellcheck -S warning "$WS"/bin/ws "$WS"/scripts/*.sh && echo "shellcheck ok" || { echo "shellcheck FAILED"; exit 1; }; fi
 T=$(mktemp -d); slug=$(basename "$T" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')
 # Cleanup runs on every exit (a failed check, a kill, a crash), so the scratch project never outlives the test.
-trap '[ -n "${srvpid:-}" ] && kill "$srvpid" 2>/dev/null; rm -rf "$T" "$WS/plans/$slug" "$WS/runs/$slug" "$WS/plans/$slug-b" "$WS/runs/$slug-b"; rm -f "$WS/projects/$slug.conf" "$WS/projects/$slug-b.conf"' EXIT
+trap '[ -n "${srvpid:-}" ] && kill "$srvpid" 2>/dev/null; rm -rf "$T" "$WS/plans/$slug" "$WS/runs/$slug" "$WS/plans/$slug-b" "$WS/runs/$slug-b" "$WS/plans/$slug-t" "$WS/runs/$slug-t"; rm -f "$WS/projects/$slug.conf" "$WS/projects/$slug-b.conf" "$WS/projects/$slug-t.conf"' EXIT
 git -C "$T" init -q -b main; echo hi > "$T/a.txt"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm init
 printf '#!/bin/sh\nexit 0\n' > "$T/t.sh"; chmod +x "$T/t.sh"
 printf 'n\n' | "$WS/bin/ws" init "$T" --tests "sh t.sh" >/dev/null && echo "init ok (non-interactive path)"
@@ -23,6 +23,17 @@ out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>
 # The resume path: a worktree that exists before the dry run is reused and kept.
 git -C "$T" worktree add -q -b agent/demo "$T/.worktrees/demo" main
 out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>&1); grep -q "reusing worktree" <<< "$out" && [ -d "$T/.worktrees/demo" ] && echo "resume path ok" || { echo "resume path FAILED"; exit 1; }
+# merge: a test command that never exits fails the merge at WS_MERGE_TEST_TIMEOUT; the merge is undone, the lock
+# released, and the command's own children are killed with it (bash forks the sleep, so only a group kill ends it).
+slug3="$slug-t"; M="$T/$slug3"; mkdir -p "$M"; git -C "$M" init -q -b main; echo a > "$M/a.txt"
+git -C "$M" add -A; git -C "$M" -c user.name=t -c user.email=t@t commit -qm init; printf 'n\n' | "$WS/bin/ws" init "$M" --tests "sleep 60.$$; true" >/dev/null
+m0=$(git -C "$M" rev-parse HEAD); git -C "$M" checkout -q -b agent/mt; echo b > "$M/b.txt"; git -C "$M" add b.txt; git -C "$M" -c user.name=t -c user.email=t@t commit -qm b
+mtip=$(git -C "$M" rev-parse HEAD); git -C "$M" checkout -q main; t0=$(date +%s)
+out=$(WS_MERGE_TEST_TIMEOUT=2 timeout 50 "$WS/scripts/merge.sh" --project "$slug3" --no-review mt "$mtip" 2>&1) && x=0 || x=1; secs=$(( $(date +%s) - t0 ))
+[ "$x" = 1 ] && [ "$secs" -lt 20 ] && grep -q 'timed out after 2 s' <<< "$out" && grep -q 'merge undone' <<< "$out" && [ "$(git -C "$M" rev-parse HEAD)" = "$m0" ] \
+  && ! git -C "$M" merge-base --is-ancestor "$mtip" main && flock -n "$WS/runs/$slug3/merge.lock" true && ! pgrep -fx "sleep 60.$$" >/dev/null \
+  && echo "merge test timeout undoes the merge and frees the lock ok" || { echo "merge test timeout FAILED: exit $x after ${secs}s"; echo "$out"; exit 1; }
+rm -rf "$M"  # later checks commit everything under $T; a nested repo there would be swept in
 # bench: WS_BENCH_HOURS gates when a replay may start, across midnight too.
 hrs=$(sed -n '/^in_bench_hours()/,/^}/p' "$WS/scripts/bench.sh")
 bash -c "$hrs"'

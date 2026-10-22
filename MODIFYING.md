@@ -21,7 +21,9 @@ scripts/dispatch.sh     creates the worktree, builds the builder prompt and gran
 scripts/check-result.sh reads the run's final JSON and checks its claims against the branch: commits, test logs,
                         each done-when item (a `done` with an item not met fails; observed evidence must exist).
 scripts/review.sh       diff on stdin to a read-only reviewer; writes runs/<slug>/<name>.review.{json,md}.
-scripts/merge.sh        pinned-SHA merge, test gate, push, cleanup.
+scripts/merge.sh        pinned-SHA merge, test gate, push, cleanup. The test run (and `--test-only`) is killed, with
+                        its whole process group, after `WS_MERGE_TEST_TIMEOUT` seconds (config.sh); a timed-out run
+                        fails like failing tests, so the merge is undone and the lock released.
 scripts/chain.sh        runs a queue of steps (dispatch, wait, review, one automatic fix round, merge, next); stops on
                         anything that needs a person. State in runs/<slug>/chain.{pid,status,log}.
 scripts/web.sh          `ws web`: the web sources a run asked for (`web_requests` in its result; builders have no web

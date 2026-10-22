@@ -3,7 +3,8 @@
 WS_TZ=""                        # calendar for dates written into plans ("Europe/Lisbon"); empty = this machine's local time
 WS_BENCH_HOURS="${WS_BENCH_HOURS-}"             # hours the bench replays back to back, "22-07" (WS_TZ, else local); outside them half pace; empty = always back to back
 WS_BENCH_OUTSIDE="${WS_BENCH_OUTSIDE-half}"        # outside WS_BENCH_HOURS: "half" (half pace) or "wait" (no replays: the bench runs inside the hours only)
-WS_DEFAULT_BUDGET="10"          # dollars, --max-budget-usd for a builder run
+WS_MERGE_TEST_TIMEOUT="${WS_MERGE_TEST_TIMEOUT-1800}"  # seconds the merge gate's test run (and merge.sh --test-only) may take before it is killed and the merge undone; a runner that never exits after its tests would otherwise hold the merge lock
+WS_DEFAULT_BUDGET="10"         # dollars, --max-budget-usd for a builder run
 WS_REVIEW_BUDGET="8"            # dollars, for a review run
 WS_DEFAULT_TIMEOUT="120m"       # wall-clock cap for a builder run (timeout(1) form)
 WS_LIGHT_TIMEOUT="45m"          # cap for a task marked 'Track: light'
