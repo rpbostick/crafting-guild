@@ -1,6 +1,6 @@
 # Bike Weather: sharing comfort ratings (the shared recommendation table)
 
-**DISPATCHED (2026-10-22 13:29 MDT):** chain `cpu-sky.queue`: `bw-cpu-measure` ($3, light: the scheduled work against the free plan's 10 ms CPU, deploy.md step 1), then `bw-sky-vendor` ($8, full: skywright copied in at 56d41a9, imports rewired, the link removed). After them: rerun the Hermes policy-notice trial on the fixed sandbox before 22:00. Device check moved to next week (Patrick: any Android phone or tablet with Expo Go).
+**CPU AND SKY MERGED (2026-10-22 13:55 MDT):** bw-cpu-measure 80bc5f2 (only ~250 ratings fit the free plan's 10 ms; deploy.md step 1 has the numbers and the off-Worker build to decide), bw-sky-vendor 76ab1b5 (weather code in `src/weather/sky/`, the `file:../skywright` link and `.worktrees/skywright` gone). Carry forward: `skywrightService.ts` keeps its old name. Now: the Hermes policy-notice trial on the fixed sandbox. Device check next week.
 
 **ENDPOINT PREP MERGED (2026-10-22 10:39 MDT):** bw-retention faf9d4f, bw-policy-notice 613d4df, then bw-anonymize 451ddcc (Patrick: keep rows whole, remove identifiers at five years; replaces the yearly archive). Open: anonymized rows' SQLite rowid follows insertion order, which hints at the run that moved them (about arrival + 5 years): a WITHOUT ROWID table keyed by a random id fixes it. For deployment: show the retention flag at cold start; the contact address (Patrick).
 
