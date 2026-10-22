@@ -14,7 +14,7 @@ Draft written 2026-10-21 from the code as merged (Settings aaa246d, Worker 332ac
 - Backups you export are files you control; the app does not send them anywhere.
 
 ### What the app sends, and to whom
-**Weather forecasts.** To get a forecast, the app sends the place you look up, as coordinates rounded to 0.01° (about 1 km), to Open-Meteo (open-meteo.com), and if Open-Meteo does not answer, to the Norwegian Meteorological Institute (api.met.no). **[check: whether the MET Norway request is rounded the same way; the rounding is guaranteed for Open-Meteo.]** Searching for a place sends the text you type to Open-Meteo's geocoding service. These services see your device's internet address, as any website does. Their own privacy policies apply.
+**Weather forecasts.** To get a forecast, the app sends the place you look up, as coordinates rounded to 0.01° (about 1 km), to Open-Meteo (open-meteo.com), and if Open-Meteo does not answer, to the Norwegian Meteorological Institute (api.met.no). Searching for a place sends the text you type to Open-Meteo's geocoding service. These services see your device's internet address, as any website does. Their own privacy policies apply.
 
 **Shared comfort ratings (on by default; Settings → Share comfort ratings).** When you rate how comfortable you were, the app sends:
 - the weather you rated it in: temperature, feels-like, wind, rain, and the kind of conditions;
@@ -50,5 +50,5 @@ The app's recommendation table is built from shared ratings. A region or brand w
 
 ## Notes for the edit
 - No marketing use, no advertising, no sale of data: decided 2026-10-09; say it in the short version if wanted.
-- Facts above come from: `src/model/shared.ts` (`describeShared`), `src/share/` (contributor key, queue, once a day), `server/migrations/` (no IP, no time, `received_on`), `server/wrangler.toml` (invocation logs off), skywright `coords.ts` (0.01° rounding for Open-Meteo), and the research report's scrub section (10 plus 0-3, rounded to 5).
+- Facts above come from: `src/model/shared.ts` (`describeShared`), `src/share/` (contributor key, queue, once a day), `server/migrations/` (no IP, no time, `received_on`), `server/wrangler.toml` (invocation logs off), skywright `coords.ts` (0.01° rounding, used by both `openMeteo.ts` and `metNorway.ts:52`), and the research report's scrub section (10 plus 0-3, rounded to 5).
 - Before publishing: run `release-audit.md` for the app's store listing, and have the text checked by someone who knows the privacy law where the app is offered (GDPR in the EU and UK, for example).
