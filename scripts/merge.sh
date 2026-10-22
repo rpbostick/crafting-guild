@@ -10,6 +10,26 @@ slug="" need_review=true test_only=false
 while [ $# -gt 0 ]; do case "$1" in --project) slug="$2"; shift 2 ;; --no-review) need_review=false; shift ;; --test-only) test_only=true; shift ;; *) break ;; esac; done
 name="${1:?usage: merge.sh [flags] <name> <reviewed-sha>}"
 load_project "$slug"; wt="$(worktree_dir "$name")"; br="$(branch_of "$name")"
+[[ "$WS_MERGE_TEST_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "WS_MERGE_TEST_TIMEOUT is '$WS_MERGE_TEST_TIMEOUT'; it must be a whole number of seconds"
+# Runs a test command in a directory under WS_MERGE_TEST_TIMEOUT, output to a log; returns its exit status.
+# A runner that finishes its tests but never exits (an open timer or promise) would otherwise hold the merge lock
+# forever. timeout(1), not run in the foreground, puts itself and the command in their own process group and
+# signals the whole group, so the runner's workers die with it. The lock's descriptor is closed for the command
+# so nothing it leaves running can keep the lock.
+run_suite() {
+  ( cd "$1" && exec timeout --kill-after=30 "$WS_MERGE_TEST_TIMEOUT" bash -c "$2" ) > "$3" 2>&1 9>&-
+}
+# Whether an exit status from run_suite, after a run of the given seconds, means the limit stopped it: 124 when
+# the TERM ended it, 137 when the KILL 30 s later did.
+timed_out() { [ "$1" -eq 124 ] || { [ "$1" -eq 137 ] && [ "$2" -ge "$WS_MERGE_TEST_TIMEOUT" ]; }; }
+# Prints a timed-out run's last log lines; when they show a test summary, the tests finished and the runner did
+# not exit, so it adds how to find what stayed open.
+show_timeout_log() {
+  tail -n 20 "$1"
+  if tail -n 20 "$1" | grep -qE 'did not exit|^Tests: |[0-9]+ (passed|passing|failed)'; then
+    echo "ws: the log's last lines show the tests finished and the runner did not exit; run it with --detectOpenHandles (Jest) or the runner's equivalent to find what stays open." >&2
+  fi
+}
 if $test_only; then
   [ -d "$wt" ] || die "no worktree for $name"
   tcmd="${BENCH_TEST_CMD:-$TEST_CMD}"; [ -n "$tcmd" ] || die "no TEST_CMD for $SLUG; nothing to test"
@@ -20,8 +40,11 @@ if $test_only; then
   fi
   mkdir -p "$wt/.ws-evidence"; log="$wt/.ws-evidence/test-only.log"
   echo "running tests on $(git -C "$wt" rev-parse --short HEAD) in $wt: $tcmd"
-  ( cd "$wt" && bash -c "$tcmd" ) > "$log" 2>&1; rc=$?; echo "exit $rc" >> "$log"
-  if [ "$rc" -eq 0 ]; then echo "tests passed (log: $log)"; else tail -n 20 "$log"; echo "tests failed, exit $rc (log: $log)"; fi
+  t0=$(date +%s); run_suite "$wt" "$tcmd" "$log"; rc=$?; secs=$(( $(date +%s) - t0 ))
+  if [ "$rc" -eq 0 ]; then echo "tests passed (log: $log)"
+  elif timed_out "$rc" "$secs"; then show_timeout_log "$log"; echo "tests failed: the suite timed out after ${WS_MERGE_TEST_TIMEOUT} s, WS_MERGE_TEST_TIMEOUT (log: $log)"
+  else tail -n 20 "$log"; echo "tests failed, exit $rc (log: $log)"; fi
+  echo "exit $rc" >> "$log"
   exit "$rc"
 fi
 pin="${2:?missing the reviewed SHA}"
@@ -73,8 +96,9 @@ if [ -n "$TEST_CMD" ]; then
   log="$RUNS/$name.merge-tests.log"
   echo "running tests on $merged: $TEST_CMD"
   t0=$(date +%s)
-  if ( cd "$PROJECT_PATH" && bash -c "$TEST_CMD" ) > "$log" 2>&1; then
-    secs=$(( $(date +%s) - t0 )); echo "--- ws merge: suite ${secs}s ---" >> "$log"
+  run_suite "$PROJECT_PATH" "$TEST_CMD" "$log"; rc=$?; secs=$(( $(date +%s) - t0 ))
+  if [ "$rc" -eq 0 ]; then
+    echo "--- ws merge: suite ${secs}s ---" >> "$log"
     echo "tests passed in ${secs}s (log: ${log#"$WS/"})"
     # The checkout had no modified tracked files before the merge, so any now are the test run's own
     # output (a build that rewrites a committed size report with new chunk hashes), which would block `ws release`.
@@ -84,6 +108,9 @@ if [ -n "$TEST_CMD" ]; then
       echo "ws: the test run changed tracked files; restored to the merged commit: ${touched[*]}. A build that rewrites a committed file is not reproducible; worth a light task in the project." >&2
     fi
     [ "$secs" -gt "${WS_SUITE_WARN_S:-300}" ] && echo "ws: the suite took ${secs}s, over WS_SUITE_WARN_S=${WS_SUITE_WARN_S:-300}. Every merge pays this; a builder task to speed up the slowest test files pays for itself in a few merges (one such task took a suite from 28 min to 2 min for \$3.75)."
+  elif timed_out "$rc" "$secs"; then
+    git -C "$PROJECT_PATH" reset --hard ORIG_HEAD -q
+    show_timeout_log "$log"; die "the suite timed out after ${WS_MERGE_TEST_TIMEOUT} s (WS_MERGE_TEST_TIMEOUT) on the merged tree; merge undone. Log: ${log#"$WS/"}"
   else
     git -C "$PROJECT_PATH" reset --hard ORIG_HEAD -q
     tail -n 30 "$log"; die "tests failed on the merged tree; merge undone. Log: ${log#"$WS/"}"
