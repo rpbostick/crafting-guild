@@ -1,0 +1,2 @@
+# Merge-gate test timeout (2026-10-21).
+cg-merge-test-timeout plans/crafting-guild/task-cg-merge-test-timeout.md --budget 3
