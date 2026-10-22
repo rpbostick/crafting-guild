@@ -1,6 +1,6 @@
 # Bike Weather: the outfit avatar (figurewright body, layered 2D SVG)
 
-**In flight right now**
+**STEP 6 FIRST GROUP CHOSEN, HELD (2026-10-22 16:19 MDT, Patrick):** vests and shells first (gilet, rain-shell hood, puffed jackets, cycling-cut jerseys, bib straps, a real base layer, a knit sweater; ~$10-14 with a render-sheet gate). Held: Patrick paused big usage "until we have access to DeepSeek v4.1 Flash capabilities onboard". Task file to write when it resumes.
 
 **CLEANUP MERGED (2026-10-21 00:36 MDT):** bw-avatar-cleanup 979f3c7 (two runs, $0.40 after the limit; review $0.29). Carry forward: the pathPoints docstring overstates its bound for arcs (drawFigure.test.ts:49); note that Avatar's useMemo deps leave out `worn` on purpose (Avatar.tsx:21). Still for Patrick: the segmented-choice font drop (SegmentedChoice.tsx:58).
 

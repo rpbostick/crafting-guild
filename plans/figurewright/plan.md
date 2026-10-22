@@ -1,6 +1,6 @@
 # figurewright: plan
 
-**In flight right now**
+**TEST SPEED MERGED (2026-10-21 10:23 MDT, noted 2026-10-22 16:19 MDT):** fw-test-speed dde83fe, suite 275 s (2219 tests, ts-jest isolatedModules). Nothing in flight. Next here: avatar step 6's first garment group, vests and shells (bike-weather avatar-build.md), held while big usage is paused.
 
 **STOPPED BY THE USAGE LIMIT (2026-10-20 22:45 MDT, resets 00:10):** fw-test-speed, partial work in its worktree. Next: resume it after the reset.
 
