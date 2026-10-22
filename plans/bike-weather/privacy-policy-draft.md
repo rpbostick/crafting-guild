@@ -1,12 +1,12 @@
 # Privacy policy: draft (step 6 of ratings-share.md)
 
-Draft written 2026-10-21 from the code as merged (Settings aaa246d, Worker 332ac3a) and the upload branch under review. For Patrick to edit. Nothing here is published; the upload endpoint stays empty until this is final. Open questions are marked **[decide]** or **[check]**.
+Draft written 2026-10-21 from the code as merged (Settings aaa246d, Worker 332ac3a) and the upload branch under review. For Patrick to edit. Nothing here is published; the upload endpoint stays empty until this is final. Decisions taken 2026-10-21 (Patrick); what is left is marked **[fill]**.
 
 ---
 
 ## Bike Weather privacy policy
 
-**Short version.** Your wardrobe, outfits and ratings stay on your phone. If you leave sharing on, the app sends an anonymous copy of each comfort rating so riders in similar weather get better suggestions. A shared rating has no exact location, no account, no device ID, and a new random ID each time. You can turn sharing off in Settings at any time, and the app works the same without it.
+**Short version.** Your wardrobe, outfits and ratings stay on your phone. If you leave sharing on, the app sends an anonymous copy of each comfort rating so riders in similar weather get better suggestions. A shared rating has no exact location, no account, no device ID, and a new random ID each time. You can turn sharing off in Settings at any time, and the app works the same without it. No ads, no selling data, no marketing.
 
 ### What stays on your phone
 - Your garments (names, colours, brands, ratings), saved outfits and comfort ratings.
@@ -31,24 +31,25 @@ It never sends garment names or colours, the place or coordinates, the time of d
 **When it is sent.** At most once a day, in one batch, only while sharing is on. Ratings made while sharing was off are never sent later.
 
 ### What the server keeps
-The ratings server runs on Cloudflare Workers with a Cloudflare D1 database. It stores each shared rating as listed above, plus the day the batch arrived. It does not read or store your internet address, the time of day, or any request headers, and request logging is turned off. Cloudflare's network still sees your internet address when the request passes through it, as for any website; Cloudflare's privacy policy applies to that. **[decide: how long raw ratings are kept, e.g. indefinitely for the table, or N years.]**
+The ratings server runs on Cloudflare Workers with a Cloudflare D1 database. It stores each shared rating as listed above, plus the day the batch arrived. It does not read or store your internet address, the time of day, or any request headers, and request logging is turned off. Cloudflare's network still sees your internet address when the request passes through it, as for any website; Cloudflare's privacy policy applies to that. Each raw shared rating is kept for five years and then deleted; the counts and averages built from it stay in the recommendation table, so the history is kept without the individual rows.
 
 ### What is published
-The app's recommendation table is built from shared ratings. A region or brand with fewer than about 10 different contributors is merged into a broader group ("other") before anything is published, so a small group cannot be picked out. Counts are rounded. **[decide: whether a public research dataset is released, and if so: weekly dates, the same 10-contributor check, yearly.]**
+The app's recommendation table is built from shared ratings. A region or brand with fewer than about 10 different contributors is merged into a broader group ("other") before anything is published, so a small group cannot be picked out. Counts are rounded. No research dataset is published now. If one is published later, it will use the same 10-contributor check and give dates only by week, and this policy will change first (see below).
 
 ### Your choices
 - Turn sharing off in Settings at any time. Ratings not yet sent are deleted from the phone's queue, and the secret is deleted.
-- Because shared ratings carry no account or device ID, the server cannot tell which ratings are yours, so it cannot find or delete them on request. **[decide: say this plainly, as here, or keep an upload receipt on the phone so a deletion request can name its random IDs.]**
+- Because shared ratings carry no account or device ID, the server cannot tell which ratings are yours, so it cannot find or delete them on request.
 
 ### Children
-**[decide: minimum age, or a statement that the app is not directed at children under 13 / 16.]**
+Bike Weather is not directed at children under 13. Because shared ratings identify no one, the app does not ask anyone's age.
 
 ### Changes and contact
-**[decide: contact address; how changes are announced (in-app notice on the next start).]** Last updated: **[date of publishing]**.
+Questions about this policy: **[fill: the app's own contact address]**. When this policy changes, the app shows a short notice with a link the first time it starts after the change, and the date below changes. Last updated: **[fill: date of publishing]**.
 
 ---
 
 ## Notes for the edit
-- No marketing use, no advertising, no sale of data: decided 2026-10-09; say it in the short version if wanted.
+- Work these decisions need before the endpoint goes live: the ratings Worker deletes raw rows at five years and, from a daily scheduled check, flags 60 days ahead when the first deletions are due, shown at cold start (Patrick asked for a reminder before removal starts); the in-app notice when the policy changes; the contact address (Patrick makes it).
+- No marketing use, no advertising, no sale of data: decided 2026-10-09; said in the short version (Patrick, 2026-10-21).
 - Facts above come from: `src/model/shared.ts` (`describeShared`), `src/share/` (contributor key, queue, once a day), `server/migrations/` (no IP, no time, `received_on`), `server/wrangler.toml` (invocation logs off), skywright `coords.ts` (0.01° rounding, used by both `openMeteo.ts` and `metNorway.ts:52`), and the research report's scrub section (10 plus 0-3, rounded to 5).
 - Before publishing: run `release-audit.md` for the app's store listing, and have the text checked by someone who knows the privacy law where the app is offered (GDPR in the EU and UK, for example).
