@@ -2,6 +2,8 @@
 
 Track: full
 
+Resume: nothing has run yet. The branch's only commit (56d41a9) is the orchestrator's verbatim copy of skywright; start at step 1.
+
 Bike Weather uses skywright, its weather library, through a local link (`"skywright": "file:../skywright"` in `package.json`, plus settings in `jest.config.js` and `metro.config.js` for a library outside the repo). skywright is no longer developed on its own, so Bike Weather should not depend on it. **The first commit on this branch is skywright's source and tests at its commit `bf6dfe0`, copied verbatim into `src/weather/sky/`** (its `src/` files, `providers/`, its library tests and fixtures in `src/weather/sky/test/` (not the `example-*` tests), its `LICENSE`, and `SOURCE.md` naming the commit). Your job is to make Bike Weather use that copy and remove the link.
 
 ## Steps
