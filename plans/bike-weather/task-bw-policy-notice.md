@@ -22,3 +22,11 @@ The app's own SharingNotice (same storage and banner pattern). App stores' guida
 ## Done when
 - Component tests: no notice while `POLICY_URL` is empty; with it set, the notice shows when the stored version is older or missing on an existing install, and not after Read it or Dismiss; a save failure shows the message; on a first start only SharingNotice shows; Read it calls `Linking.openURL` with the URL.
 - `npm run typecheck` passes; the jest files you touched pass with `--runInBand`.
+
+## Carried from the bw-retention review (suggestions; do them where the code is yours to touch)
+- `server/src/retention.ts:63`: The gear set is sorted with localeCompare, which depends on the runtime's ICU collation. The archive primary key includes this text, so a collation change could split one archived row into two across runs. The build still counts correctly either way, but a plain string comparison (left < right ? -1 : 1) on the JSON keys gives a locale-independent key.
+- `server/src/table/release.ts:40`: Rule 8: the docstring on RATING_COLUMNS restates the name. Drop it, or say why the column list is shared (retention.ts must read exactly what tableRow reads so the fold and the build agree).
+- `server/src/table/release.ts:5`: Region is imported from '../../../src/model/region' on a separate line from AltitudeBand, which comes from the same module two lines up. Merge the two type imports.
+- `server/README.md:36`: This line runs well past the wrap width of the rest of the file, and 'the day rated (but its year)' reads oddly. Suggest: 'the day received and the day rated, all but the year of the latter, are gone'. The archive also drops version and feels-like temperature; 'exact weather' covers the latter but version is unmentioned.
+- `server/src/table/build.ts:144`: The empty-gear guard can only fire on a corrupt archive row, since validSharedRating requires at least one garment worn. Fine as a fail-loud, but a one-line comment saying so would stop a reader hunting for the path that produces an empty set.
+- `.ws-evidence/after-retention-test.log:8`: Evidence formatting only: the vitest banner prints the absolute home path in every saved log. Untracked, so nothing to fix on the branch; noted for the orchestrator's cleanup.
