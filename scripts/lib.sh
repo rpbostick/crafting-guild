@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # Shared helpers. Source, don't run. Every script starts with: . "$(dirname "$0")/lib.sh"
 WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The settings config.sh lets the environment override (written there as ${VAR-default}): a value set in the
+# environment wins over config.sh and config.local.sh alike, so a test can run with the bench hours off.
+ws_env=$(declare -p WS_BENCH_HOURS WS_BENCH_OUTSIDE 2>/dev/null | sed 's/^declare -[a-z-]*/declare -gx/' || true)
 # shellcheck source=../config.sh
 . "$WS/config.sh"
 # Private overrides (your own names for WS_ATTRIBUTION_RE, a different browser): kept out of a published copy.
 # shellcheck source=/dev/null
 [ -f "$WS/config.local.sh" ] && . "$WS/config.local.sh"
+[ -n "$ws_env" ] && eval "$ws_env"; unset ws_env
 # The lessons directory; the selftest points it at a scratch copy.
 WS_LESSONS_DIR="${WS_LESSONS_DIR:-$WS/lessons}"
 die() { echo "ws: $*" >&2; exit 1; }

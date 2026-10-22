@@ -112,7 +112,8 @@ in_bench_hours() { # <hour> -> 0 inside the window
   from=$((10#${WS_BENCH_HOURS%-*})); to=$((10#${WS_BENCH_HOURS#*-}))
   if [ "$from" -le "$to" ]; then [ "$h" -ge "$from" ] && [ "$h" -lt "$to" ]; else [ "$h" -ge "$from" ] || [ "$h" -lt "$to" ]; fi
 }
-bench_hour() { TZ="${WS_TZ:-}" date +%H; }
+# An empty TZ means UTC to date(1), so the local clock is used unless WS_TZ names a zone.
+bench_hour() { if [ -n "${WS_TZ:-}" ]; then TZ="$WS_TZ" date +%H; else date +%H; fi; }
 bench_last_start=""
 wait_for_hours() {
   local now wake; now=$(date +%s)

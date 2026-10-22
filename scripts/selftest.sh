@@ -29,6 +29,10 @@ bash -c "$hrs"'
   WS_BENCH_HOURS=22-07; in_bench_hours 23 && in_bench_hours 3 && ! in_bench_hours 7 && ! in_bench_hours 12 || exit 1
   WS_BENCH_HOURS=09-17; in_bench_hours 09 && ! in_bench_hours 17 && ! in_bench_hours 2 || exit 1
   WS_BENCH_HOURS=; in_bench_hours 12' && echo "bench hours ok" || { echo "bench hours FAILED"; exit 1; }
+# bench_hour reads the local clock when WS_TZ is empty (TZ="" would be UTC) and the named zone otherwise.
+bh=$(sed -n '/^bench_hour()/p' "$WS/scripts/bench.sh")
+[ "$(WS_TZ="" bash -c "$bh; bench_hour")" = "$(date +%H)" ] && [ "$(WS_TZ=Asia/Tokyo bash -c "$bh; bench_hour")" = "$(TZ=Asia/Tokyo date +%H)" ] \
+  && echo "bench hour ok" || { echo "bench hour FAILED"; exit 1; }
 # WS_BENCH_OUTSIDE=wait holds a replay outside the hours until they start (the clock reads 12, then 12, then 23).
 wfh=$(sed -n '/^wait_for_hours()/,/^}/p' "$WS/scripts/bench.sh")
 out=$(bash -c "$hrs
