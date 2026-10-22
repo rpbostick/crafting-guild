@@ -2,6 +2,8 @@
 
 **In flight right now**
 
+**STEP 5 (2026-10-21 18:40 MDT):** bw-share-upload reviewed at 9766742 (merge), merging; deps expo-crypto ~57.0.4 and @noble/hashes 2.4.0 installed by the orchestrator (9a47f82). One shared rating per outing (the detail replaces a queued one-press rating). Accepted: after sharing off/on, a detail for a one-press rating sent earlier can count twice (needs a switch between the two). Carry forward to the next task on src/share/ or src/sharing/: a rating saved while the setting is loading is never shared (RatingPanel.tsx:32); the startup flush ignores `live` (SharingProvider.tsx:44). Unchecked: the native crypto path on a device (rate once with sharing on in a dev build). Settings merged aaa246d, Worker 332ac3a. Next on the queue: bw-heat-indexes (gate). Step 6 (privacy policy) before the endpoint is set.
+
 **DISPATCHED (2026-10-21 12:14 MDT, Patrick ticked steps 3-5):** `bw-share-settings` ($5, light, gate: a Settings tab with the switch and the "what is shared" preview, the first-run notice on Today, the setting kept in device storage) by hand, beside the chain `ratings-share.queue`: `ratings-worker` ($10, full: `server/` package, `POST /v1/ratings`, the scrubbed table build, workerd tests, nothing deployed), then the settings gate, then `bw-share-upload` ($5, light: contributor key, queue, `flushQueue`, endpoint empty). Not in these steps: attested tokens and rate limits, the dataset, deploy, the privacy policy (step 6). Saluki tests run beside them and pause during merges.
 
 **KÖPPEN MERGED (2026-10-21):** bw-share-koppen 702f145 after one fix round (`task-bw-share-koppen-fix.md`).
