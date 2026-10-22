@@ -1,0 +1,3 @@
+# Replaces the yearly-totals archive with anonymized whole rows (product.md, RETENTION CHANGED).
+# Run with: bin/ws --project bike-weather chain plans/bike-weather/anonymize.queue   (under run_in_background)
+bw-anonymize plans/bike-weather/task-bw-anonymize.md --budget 5
