@@ -455,4 +455,9 @@ grep -q 'DUPLICATE' <<< "$lc" || { echo "lessons-check duplicate FAILED:"; echo 
 printf -- '- Ask before any infrastructure change: a replaced layer cost two days (demo, 2026-10-01).\n' > "$LC/orchestrator.local.md"
 lc=$(python3 "$WS/scripts/lessons-check.py" "$LC" 2>&1) && echo "lessons-check fixture ok" || { echo "lessons-check specific FAILED:"; echo "$lc"; exit 1; }
 lc=$(python3 "$WS/scripts/lessons-check.py" "$WS/lessons" 2>&1) && echo "private lessons add to the shared ones ok" || { echo "private lessons restate shared ones:"; grep -B1 -A1 'DUPLICATE' <<< "$lc"; exit 1; }
+# zdr-check: a model passes only while its page row says no training and 0 days, and a starred row's dated agreement holds.
+Z="$T/go.html"; printf '<td>DeepSeek V4.1 Flash</td><td>Not used</td><td>0 days*</td> <td>Muse Spark 1.3 Contributor</td><td>Yes</td><td>Not ZDR</td> <td>Hy3</td><td>Not used</td><td>0 days</td><p>DeepSeek: ZDR agreement is renewed monthly. The current agreement is valid through October 31, 2026.</p>' > "$Z"
+WS_TODAY=2026-10-31 "$WS/scripts/zdr-check.sh" --page "$Z" >/dev/null && "$WS/scripts/zdr-check.sh" --page "$Z" Hy3 >/dev/null \
+  && ! WS_TODAY=2026-11-01 "$WS/scripts/zdr-check.sh" --page "$Z" >/dev/null && ! "$WS/scripts/zdr-check.sh" --page "$Z" "Muse Spark 1.3 Contributor" >/dev/null \
+  && ! "$WS/scripts/zdr-check.sh" --page "$Z" "Absent Model" >/dev/null && echo "zdr-check ok" || { echo "zdr-check FAILED"; exit 1; }
 echo "selftest passed"
