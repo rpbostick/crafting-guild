@@ -1,0 +1,2 @@
+# Anonymized rows lose their insertion-order rowid (ratings-share.md, ENDPOINT PREP MERGED).
+bw-anon-order plans/bike-weather/task-bw-anon-order.md --budget 3
