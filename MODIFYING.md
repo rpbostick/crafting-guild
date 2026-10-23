@@ -89,7 +89,7 @@ lessons/*.md            per-role notes, pasted into prompts. The whole memory sy
                         present, is pasted after lessons/<role>.md (scripts/lib.sh, lessons_for): private lessons.
 checklist.md            what the reviewer applies. 20 rules; keep it that size.
 schema/*.json           the JSON a builder and a reviewer must return (Claude Code's --json-schema).
-projects/<slug>.conf    one registered project: path, branch, TEST_CMD, EXTRA_TOOLS, PREVIEW_CMD.
+projects/<slug>.conf    one registered project: path, branch, TEST_CMD, EXTRA_TOOLS, PREVIEW_CMD, COLD_START_CMD.
 plans/<slug>/           plans and task files, tracked here so the product repo stays clean.
 runs/<slug>/            logs, results, reviews, server pids, and evidence/<name>/ from each merged builder. Not tracked.
 VERSION, CHANGELOG.md   the version `ws version` prints, and the notes for each one.
