@@ -30,3 +30,8 @@ wrangler's `d1 migrations apply`, `d1 execute` and `deploy --dry-run` pages; the
 - A broken migration in the temp tree makes it exit non-zero; both runs are saved under `.ws-evidence/`.
 - `npm --prefix server test` and `npm --prefix server run typecheck` still pass.
 - The README names the command and what it checks.
+
+## Carried from the bw-cron review (suggestions; do them where the code is yours to touch)
+- `server/test/schedule.test.ts:15`: `declaredCrons` parses `wrangler.toml` with a line scan, so an array split across lines or a `crons` key in another table gives a confusing failure. Parsing with a maintained TOML parser such as smol-toml (MIT) would make it robust; a test helper beside this script may be the right home.
+- `server/test/schedule.test.ts:22`: `DAILY` and `WEEKLY` are taken by position. Find each by value, or import the constants from `src/index.ts`, so a swap in `wrangler.toml` fails clearly.
+- `server/src/index.ts:11`: the cron strings are duplicated between `index.ts` and `wrangler.toml`; a comment pointing at the test that ties them together would make the coupling visible.
