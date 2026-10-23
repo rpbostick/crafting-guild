@@ -2,7 +2,14 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
-## 2.5.4
+## 2.6.0
+
+- Builders can run on OpenCode (`ws dispatch --agent opencode`, `WS_AGENT`, `WS_OPENCODE_MODEL`; default model `opencode-go/deepseek-v4.1-flash`). The task's grants become OpenCode's permission config (every other command and any write outside the worktree is denied), the run stops at its budget from the per-step costs OpenCode reports, the JSON result is checked against the same schema, and the result check, review, chain and merge work as for Claude Code. `ws tail` reads OpenCode logs too.
+- `scripts/zdr-check.sh`: an OpenCode Go model is used only while OpenCode's page lists it as not used for training, kept 0 days, and under an unlapsed retention agreement; the launcher refuses it otherwise.
+- The orchestrator can run under OpenCode: `AGENTS.md` (the brief, with OpenCode's mechanisms where Claude Code's differ), `opencode.json` (loads the private preferences and lessons when present; missing files are skipped), `/cold-start`, and `docs/opencode-orchestrator.md`. A self-test check keeps the `bin/ws` commands named in `CLAUDE.md` and `AGENTS.md` the same.
+- `ws bench`: an arm can name its agent and model (`--arm L=<ref>,agent=opencode,model=<id>`), `--review none` grades on tests and done-when only, and `report --baseline recorded` compares with the tasks' first runs as recorded, without replaying them.
+
+## 2.5.4 (not released separately: part of 2.6.0)
 
 - `ws release` authors the public commit and tag as GitHub's no-reply address for the public repository's owner (or `RELEASE_NAME`/`RELEASE_EMAIL` from the conf), so the private repository's e-mail never reaches the public history.
 - `ws release` publishes a GitHub Pages site when the conf sets `PAGES_BUILD` (and `PAGES_DIR`, default `dist`): it builds from a clean clone of the new tag, scans the output for home paths and keys, and pushes it to the public repository's `gh-pages` branch.
