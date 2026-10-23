@@ -2,6 +2,7 @@
 
 **In flight right now**
 
+**2026-10-22 23:57 MDT:** `bw-token-lifetime` ($2, light: delete a token hash after 30 idle days, migration 0006, policy and gaps updated) and `bw-release-build` ($3, light research: where the weekly release build runs, with the measured CPU numbers and the free-tier limits) dispatched side by side. Patrick is creating the Cloudflare account (step 2); once `wrangler login` is done, step 3 follows: create the D1, wire its id, apply migrations, deploy, confirm logs off.
 **2026-10-22 23:42 MDT: night chain done, all six steps merged** (`night-2026-10-22.queue`, $30 cap, about $2.50 spent including reviews):
 - `bw-cap-race` d67dd57 ($0.05): the day caps are reserved by one conditional upsert, so two concurrent batches cannot exceed 30 ratings, 3 uploads or 2 contributor keys.
 - `bw-cron` 1f9facb ($0.03 + $0.21 review, merged by hand after a result-check false alarm): daily `0 3 * * *` (anonymize, retention status, `install_days` cleanup) and weekly `0 4 * * 1` (release build).

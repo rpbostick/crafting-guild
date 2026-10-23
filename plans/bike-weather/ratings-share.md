@@ -2,6 +2,7 @@
 
 **In flight right now**
 
+**2026-10-22 23:57 MDT:** `bw-token-lifetime` dispatched ($2, light): a 30-day idle lifetime for `install_tokens`, the policy sentence and gaps item 6 closed.
 **2026-10-22 23:42 MDT:** the night chain finished; nothing running. `bw-share-followups` merged 4eca25b and `bw-policy-prep` merged 69ebcf0 (see `deploy.md` for the whole chain). `docs/privacy-policy.md` is ready except the contact address, the controller identity, the effective date and hosting; `docs/privacy-policy-gaps.md` lists them. Open: `install_tokens` has no cleanup, so the policy either names a token lifetime or states it is kept; decide before publishing.
 **2026-10-22 22:31 MDT:** `bw-share-nits` merged 620cd81 ($0.04 + review $0.37, suite 165 s): the 401 retries on the next flush, `installsUrl` refuses a non-`ratings` endpoint, `stopSharing` forgets the token, the provider resolves held ratings on unmount, and the docs now state the 30/3/2 cap. Carried: a 401 loop mints a token per flush (bounded only by the 500/day cap) — add a test or a comment; a trailing-slash endpoint now throws, worth a test; the provider's unmount cleanup also runs under StrictMode (harmless, comment only).
 **INSTALL TOKEN MERGED (2026-10-22 22:12 MDT):** `bw-install-token` f085131: a per-install token from `POST /v1/installs` and the 30/3/2/500 daily caps, client `MAX_BATCH` 30. The read-then-write race is documented (up to two concurrent batches).
