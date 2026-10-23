@@ -2,6 +2,8 @@
 
 **In flight right now**
 
+**2026-10-22 22:20 MDT:** `bw-share-nits` dispatched ($2, light): the install-token review's three edge cases (401 clears `lastAttemptAt`; `installsUrl` asserts the `ratings` segment; `stopSharing` deletes the token), the queue docstring, the provider's unmount path, the two corrected lines in `ratings-sharing.md` question 5, the option-A cost cell, and the `need.ts` docstring.
+**INSTALL TOKEN MERGED (2026-10-22 22:12 MDT):** `bw-install-token` f085131: a per-install token from `POST /v1/installs` and the 30/3/2/500 daily caps, client `MAX_BATCH` 30. The read-then-write race is documented (up to two concurrent batches).
 **2026-10-22 21:47 MDT:** nothing running. `bw-heat-cleanup` merged 61fdbd1 (review merge; $1.76 + $0.45): `heatIndexC` is gone from `Need['heat']` and `HeatView`; the native crypto test now proves the native path; the upload POST aborts after 30 s and keeps the queue; ratings held while the setting loads survive a remount; a provider started with sharing off clears the queue and secret. Carried suggestions: reflow the `need.ts:192` docstring; say in the provider what happens to held ratings when it unmounts during loading; add a red run for the two new provider tests.
 
 **CPU AND SKY MERGED (2026-10-22 13:55 MDT):** bw-cpu-measure 80bc5f2 (only ~250 ratings fit the free plan's 10 ms; deploy.md step 1 has the numbers and the off-Worker build to decide), bw-sky-vendor 76ab1b5 (weather code in `src/weather/sky/`, the `file:../skywright` link and `.worktrees/skywright` gone). Carry forward: `skywrightService.ts` keeps its old name. Now: the Hermes policy-notice trial on the fixed sandbox. Device check next week.
