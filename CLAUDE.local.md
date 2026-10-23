@@ -22,3 +22,8 @@ Read with CLAUDE.md; where they differ, this file wins. Not part of a public rel
 - Credits the audit checks for this installation's projects: Open Peeps CC0, React Bits MIT + Commons Clause, Open-Meteo CC BY 4.0. Not redistributable: reference photos, BodyM (non-commercial). colorwright's `build-static.sh` is the example of a build that fails on a leak pattern.
 - Policy decided 2026-09-28; which agent-readable material each release carries is settled with Patrick per release.
 - Crafting Guild is published from this repository with `ws --project crafting-guild release` (`RELEASE_PATHS` in its conf); this file, `lessons/*.local.md`, `config.local.sh`, `plans/`, `projects/*.conf`, `reports/` and `CHANGELOG.md` stay here.
+
+## Two orchestrators (2026-10-22)
+- The OpenCode session (in VSCodium, `WS_PROJECT=bike-weather opencode`) owns Bike Weather: it plans, dispatches, reviews and merges there. The Claude Code session owns every other project (figurewright, Crafting Guild, the rest) and the replay bench, and checks the OpenCode session's Bike Weather merges afterwards.
+- Neither acts on the other's projects. In this shared repo, commit only the files you changed yourself (`git add <paths>`, never `git commit -a` or `git add -A`), and never edit a plan file the other session has uncommitted changes in.
+- Builders run on OpenCode + DeepSeek V4.1 Flash by default (`WS_AGENT=opencode` in config.local.sh); pass `--agent claude` only when a task needs Claude. Reviews stay on Claude.
