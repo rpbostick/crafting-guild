@@ -26,3 +26,10 @@ Never start a real OpenCode or Claude session: the stand-ins only.
 - `bench.sh report --baseline recorded <slug>` prints the recorded Claude runs beside the opencode arm, with the agent and model in the arm column.
 - An existing `--arm <label>=<ref>` bench still runs and reports as before (the existing bench self-test checks pass unchanged).
 - `bash scripts/selftest.sh` passes in full.
+
+## Carried from the cg-agents-md review (suggestions; do them where the code is yours to touch)
+- `docs/opencode-orchestrator.md:34`: Rule 3: this line and the table row at line 62 say the built-in tool and its permission are called `shell`. This repository's own OpenCode config uses `permission.bash` (scripts/selftest.sh reads `.permission.bash` from the generated config), and the denied-tool fixture prints 'DENIED bash'. Check the name against the cited docs/tools page, or say that the installed version calls it `bash`.
+- `scripts/selftest.sh:598`: Rule 15: the new For/comprehension branch of the single-letter check was shown to work only with a scratch probe in .ws-evidence/. Add a small committed case to the suite, for example run the checker on an inline snippet and expect it to fail, so the extension cannot quietly stop working.
+- `scripts/selftest.sh:8`: The parity check runs in one direction only (CLAUDE.md to AGENTS.md). A bin/ws command added only to AGENTS.md would not be caught. Consider `comm -3` so either side's extra command fails the check, which is what the MODIFYING.md line 'a bin/ws command named in one is missing from the other' already describes.
+- `opencode.json:4`: It names CLAUDE.local.md and lessons/orchestrator.local.md, which are private and excluded from public releases. The docs record this, but nothing enforces it at release time. Consider a release-audit or release.sh check that a public tree either ships those files or drops the entries.
+- `AGENTS.md:11`: Wait step: 'OpenCode's shell defaults to a two-minute foreground timeout' rests on the v2 page only, while the v1 page gives no figure. The docs file says so; consider making AGENTS.md just as cautious ('may default to').
