@@ -168,6 +168,11 @@ while IFS= read -r c; do
   pat="Bash($g*)"; printf '%s\n' "${TOOLS[@]}" "${derived[@]}" | grep -qxF "$pat" || derived+=("$pat")
 done <<< "$cmds"
 [ ${#derived[@]} -gt 0 ] && { TOOLS+=("${derived[@]}"); note "grants from ## Commands: ${derived[*]}"; }
+# Both commands in a compound entry can be granted and the call is still denied as one Bash call. Say it at
+# dispatch: the audit found the denied-call class the most recurrent defect, and a lost turn is silent.
+if printf '%s\n' "$cmds" | grep -qE '(\|\||&&|\||;)'; then
+  note "warning: a ## Commands entry looks compound (|, &&, ||, ;); builders run one command per call, so split it"
+fi
 # A task that names WebSearch or WebFetch (research) gets them; without a grant they are denied silently.
 # "WebSearch", "web search" and "web-search" all count (research tasks are written in prose).
 grep -qiE '\bweb[ -]?search\b' "$task" && TOOLS+=("WebSearch")
