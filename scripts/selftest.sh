@@ -460,4 +460,68 @@ Z="$T/go.html"; printf '<td>DeepSeek V4.1 Flash</td><td>Not used</td><td>0 days*
 WS_TODAY=2026-10-31 "$WS/scripts/zdr-check.sh" --page "$Z" >/dev/null && "$WS/scripts/zdr-check.sh" --page "$Z" Hy3 >/dev/null \
   && ! WS_TODAY=2026-11-01 "$WS/scripts/zdr-check.sh" --page "$Z" >/dev/null && ! "$WS/scripts/zdr-check.sh" --page "$Z" "Muse Spark 1.3 Contributor" >/dev/null \
   && ! "$WS/scripts/zdr-check.sh" --page "$Z" "Absent Model" >/dev/null && echo "zdr-check ok" || { echo "zdr-check FAILED"; exit 1; }
+# OpenCode builders: a stand-in opencode first on PATH replays a real OpenCode log (one bash call, two step costs, a
+# final text) with the final text set by OC_STUB, and records each call, so no check can reach a real model.
+# Every check runs and the section fails at its end.
+of=0; ofail() { echo "$1 FAILED:"; printf '%s\n' "${2:-}" | sed -n 1,25p; of=1; }
+mkdir -p "$T/ocbin"; cat > "$T/ocbin/opencode" <<'STUB'
+#!/bin/bash
+case " $* " in *" --session "*) call=continue ;; *) call=first ;; esac
+echo "$call stdin=$(readlink /proc/self/fd/0) config=$(jq -r '.permission.bash["*"]' <<< "${OPENCODE_CONFIG_CONTENT:-{\}}")" >> "$OC_CALLS"
+valid='{"status":"done","summary":"stand-in","files_changed":[],"commits":[],"tests":null,"denied":[],"done_when":[{"item":"x","status":"met","basis":"inferred","evidence":"r"}],"unknowns":[],"open_questions":[]}'
+case "$OC_STUB" in
+  valid) t="Done. $valid" ;; invalid) t='{"status":"done"}' ;;
+  fix) [ "$call" = continue ] && t="$valid" || t='{"status":"done"}' ;;
+  slow) head -3 "$OC_SAMPLE"; exec sleep 30 ;;
+esac
+jq -c --arg t "$t" 'if .type == "text" then .part.text = $t else . end' "$OC_SAMPLE"
+STUB
+chmod +x "$T/ocbin/opencode"; ocr="$WS/runs/$slug"
+oc() { PATH="$T/ocbin:$PATH" OC_CALLS="$T/oc-calls" OC_SAMPLE="$WS/scripts/fixtures/opencode-sample.jsonl" WS_ZDR_PAGE="$Z" WS_TODAY="${OC_TODAY:-2026-10-31}" OC_STUB="$1" "${@:2}"; }
+# Runs the launcher alone on the stand-in: $1 the stand-in's mode, $2 the run name, $3 the budget.
+ocb() { rm -f "$T/oc-calls"; oc "$1" "$WS/scripts/opencode-builder.sh" --model opencode-go/deepseek-v4.1-flash --budget "$3" --config "$ocr/demo.opencode.json" \
+  --log "$ocr/$2.jsonl" --name "ws:$slug:$2" "$T/task.md" > "$ocr/$2.jsonl" 2>&1; }
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run --agent opencode demo "$T/task.md" 2>&1) && x=0 || x=1
+cfg="$ocr/demo.opencode.json"; allowed=$(jq -r '.permission.bash | to_entries[] | select(.value == "allow") | .key' "$cfg" 2>/dev/null | sort)
+[ "$x" = 0 ] && grep -qx 'agent: opencode model: opencode-go/deepseek-v4.1-flash' <<< "$out" && grep -qF '"git push *": "deny"' <<< "$out" \
+  && [ -s "$ocr/demo.grants" ] && [ -z "$(sort "$ocr/demo.grants" | comm -23 - <(printf '%s\n' "$allowed"))" ] \
+  && [ "$(jq -r '[.permission.bash["git push *", "git config *", "git rebase *", "*"]] | unique | join(",")' "$cfg")" = deny ] \
+  && ! grep -q '"ask"' "$cfg" && [ "$(jq -r '[.share, .permission.external_directory, .permission.webfetch] | join(",")' "$cfg")" = disabled,deny,deny ] \
+  && echo "dispatch --agent opencode dry run shows the agent, model and permissions ok" || ofail "opencode dry run" "$out"
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run --agent opencode --model deepseek demo "$T/task.md" 2>&1) && x=0 || x=1
+[ "$x" = 1 ] && grep -q 'takes a provider/model ID' <<< "$out" && echo "opencode model without a provider refused ok" || ofail "opencode bare model" "$out"
+# A full dispatch on the stand-in: the run ends with a result line check-result accepts.
+rm -f "$T/oc-calls"; out=$(oc valid "$WS/scripts/dispatch.sh" --project "$slug" --agent opencode --budget 1 ocrun "$T/task.md" 2>&1) || true
+for _ in $(seq 200); do [ -f "$ocr/ocrun.pid" ] || break; sleep 0.1; done
+res=$(cat "$ocr/ocrun.result.txt" 2>/dev/null || true)
+[ ! -f "$ocr/ocrun.pid" ] && grep -q '^done: stand-in' <<< "$res" && ! grep -q '^FAIL' <<< "$res" && grep -q 'ok    no denied calls' <<< "$res" \
+  && grep -q '^cost=\$0.001591' <<< "$res" && [ "$(cat "$T/oc-calls" 2>/dev/null)" = "first stdin=/dev/null config=deny" ] \
+  && echo "opencode run ends with a result check-result accepts ok" || ofail "opencode run result" "$out
+$res
+$(tail -3 "$ocr/ocrun.jsonl" 2>/dev/null)"
+git -C "$T" worktree remove --force "$T/.worktrees/ocrun" 2>/dev/null; git -C "$T" branch -q -D agent/ocrun 2>/dev/null || true
+# Over the budget: the first step's cost passes it, the stand-in is stopped by PID, and the run is reported partial.
+t0=$(date +%s); ocb slow ocslow 0.001; secs=$(( $(date +%s) - t0 ))
+so=$(grep '"type":"result"' "$ocr/ocslow.jsonl" | tail -1 | jq -c .structured_output)
+[ "$secs" -lt 15 ] && [ "$(jq -r .status <<< "$so")" = partial ] && grep -q 'over the \$0.001 budget' <<< "$so" && [ "$(cat "$T/oc-calls")" = "first stdin=/dev/null config=deny" ] \
+  && echo "opencode run over budget is stopped and partial ok" || ofail "opencode budget stop (${secs}s)" "$(cat "$ocr/ocslow.jsonl")"
+# An invalid final JSON gets exactly one continue: a valid reply there is the result; a second invalid one leaves it null.
+ocb fix ocfix 1; so=$(grep '"type":"result"' "$ocr/ocfix.jsonl" | tail -1 | jq -c .structured_output)
+[ "$(cut -d' ' -f1 "$T/oc-calls" | paste -sd,)" = first,continue ] && [ "$(jq -r .summary <<< "$so")" = stand-in ] \
+  && echo "opencode invalid result is fixed by one continue ok" || ofail "opencode continue fixes" "$(cat "$T/oc-calls" "$ocr/ocfix.jsonl")"
+ocb invalid ocbad 1; res=$("$WS/scripts/check-result.sh" --project "$slug" ocbad 2>&1) && x=0 || x=1
+[ "$(cut -d' ' -f1 "$T/oc-calls" | paste -sd,)" = first,continue ] && [ "$(grep '"type":"result"' "$ocr/ocbad.jsonl" | jq -c .structured_output)" = null ] \
+  && [ "$x" = 1 ] && grep -q 'FAIL  no structured result' <<< "$res" && echo "opencode result still invalid after one continue is null ok" || ofail "opencode continue fails" "$(cat "$T/oc-calls")
+$res"
+# A model zdr-check refuses (the fixture's agreement has lapsed by this date) never starts the stand-in.
+OC_TODAY=2026-11-01 ocb valid ocrefused 1 || true; res=$("$WS/scripts/check-result.sh" --project "$slug" ocrefused 2>&1 || true)
+[ ! -e "$T/oc-calls" ] && grep -q 'no structured result: refused: zdr-check: DeepSeek V4.1 Flash: the DeepSeek ZDR agreement lapsed' <<< "$res" \
+  && echo "opencode model refused by zdr-check never starts ok" || ofail "opencode zdr refusal" "$res
+$(cat "$ocr/ocrefused.jsonl")"
+# Denied tool calls in an OpenCode log reach the result line as Claude's permission_denials.
+jq -c 'if .type == "tool_use" then .part.state = {"status":"error","input":{"command":"git push origin"},"error":"The user has specified a rule which prevents you from using this specific tool call."} else . end' \
+  "$WS/scripts/fixtures/opencode-sample.jsonl" > "$T/oc-denied.jsonl"
+d=$(python3 -I "$WS/scripts/opencode_run.py" result "$T/oc-denied.jsonl" "$WS/schema/result.json" 1 0 | jq -c '[.permission_denials[] | .tool_input.command // .tool_name]')
+[ "$d" = '["git push origin"]' ] && echo "opencode denials reported ok" || ofail "opencode denials" "$d"
+[ "$of" = 0 ] || exit 1
 echo "selftest passed"

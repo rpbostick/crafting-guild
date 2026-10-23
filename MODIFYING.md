@@ -17,7 +17,17 @@ CLAUDE.local.md         optional private orchestrator preferences; Claude Code l
 scripts/lib.sh          shared helpers; loads projects/<slug>.conf into variables.
 scripts/cold-start.sh   ground truth in ~20 s. Git state, worktrees, running builders, servers, in-flight block.
 scripts/dispatch.sh     creates the worktree, builds the builder prompt and grant, runs claude -p in the background,
-                        then runs check-result.sh when it ends.
+                        then runs check-result.sh when it ends. `--agent opencode` (or WS_AGENT) runs opencode-builder.sh
+                        in its place, with the grants written to runs/<slug>/<name>.opencode.json.
+scripts/opencode-builder.sh  the OpenCode launcher: zdr-check.sh on the model's display name (WS_OPENCODE_MODEL_NAMES)
+                        before anything runs, then `opencode run --format json` with the permission config in
+                        OPENCODE_CONFIG_CONTENT and stdin closed; stops OpenCode by PID once the step costs pass the
+                        budget; continues the session once when the reply is not a valid result; appends a Claude-shaped
+                        `result` line (cost, tokens, permission_denials, structured_output) for check-result.sh.
+scripts/opencode_run.py the launcher's parts: the permission config (bash deny except each Bash grant, the DENY list last,
+                        nothing left at "ask"), the budget watch, the stdlib schema check, the result line.
+scripts/fixtures/       a real OpenCode log the selftest's stand-in opencode replays.
+scripts/zdr-check.sh    whether an OpenCode Go model is zero-retention with no training, from OpenCode's Go page.
 scripts/check-result.sh reads the run's final JSON and checks its claims against the branch: commits, test logs,
                         each done-when item (a `done` with an item not met fails; observed evidence must exist).
 scripts/review.sh       diff on stdin to a read-only reviewer; writes runs/<slug>/<name>.review.{json,md}.
@@ -79,6 +89,7 @@ state/current           the last project opened with `ws <slug>`; what a termina
 | Forbid something | the `DENY` array in `scripts/dispatch.sh`. |
 | Change what counts as attribution | `WS_ATTRIBUTION_RE` in `config.sh` (merge refuses added lines, dispatch refuses task files; `--names-ok` for a scrub task). Intended credits: `CREDIT_PATHS` in the project's conf. |
 | Change the default budget, timeout or model | `config.sh`; or per run with `--budget`, `--timeout`, `--model`, `--effort`. |
+| Run builders on OpenCode | `WS_AGENT="opencode"` in `config.sh`, or `--agent opencode` per run (also in a chain queue's flags); the model is `WS_OPENCODE_MODEL` or `--model provider/model`, and it must be in `WS_OPENCODE_MODEL_NAMES` with its Go page name, or the launcher refuses it. |
 | Change how a builder behaves | `agents/builder.md` (the role) or `lessons/builder.md` (specific lessons; `lessons/builder.local.md` for private ones). All go into every builder prompt verbatim; `ws dispatch --print-prompt <name> <task>` shows the result. |
 | Change what a review checks | `checklist.md`. Add a rule only by removing one. `agents/reviewer.md` sets the reviewer's posture (what blocks, what is a suggestion). `ws review --print-prompt <name>` shows the reviewer's whole prompt. |
 | Change what counts as a valid result | `schema/result.json`; then update the checks in `scripts/check-result.sh`. |
