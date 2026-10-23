@@ -26,7 +26,9 @@ Builders are launched as `claude -p` (`scripts/dispatch.sh`, the `cmd=(claude -p
 - `scripts/zdr-check.sh` for the privacy guard.
 
 ## Commands
-`bash scripts/selftest.sh`, `bash -n *`, `shellcheck *`, `python3 *`, `jq *`, `git add`, `git commit`, `git mv`, `grep *`. One command per Bash call. Never run a real `opencode` or `claude` (the stand-ins only). No installs.
+The project test command (the self-test) and syntax checks are already granted. Also: `shellcheck *`, `python3 *`, `jq *`, `git add`, `git commit`, `git mv`, `grep *`. One command per Bash call. No installs.
+
+Never start a real OpenCode or Claude session: the stand-ins only.
 
 ## Leave alone
 `plans/`, `projects/`, `lessons/`, `CLAUDE.md`, `*.local.*`. The Claude launch path must behave exactly as before.
