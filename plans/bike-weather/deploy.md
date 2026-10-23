@@ -2,7 +2,9 @@
 
 **In flight right now**
 
-Nothing. Planned 2026-10-22; every step below that creates an account, a database or a public address is put to Patrick first.
+**2026-10-22 21:47 MDT:** nothing running. `bw-abuse-limits` merged a0304e1 ($1.60 + review $0.38): step 6 is answered in `docs/research/abuse-limits.md` and the recommendation is **option C** — launch with a simple server-issued per-install token and a daily cap, add attestation in a later update. Cap per token per UTC day: 30 new ratings and 3 uploads, 2 contributorKeys; 500 new tokens a day service-wide; `MAX_BATCH` in `src/share/shareQueue.ts` drops 100 → 30. Free-plan cost about 121 rows written per upload at the cap (~820 installs a day at 30 ratings). `bw-heat-cleanup` merged 61fdbd1 ($1.76 + review $0.45). Still open: step 2 (Cloudflare account, Patrick), the option-A build task, and the two contradictory lines in `ratings-sharing.md` question 5 (it still says 50 a day and that a revoked token's ratings are dropped from the build; abuse-limits.md corrects both).
+
+Planned 2026-10-22; every step below that creates an account, a database or a public address is put to Patrick first.
 
 ## Why
 Shared ratings have nowhere to go: `src/share/endpoint.ts` is empty and the Worker (`server/`) runs only locally. Going live needs a Cloudflare account, the D1 database, a schedule for the release build and the retention step, the endpoint set in the app, and the privacy policy published at an address the app can link to.
@@ -18,7 +20,7 @@ Shared ratings have nowhere to go: `src/share/endpoint.ts` is empty and the Work
 3. **Database and Worker** (orchestrator, after asking): `wrangler d1 create bike-weather-ratings`, put its id in `wrangler.toml`, `wrangler d1 migrations apply --remote`, `wrangler deploy`. Logging stays off; check in the dashboard that Workers Logs and invocation logs show off.
 4. **Schedule** (light builder task): cron triggers in `wrangler.toml` for the release build (weekly) and anonymization (daily), within the 5-trigger limit, shaped by step 1.
 5. **Retention flag at cold start** (tool change, ask first: a project hook in `scripts/cold-start.sh`): run `server/scripts/retention-status.sh --remote` and print its line when flagged.
-6. **Abuse limits before the address is public** (research, then a task): attested install tokens (App Attest, Play Integrity) and a per-token daily cap were left out of the Worker step; decide with Patrick whether launch waits for them or starts with a simple per-day cap.
+6. **Abuse limits before the address is public (research done 2026-10-22, bw-abuse-limits a0304e1):** `docs/research/abuse-limits.md`. Play Integrity allows 10,000 token decodes a day on the free quota; `@expo/app-integrity` (MIT) is alpha; App Attest needs iOS 14+ and a fallback path anyway; the Rate Limiting binding's free-plan status is still unknown but the design does not need it. **Decision: launch with option A** — a server-issued per-install token, a `install_days` counter in D1, 30 new ratings and 3 uploads per token per day, 2 contributorKeys, 500 new tokens a day, and `MAX_BATCH` 100 → 30 in `src/share/shareQueue.ts`; attestation in a later update if the table shows abuse. Next: a build task for the token endpoint, the counter and the client `MAX_BATCH` change (local tests; no account needed).
 7. **Policy published** (Patrick's contact address first): the draft (`privacy-policy-draft.md`) checked by someone who knows the law where the app is offered, then published (a GitHub Pages page on rpbostick.github.io is free); `POLICY_URL` and `POLICY_VERSION` set in `src/privacy/policy.ts`.
 8. **Endpoint set** in `src/share/endpoint.ts`, after steps 3 to 7. Release audit for the app's store listing.
 
