@@ -1,7 +1,7 @@
 # Fix round 1 for `task-fw-vests-shells.md`: five garments that don't read as themselves yet
 
 Track: light
-Resume: the worktree holds the sixteen garments (9546216). Continue from it.
+Resume: the worktree holds the sixteen garments (9546216) and an earlier attempt at this fix round, uncommitted (14 files), which timed out at 90 minutes while checking crops of its renders. Read `git diff` first. Commit each of the five fixes as soon as its test passes, one commit per fix, before redrawing anything. Keep changes to `src/garments/`, `test/garments/` and the sheet spec; if the earlier attempt changed `spike/` or `src/garments/import/`, keep those edits only if a type change requires them, and say why. Draw the sheet once at the end; look at it whole, not in crops.
 
 The render sheet (`.ws-evidence/sheets/vests-shells.png`) was looked at. Eleven garments read right. Five do not:
 1. **Wind vest:** drawn with short cap sleeves. It must be sleeveless: the torso piece ends at open armholes, with no piece on the arm chain, so over a jersey the jersey's full sleeves show from the shoulder.
