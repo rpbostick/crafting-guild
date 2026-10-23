@@ -1,0 +1,10 @@
+# Bike Weather, night of 2026-10-22: the endpoint's strictness, schedule, deploy checks and policy text.
+# Run with: bin/ws --project bike-weather chain plans/bike-weather/night-2026-10-22.queue
+# Every step is invisible in the app, so all merge on tests with no gate. The queue stops only for a
+# failed/partial run, a review that is not `merge` after its fix round, or a failed merge.
+bw-cap-race       plans/bike-weather/task-bw-cap-race.md --budget 2
+bw-cron           plans/bike-weather/task-bw-cron.md --budget 1
+bw-deploy-dry-run plans/bike-weather/task-bw-deploy-dry-run.md --budget 2
+bw-e2e-measure    plans/bike-weather/task-bw-e2e-measure.md --budget 3 --timeout 60m
+bw-share-followups plans/bike-weather/task-bw-share-followups.md --budget 1
+bw-policy-prep    plans/bike-weather/task-bw-policy-prep.md --budget 2 --input plans/bike-weather/privacy-policy-draft.md
