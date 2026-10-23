@@ -4,11 +4,13 @@ set -euo pipefail
 WS="$(cd "$(dirname "$0")/.." && pwd)"
 for f in "$WS"/bin/ws "$WS"/scripts/*.sh; do bash -n "$f" && echo "syntax ok  ${f#"$WS"/}"; done
 if command -v shellcheck >/dev/null; then shellcheck -S warning "$WS"/bin/ws "$WS"/scripts/*.sh && echo "shellcheck ok" || { echo "shellcheck FAILED"; exit 1; }; fi
-# The two orchestrator briefs cannot drift on commands: every bin/ws command CLAUDE.md names is named in AGENTS.md too.
+# The two orchestrator briefs cannot drift on commands: a bin/ws command named in one is named in the other.
 claude_ws=$(grep -oE 'bin/ws [a-z][a-z-]*' "$WS/CLAUDE.md" | sort -u || true)
 agents_ws=$(grep -oE 'bin/ws [a-z][a-z-]*' "$WS/AGENTS.md" | sort -u || true)
-missing_ws=$(comm -23 <(printf '%s\n' "$claude_ws") <(printf '%s\n' "$agents_ws"))
-[ -z "$missing_ws" ] && echo "AGENTS.md names every bin/ws command CLAUDE.md names ok" || { echo "AGENTS.md parity FAILED: missing: $missing_ws"; exit 1; }
+only_claude=$(comm -23 <(printf '%s\n' "$claude_ws") <(printf '%s\n' "$agents_ws"))
+only_agents=$(comm -13 <(printf '%s\n' "$claude_ws") <(printf '%s\n' "$agents_ws"))
+[ -z "$only_claude$only_agents" ] && echo "CLAUDE.md and AGENTS.md name the same bin/ws commands ok" \
+  || { echo "brief parity FAILED: only in CLAUDE.md: ${only_claude:-none}; only in AGENTS.md: ${only_agents:-none}"; exit 1; }
 # OpenCode's project config must stay valid JSON and load the private preferences and both orchestrator lessons files.
 jq -e '.share == "disabled"
   and (.instructions | index("CLAUDE.local.md"))
@@ -345,7 +347,7 @@ RB="$WS/runs/$slug2"; mkdir -p "$RB"
 printf 'task=%s\nstarted=%s\nbudget=7\ntimeout=120m\n' "$H/plans/$slug2/task-bx.md" "$(date -d "@$((now-5400))" '+%Y-%m-%d %H:%M %Z')" > "$RB/bx.20260101T000000Z.task.txt"
 printf 'task=%s\nstarted=%s\nbudget=3\ntimeout=120m\n' "$H/plans/$slug2/task-bx-fix-auto-1.md" "$(date '+%Y-%m-%d %H:%M %Z')" > "$RB/bx.task.txt"
 cat > "$RB/bx.20260101T000000Z.jsonl" <<'JSONL'
-{"type":"system","subtype":"init"}
+{"type":"system","subtype":"init","model":"claude-opus-5-5"}
 {"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"a"}],"usage":{"input_tokens":10,"cache_read_input_tokens":900,"cache_creation_input_tokens":90,"output_tokens":5}}}
 {"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}],"usage":{"input_tokens":10,"cache_read_input_tokens":900,"cache_creation_input_tokens":90,"output_tokens":40}}}
 {"type":"user","message":{"content":[{"type":"tool_result","content":"a.txt"}]}}
@@ -595,7 +597,7 @@ tout=$(cat "$T/tail.out")
   && echo "ws tail shows OpenCode events and skips non-JSON notes ok" || ofail "ws tail OpenCode" "$tout"
 # opencode_run.py names variables in words, including for-loop and comprehension targets; a single letter is only
 # the loop counter i or the throwaway _.
-python3 - "$WS/scripts/opencode_run.py" <<'PY' && echo "opencode_run names variables in words ok" || { echo "opencode_run single-letter names FAILED"; of=1; }
+single_letter_check=$(cat <<'PY'
 import ast, sys
 tree = ast.parse(open(sys.argv[1]).read())
 bad = []
@@ -621,5 +623,43 @@ if bad:
     print("single-letter names:", sorted(set(bad)))
 sys.exit(1 if bad else 0)
 PY
+)
+python3 -c "$single_letter_check" "$WS/scripts/opencode_run.py" && echo "opencode_run names variables in words ok" || { echo "opencode_run single-letter names FAILED"; of=1; }
+# The check itself still catches a single-letter for-loop target and a comprehension target.
+printf 'for x in []:\n    pass\n' > "$T/letters-for.py"; printf 'names = [y for y in []]\n' > "$T/letters-comp.py"
+! python3 -c "$single_letter_check" "$T/letters-for.py" >/dev/null && ! python3 -c "$single_letter_check" "$T/letters-comp.py" >/dev/null \
+  && echo "single-letter check catches loop and comprehension targets ok" || { echo "single-letter check missed a loop or comprehension target"; of=1; }
 [ "$of" = 0 ] || exit 1
+# bench with another agent: an arm built by the stand-in opencode, not reviewed, beside the recorded first run of bx
+# (its record was moved aside by a later round, so its tests and verdict are unknown; its done-when is read here).
+printf 'ok    done-when met observed: one\nnote  done-when partial inferred: two\n' > "$RB/bx.20260101T000000Z.result.txt"
+rm -f "$T/oc-calls"; n0=$(ls "$T/stub-log" | wc -l)
+ds_arm="ds=HEAD,agent=opencode,model=opencode-go/deepseek-v4.1-flash"
+out=$(PATH="$T/ocbin:$PATH" OC_CALLS="$T/oc-calls" OC_SAMPLE="$WS/scripts/fixtures/opencode-sample.jsonl" WS_ZDR_PAGE="$Z" WS_TODAY=2026-10-31 OC_STUB=valid \
+  wsb bench run "$slug2" --arm "$ds_arm" --review none bx) && x=0 || x=1
+dsrow=$(awk -F'\t' '$3=="ds"' "$rt" || true); armrow=$(awk -F'\t' '$1=="ds"' "$WS/runs/$slug2/bench/arms.tsv" || true)
+[ "$x" = 0 ] && [ "$(cut -d' ' -f1 "$T/oc-calls" 2>/dev/null)" = first ] && [ "$(ls "$T/stub-log" | wc -l)" = "$n0" ] \
+  && [ "$(cut -f6,10 <<< "$dsrow")" = "$(printf 'done\tunreviewed')" ] && [ "$(cut -f17 <<< "$dsrow")" = 0.0016 ] \
+  && [ "$(cut -f2,4,5 <<< "$armrow")" = "$(printf 'HEAD\topencode\topencode-go/deepseek-v4.1-flash')" ] && grep -q 'not reviewed (--review none)' <<< "$out" \
+  && echo "bench arm on opencode dispatches through the launcher, unreviewed ok" || bfail "bench opencode arm" "$out
+$dsrow
+$armrow"
+out=$(wsb bench report --baseline recorded "$slug2" || true); rec=$(awk -F'\t' '$3=="recorded"' "$WS/runs/$slug2/bench/recorded.tsv" 2>/dev/null || true)
+grep -qE '^  agent +.*opencode.*claude|^  agent +.*claude.*opencode' <<< "$out" && grep -q 'opencode-go/deepseek-v4.1-flash' <<< "$out" && grep -q 'claude-opus-5-5' <<< "$out" \
+  && grep -q '^baseline arm: recorded$' <<< "$out" && grep -q 'notional per-token prices' <<< "$out" && grep -q 'arm ds: not reviewed (--review none).*empty by choice' <<< "$out" \
+  && grep -q '^    recorded (claude claude-opus-5-5): tests 0/0  done-when 1/2  merge 0/0' <<< "$out" && grep -q '^    ds (opencode opencode-go/deepseek-v4.1-flash): ' <<< "$out" \
+  && [ "$(cut -f7,8,9,10,17,18 <<< "$rec")" = "$(printf '\t1\t2\t\t0.5\t2.5')" ] \
+  && echo "bench report --baseline recorded prints the recorded first run beside the opencode arm ok" || bfail "bench report recorded" "$out
+$rec"
+# An arms.tsv row from before arms had an agent (three fields) is the same arm without keys, and a different one with them.
+printf 'old\tHEAD\t%s\n' "$(git -C "$WS" rev-parse HEAD)" >> "$WS/runs/$slug2/bench/arms.tsv"
+out=$(wsb bench run "$slug2" --arm old=HEAD --dry-run bx) && x=0 || x=1
+out2=$(wsb bench run "$slug2" --arm old=HEAD,agent=opencode --dry-run bx) && x2=0 || x2=1
+[ "$x" = 0 ] && grep -q 'agent default model default review claude' <<< "$out" && [ "$x2" = 1 ] && grep -q 'arm old was HEAD agent= model= in earlier runs' <<< "$out2" \
+  && echo "bench reads an arms.tsv row without agent and model ok" || bfail "bench old arms row" "$out
+$out2"
+# --review with no value is a usage error, not a parse loop that never ends (shift 2 past the end leaves $1 in place).
+out=$(PATH="$T/stub:$PATH" timeout 10 "$WS/bin/ws" bench run "$slug2" --arm old=HEAD --review 2>&1) && x=0 || x=$?
+[ "$x" = 1 ] && grep -q -- '--review takes none or claude' <<< "$out" && echo "bench --review without a value fails loud ok" || bfail "bench --review without a value (exit $x)" "$out"
+[ "$bf" = 0 ] || exit 1
 echo "selftest passed"
