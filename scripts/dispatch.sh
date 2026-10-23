@@ -224,6 +224,7 @@ if [ "$agent" = opencode ]; then
   oc_config="$RUNS/$name.opencode.json"; oc_prompt="$RUNS/$name.prompt.txt"
   dargs=(); for d in "${DENY[@]}"; do dargs+=(--deny "$d"); done
   python3 -I "$WS/scripts/opencode_run.py" config "${TOOLS[@]}" "${dargs[@]}" > "$oc_config" || die "could not build the OpenCode config"
+  [ -n "$effort" ] && echo "note: OpenCode ignores --effort '$effort'"
   printf '%s\n' "$prompt" > "$oc_prompt"
   cmd=("$WS/scripts/opencode-builder.sh" --model "$model" --budget "$budget" --config "$oc_config" --log "$RUNS/$name.jsonl" --name "ws:$SLUG:$name" "$oc_prompt")
 fi

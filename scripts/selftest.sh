@@ -464,6 +464,8 @@ WS_TODAY=2026-10-31 "$WS/scripts/zdr-check.sh" --page "$Z" >/dev/null && "$WS/sc
 # final text) with the final text set by OC_STUB, and records each call, so no check can reach a real model.
 # Every check runs and the section fails at its end.
 of=0; ofail() { echo "$1 FAILED:"; printf '%s\n' "${2:-}" | sed -n 1,25p; of=1; }
+# A process is stopped when it is gone or only a zombie; a live sleep or wrapper is not.
+stopped() { local stat; stat=$(ps -o stat= -p "$1" 2>/dev/null); [ -z "$stat" ] || [ "${stat:0:1}" = Z ]; }
 mkdir -p "$T/ocbin"; cat > "$T/ocbin/opencode" <<'STUB'
 #!/bin/bash
 case " $* " in *" --session "*) call=continue ;; *) call=first ;; esac
@@ -472,14 +474,16 @@ valid='{"status":"done","summary":"stand-in","files_changed":[],"commits":[],"te
 case "$OC_STUB" in
   valid) t="Done. $valid" ;; invalid) t='{"status":"done"}' ;;
   fix) [ "$call" = continue ] && t="$valid" || t='{"status":"done"}' ;;
-  slow) head -3 "$OC_SAMPLE"; exec sleep 30 ;;
+  cutoff) t='{"status":"done"' ;;
+  nonl) out=$(jq -c --arg t "$valid" 'if .type == "text" then .part.text = $t else . end' "$OC_SAMPLE"); printf '%s' "$out"; exit 0 ;;
+  slow) head -3 "$OC_SAMPLE"; sleep 30 & echo $! > "${OC_CHILD:-/dev/null}"; wait ;;
 esac
 jq -c --arg t "$t" 'if .type == "text" then .part.text = $t else . end' "$OC_SAMPLE"
 STUB
 chmod +x "$T/ocbin/opencode"; ocr="$WS/runs/$slug"
-oc() { PATH="$T/ocbin:$PATH" OC_CALLS="$T/oc-calls" OC_SAMPLE="$WS/scripts/fixtures/opencode-sample.jsonl" WS_ZDR_PAGE="$Z" WS_TODAY="${OC_TODAY:-2026-10-31}" OC_STUB="$1" "${@:2}"; }
+oc() { PATH="$T/ocbin:$PATH" OC_CALLS="$T/oc-calls" OC_CHILD="$T/oc-child" OC_SAMPLE="$WS/scripts/fixtures/opencode-sample.jsonl" WS_ZDR_PAGE="$Z" WS_TODAY="${OC_TODAY:-2026-10-31}" OC_STUB="$1" "${@:2}"; }
 # Runs the launcher alone on the stand-in: $1 the stand-in's mode, $2 the run name, $3 the budget.
-ocb() { rm -f "$T/oc-calls"; oc "$1" "$WS/scripts/opencode-builder.sh" --model opencode-go/deepseek-v4.1-flash --budget "$3" --config "$ocr/demo.opencode.json" \
+ocb() { rm -f "$T/oc-calls" "$T/oc-child"; oc "$1" "$WS/scripts/opencode-builder.sh" --model opencode-go/deepseek-v4.1-flash --budget "$3" --config "$ocr/demo.opencode.json" \
   --log "$ocr/$2.jsonl" --name "ws:$slug:$2" "$T/task.md" > "$ocr/$2.jsonl" 2>&1; }
 out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run --agent opencode demo "$T/task.md" 2>&1) && x=0 || x=1
 cfg="$ocr/demo.opencode.json"; allowed=$(jq -r '.permission.bash | to_entries[] | select(.value == "allow") | .key' "$cfg" 2>/dev/null | sort)
@@ -490,6 +494,9 @@ cfg="$ocr/demo.opencode.json"; allowed=$(jq -r '.permission.bash | to_entries[] 
   && echo "dispatch --agent opencode dry run shows the agent, model and permissions ok" || ofail "opencode dry run" "$out"
 out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run --agent opencode --model deepseek demo "$T/task.md" 2>&1) && x=0 || x=1
 [ "$x" = 1 ] && grep -q 'takes a provider/model ID' <<< "$out" && echo "opencode model without a provider refused ok" || ofail "opencode bare model" "$out"
+# OpenCode has no effort setting, so a dispatch that sets one says it is ignored instead of dropping it silently.
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run --agent opencode --effort high demo "$T/task.md" 2>&1) && x=0 || x=1
+[ "$x" = 0 ] && grep -q "note: OpenCode ignores --effort 'high'" <<< "$out" && echo "opencode effort note ok" || ofail "opencode effort note" "$out"
 # A full dispatch on the stand-in: the run ends with a result line check-result accepts.
 rm -f "$T/oc-calls"; out=$(oc valid "$WS/scripts/dispatch.sh" --project "$slug" --agent opencode --budget 1 ocrun "$T/task.md" 2>&1) || true
 for _ in $(seq 200); do [ -f "$ocr/ocrun.pid" ] || break; sleep 0.1; done
@@ -500,11 +507,28 @@ res=$(cat "$ocr/ocrun.result.txt" 2>/dev/null || true)
 $res
 $(tail -3 "$ocr/ocrun.jsonl" 2>/dev/null)"
 git -C "$T" worktree remove --force "$T/.worktrees/ocrun" 2>/dev/null; git -C "$T" branch -q -D agent/ocrun 2>/dev/null || true
-# Over the budget: the first step's cost passes it, the stand-in is stopped by PID, and the run is reported partial.
+# Over the budget: the first step's cost passes it, the stand-in's whole process group is stopped (its sleep child
+# too), and the run is reported partial.
 t0=$(date +%s); ocb slow ocslow 0.001; secs=$(( $(date +%s) - t0 ))
+child=$(cat "$T/oc-child" 2>/dev/null || true)
 so=$(grep '"type":"result"' "$ocr/ocslow.jsonl" | tail -1 | jq -c .structured_output)
-[ "$secs" -lt 15 ] && [ "$(jq -r .status <<< "$so")" = partial ] && grep -q 'over the \$0.001 budget' <<< "$so" && [ "$(cat "$T/oc-calls")" = "first stdin=/dev/null config=deny" ] \
+[ "$secs" -lt 15 ] && [ -n "$child" ] && stopped "$child" && [ "$(jq -r .status <<< "$so")" = partial ] \
+  && grep -q 'over the \$0.001 budget' <<< "$so" && [ "$(cat "$T/oc-calls")" = "first stdin=/dev/null config=deny" ] \
   && echo "opencode run over budget is stopped and partial ok" || ofail "opencode budget stop (${secs}s)" "$(cat "$ocr/ocslow.jsonl")"
+kill "$child" 2>/dev/null || true
+# The TERM trap stops the same group: a signal to the launcher must not leave the stand-in's child behind.
+rm -f "$T/oc-calls" "$T/oc-child"
+PATH="$T/ocbin:$PATH" OC_CALLS="$T/oc-calls" OC_CHILD="$T/oc-child" OC_SAMPLE="$WS/scripts/fixtures/opencode-sample.jsonl" \
+  WS_ZDR_PAGE="$Z" WS_TODAY=2026-10-31 OC_STUB=slow \
+  "$WS/scripts/opencode-builder.sh" --model opencode-go/deepseek-v4.1-flash --budget 100 --config "$ocr/demo.opencode.json" \
+  --log "$ocr/octerm.jsonl" --name "ws:$slug:octerm" "$T/task.md" > "$ocr/octerm.jsonl" 2>&1 &
+bpid=$!
+for _ in $(seq 100); do [ -s "$T/oc-child" ] && break; sleep 0.1; done
+child=$(cat "$T/oc-child" 2>/dev/null || true)
+kill -TERM "$bpid" 2>/dev/null || true
+wait "$bpid" 2>/dev/null || true
+[ -n "$child" ] && stopped "$child" && echo "opencode TERM trap stops the process group ok" || ofail "opencode TERM trap" "child=${child:-none}"
+kill "$child" 2>/dev/null || true
 # An invalid final JSON gets exactly one continue: a valid reply there is the result; a second invalid one leaves it null.
 ocb fix ocfix 1; so=$(grep '"type":"result"' "$ocr/ocfix.jsonl" | tail -1 | jq -c .structured_output)
 [ "$(cut -d' ' -f1 "$T/oc-calls" | paste -sd,)" = first,continue ] && [ "$(jq -r .summary <<< "$so")" = stand-in ] \
@@ -513,6 +537,21 @@ ocb invalid ocbad 1; res=$("$WS/scripts/check-result.sh" --project "$slug" ocbad
 [ "$(cut -d' ' -f1 "$T/oc-calls" | paste -sd,)" = first,continue ] && [ "$(grep '"type":"result"' "$ocr/ocbad.jsonl" | jq -c .structured_output)" = null ] \
   && [ "$x" = 1 ] && grep -q 'FAIL  no structured result' <<< "$res" && echo "opencode result still invalid after one continue is null ok" || ofail "opencode continue fails" "$(cat "$T/oc-calls")
 $res"
+# A reply cut off after its opening brace is no JSON, not a crash: one continue, then a null result and a FAIL with
+# the cost, so a truncated final message does not look like a launcher failure.
+ocb cutoff occut 1 || true; res=$("$WS/scripts/check-result.sh" --project "$slug" occut 2>&1) && x=0 || x=1
+[ "$(cut -d' ' -f1 "$T/oc-calls" | paste -sd,)" = first,continue ] && [ "$(grep '"type":"result"' "$ocr/occut.jsonl" | tail -1 | jq -c .structured_output)" = null ] \
+  && [ "$x" = 1 ] && grep -q 'FAIL  no structured result' <<< "$res" && grep -q '^cost=\$' <<< "$res" \
+  && echo "opencode cut-off JSON is no result and fails with the cost ok" || ofail "opencode cut-off JSON" "$(cat "$T/oc-calls")
+$res
+$(tail -3 "$ocr/occut.jsonl")"
+# The result line starts a line even when OpenCode's last event did not end in a newline.
+ocb nonl ocnl 1
+grep -q '^{"type":"result"' "$ocr/ocnl.jsonl" && echo "opencode result starts on its own line ok" || ofail "opencode result newline" "$(tail -c 300 "$ocr/ocnl.jsonl")"
+# No text part (auth missing, a provider error): the result carries the log's last non-JSON lines, so the FAIL says why.
+printf '%s\n' '{"type":"step_start","part":{}}' 'Error: no auth for provider opencode-go' > "$T/oc-notext.jsonl"
+r=$(python3 -I "$WS/scripts/opencode_run.py" result "$T/oc-notext.jsonl" "$WS/schema/result.json" 1 0 | jq -r .result)
+[ "$r" = "Error: no auth for provider opencode-go" ] && echo "opencode textless run reports the log's error ok" || ofail "opencode textless result" "$r"
 # A model zdr-check refuses (the fixture's agreement has lapsed by this date) never starts the stand-in.
 OC_TODAY=2026-11-01 ocb valid ocrefused 1 || true; res=$("$WS/scripts/check-result.sh" --project "$slug" ocrefused 2>&1 || true)
 [ ! -e "$T/oc-calls" ] && grep -q 'no structured result: refused: zdr-check: DeepSeek V4.1 Flash: the DeepSeek ZDR agreement lapsed' <<< "$res" \
@@ -523,5 +562,51 @@ jq -c 'if .type == "tool_use" then .part.state = {"status":"error","input":{"com
   "$WS/scripts/fixtures/opencode-sample.jsonl" > "$T/oc-denied.jsonl"
 d=$(python3 -I "$WS/scripts/opencode_run.py" result "$T/oc-denied.jsonl" "$WS/schema/result.json" 1 0 | jq -c '[.permission_denials[] | .tool_input.command // .tool_name]')
 [ "$d" = '["git push origin"]' ] && echo "opencode denials reported ok" || ofail "opencode denials" "$d"
+# A real OpenCode 1.19.1 log: exactly its four refused calls (git push, rm, a write outside, python3), not the two
+# calls that succeeded.
+df=$(python3 -I "$WS/scripts/opencode_run.py" result "$WS/scripts/fixtures/opencode-denied.jsonl" "$WS/schema/result.json" 1 0 \
+  | jq -c '.permission_denials | map(.tool_input.command // .tool_input.filePath)') || true
+[ "$(jq -r length <<< "$df")" = 4 ] && [ "$(jq -r '.[0]' <<< "$df")" = "git push origin main" ] \
+  && [ "$(jq -r '.[1]' <<< "$df")" = "rm -f nothing.txt" ] && [ "$(jq -r '.[2]' <<< "$df")" = "/tmp/demo/outside.txt" ] \
+  && [ "$(jq -r '.[3]' <<< "$df")" = "python3 -c 'print(1)'" ] \
+  && echo "real OpenCode log's four denials parsed ok" || ofail "opencode denied fixture" "$df"
+# ws tail reads OpenCode's text and tool events, marks a denied call, and skips the launcher's non-JSON notes.
+{
+  echo 'opencode-builder: note'
+  jq -c 'select(.type=="text")' "$WS/scripts/fixtures/opencode-sample.jsonl"
+  printf '%s\n' '{"type":"tool_use","part":{"tool":"bash","state":{"status":"error","error":"prevents you from using this tool call","input":{"command":"git push origin main"}}}}'
+  printf '%s\n' '{"type":"tool_use","part":{"tool":"write","state":{"status":"completed","input":{"filePath":"a.txt"}}}}'
+} > "$WS/runs/$slug/tailoc.jsonl"
+setsid "$WS/bin/ws" --project "$slug" tail tailoc > "$T/tail.out" 2>&1 &
+tpid=$!; sleep 1; kill -TERM -- "-$tpid" 2>/dev/null || true; wait "$tpid" 2>/dev/null || true
+tout=$(cat "$T/tail.out")
+[ -n "$tout" ] && grep -q 'SAY  ' <<< "$tout" && grep -q 'DENIED bash git push origin main' <<< "$tout" \
+  && grep -q 'TOOL write a.txt \[completed\]' <<< "$tout" && ! grep -q 'opencode-builder' <<< "$tout" \
+  && echo "ws tail shows OpenCode events and skips non-JSON notes ok" || ofail "ws tail OpenCode" "$tout"
+# opencode_run.py names variables in words; a single letter is only the loop counter i or the throwaway _.
+python3 - "$WS/scripts/opencode_run.py" <<'PY' && echo "opencode_run names variables in words ok" || { echo "opencode_run single-letter names FAILED"; of=1; }
+import ast, sys
+tree = ast.parse(open(sys.argv[1]).read())
+bad = []
+for node in ast.walk(tree):
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
+            if len(arg.arg) == 1 and arg.arg not in ("i", "_"):
+                bad.append(arg.arg)
+        continue
+    if isinstance(node, ast.Assign):
+        targets = node.targets
+    elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+        targets = [node.target]
+    else:
+        continue
+    for target in targets:
+        for name in ast.walk(target):
+            if isinstance(name, ast.Name) and len(name.id) == 1 and name.id not in ("i", "_"):
+                bad.append(name.id)
+if bad:
+    print("single-letter names:", sorted(set(bad)))
+sys.exit(1 if bad else 0)
+PY
 [ "$of" = 0 ] || exit 1
 echo "selftest passed"

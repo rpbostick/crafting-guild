@@ -39,11 +39,12 @@ echo "opencode-builder: $zdr"
 
 OPENCODE_CONFIG_CONTENT="$(cat "$config")"; export OPENCODE_CONFIG_CONTENT
 pid=""
-# A timeout or kill of this script stops OpenCode too, by its PID.
-trap '[ -n "$pid" ] && kill "$pid" 2>/dev/null; exit 143' TERM INT
+# A timeout or kill of this script stops OpenCode's whole process group, so a wrapper's child goes too. setsid makes
+# the background opencode a session leader, so its PID is its group's ID; killing the group is safe and by PID.
+trap '[ -n "$pid" ] && kill -- "-$pid" 2>/dev/null; exit 143' TERM INT
 # One OpenCode call with the budget watched across the whole log; stdin closed, or `opencode run` waits on it.
 run() {
-  opencode run --format json --model "$model" --title "$title" "$@" < /dev/null &
+  setsid opencode run --format json --model "$model" --title "$title" "$@" < /dev/null &
   pid=$!
   python3 -I "$helper" watch "$log" "$budget" "$pid" & watcher=$!
   wait "$pid"; pid=""

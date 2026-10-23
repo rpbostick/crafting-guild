@@ -29,31 +29,31 @@ DENIAL = re.compile(r"permission|prevents you from using|rejected", re.I)
 
 
 def bash_pattern(grant):
-    m = re.fullmatch(r"Bash\((.*)\)", grant)
-    return m.group(1) if m else None
+    match = re.fullmatch(r"Bash\((.*)\)", grant)
+    return match.group(1) if match else None
 
 
 def build_config(tools, deny):
     """Bash is deny unless a grant allows it; the deny list comes last because OpenCode applies the last matching rule."""
     bash = {"*": "deny"}
-    for t in tools:
-        p = bash_pattern(t)
-        if p is not None:
-            bash[p] = "allow"
-    for d in deny:
-        p = bash_pattern(d)
-        if p is None:
-            sys.exit(f"opencode_run: deny entry {d!r} is not Bash(<pattern>)")
-        bash.pop(p, None)
-        bash[p] = "deny"
+    for tool in tools:
+        pattern = bash_pattern(tool)
+        if pattern is not None:
+            bash[pattern] = "allow"
+    for denied in deny:
+        pattern = bash_pattern(denied)
+        if pattern is None:
+            sys.exit(f"opencode_run: deny entry {denied!r} is not Bash(<pattern>)")
+        bash.pop(pattern, None)
+        bash[pattern] = "deny"
     perm = {"*": "deny", **FIXED, "bash": bash,
             # Edits stay in the worktree: OpenCode's project directory is the worktree and external_directory is deny.
-            "edit": "allow" if any(t.startswith("Edit(") for t in tools) else "deny",
+            "edit": "allow" if any(tool.startswith("Edit(") for tool in tools) else "deny",
             "webfetch": "allow" if "WebFetch" in tools else "deny",
             "websearch": "allow" if "WebSearch" in tools else "deny"}
     cfg = {"$schema": "https://opencode.ai/config.json", "share": "disabled", "autoupdate": False, "permission": perm}
-    bad = [k for k, v in perm.items() if v not in ("allow", "deny") and not isinstance(v, dict)]
-    bad += [f"bash {k}" for k, v in bash.items() if v not in ("allow", "deny")]
+    bad = [key for key, value in perm.items() if value not in ("allow", "deny") and not isinstance(value, dict)]
+    bad += [f"bash {key}" for key, value in bash.items() if value not in ("allow", "deny")]
     if bad:
         sys.exit(f"opencode_run: permissions not allow or deny: {bad}")
     return cfg
@@ -94,6 +94,21 @@ def last_text(log):
     return text
 
 
+def last_unparsed(log, count=5):
+    """The last non-JSON lines of a log: launcher notes and provider errors, the reason a run produced no text."""
+    lines = []
+    with open(log, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            line = line.rstrip("\n")
+            if not line.strip():
+                continue
+            try:
+                json.loads(line)
+            except json.JSONDecodeError:
+                lines.append(line)
+    return "\n".join(lines[-count:]) or None
+
+
 def denials(log):
     """Tool calls OpenCode refused, shaped as Claude's permission_denials so check-result reads them unchanged."""
     found = []
@@ -106,16 +121,21 @@ def denials(log):
 
 
 def extract(text):
-    """The JSON object in a reply: the whole text, a fenced block, or the span from the first { to the last }."""
+    """The JSON object in a reply: the whole text, a fenced block, or the span from the first { to the last }.
+
+    A reply cut off after its opening brace has no closing one, so there is no span to extract; it counts as no JSON
+    rather than raising on rindex.
+    """
     if text is None:
         return None, "no text part in the log"
     candidates = [text.strip()]
     candidates += re.findall(r"```(?:json)?\s*(.*?)```", text, re.S)
-    if "{" in text:
-        candidates.append(text[text.index("{"):text.rindex("}") + 1])
-    for c in candidates:
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(text[start:end + 1])
+    for candidate in candidates:
         try:
-            obj = json.loads(c)
+            obj = json.loads(candidate)
         except json.JSONDecodeError:
             continue
         if isinstance(obj, dict):
@@ -126,14 +146,14 @@ def extract(text):
 TYPES = {"object": dict, "array": list, "string": str, "null": type(None), "boolean": bool}
 
 
-def type_ok(value, name):
-    if name == "integer":
+def type_ok(value, type_name):
+    if type_name == "integer":
         return isinstance(value, int) and not isinstance(value, bool)
-    if name == "number":
+    if type_name == "number":
         return isinstance(value, (int, float)) and not isinstance(value, bool)
-    if name not in TYPES:
-        raise ValueError(f"schema type {name!r} is not handled")
-    return isinstance(value, TYPES[name])
+    if type_name not in TYPES:
+        raise ValueError(f"schema type {type_name!r} is not handled")
+    return isinstance(value, TYPES[type_name])
 
 
 def validate(value, schema, path="$"):
@@ -143,7 +163,7 @@ def validate(value, schema, path="$"):
     errs = []
     if "type" in schema:
         names = schema["type"] if isinstance(schema["type"], list) else [schema["type"]]
-        if not any(type_ok(value, n) for n in names):
+        if not any(type_ok(value, type_name) for type_name in names):
             return [f"{path}: expected {'|'.join(names)}, got {type(value).__name__}"]
     if "enum" in schema and value not in schema["enum"]:
         errs.append(f"{path}: {value!r} is not one of {schema['enum']}")
@@ -178,19 +198,40 @@ def alive(pid):
         return False
 
 
+def kill_group(pgid, sig):
+    """A group that already exited is not an error: the leader can go before its children do."""
+    try:
+        os.killpg(pgid, sig)
+    except ProcessLookupError:
+        pass
+
+
 def watch(log, budget, pid):
+    """Stop the run's process group, not just its leader: a wrapper's child would otherwise keep running."""
     budget, pid = float(budget), int(pid)
     while alive(pid):
         if os.path.exists(log) and totals(log)[0] > budget:
             print(f"opencode_run: step costs passed the ${budget} budget; stopping pid {pid}", file=sys.stderr)
-            os.kill(pid, signal.SIGTERM)
+            kill_group(pid, signal.SIGTERM)
             for _ in range(50):
                 if not alive(pid):
+                    kill_group(pid, signal.SIGKILL)
                     return
                 time.sleep(0.1)
-            os.kill(pid, signal.SIGKILL)
+            kill_group(pid, signal.SIGKILL)
             return
         time.sleep(0.2)
+
+
+def end_log_line(log):
+    """The result line is appended to the log's own stream, so separate it from an unterminated last line."""
+    with open(log, "rb") as fh:
+        fh.seek(0, os.SEEK_END)
+        if fh.tell() == 0:
+            return
+        fh.seek(-1, os.SEEK_END)
+        if fh.read(1) != b"\n":
+            print()
 
 
 def result(log, schema_path, budget, duration_ms, refused=None):
@@ -198,6 +239,9 @@ def result(log, schema_path, budget, duration_ms, refused=None):
     text = last_text(log)
     so = None
     if refused is None:
+        # No text part means OpenCode itself failed (missing auth, a provider error): its stderr lines are the reason.
+        if text is None:
+            text = last_unparsed(log)
         so, _ = checked(log, schema_path)
         if cost > float(budget):
             reason = f"stopped: OpenCode steps cost ${cost:.4f}, over the ${budget} budget"
@@ -212,6 +256,7 @@ def result(log, schema_path, budget, duration_ms, refused=None):
     line = {"type": "result", "agent": "opencode", "total_cost_usd": round(cost, 6), "duration_ms": int(duration_ms),
             "usage": {"output_tokens": out, "cache_read_input_tokens": cache},
             "permission_denials": denials(log), "structured_output": so, "result": text}
+    end_log_line(log)
     # Compact separators: result_json (scripts/lib.sh) greps for "type":"result" with no space.
     print(json.dumps(line, separators=(",", ":")))
 
