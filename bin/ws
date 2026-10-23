@@ -174,8 +174,17 @@ case "$cmd" in
     done; echo "still running after $mins minutes"; exit 3 ;;
   tail)
     name="${1:?ws tail <name>}"; load_project "$proj"
-    tail -n +1 -f "$RUNS/$name.jsonl" | jq -r --unbuffered '
+    # `opencode-builder: ...` notes and OpenCode's stderr sit beside the JSON events: fromjson? skips those lines.
+    # OpenCode carries its text and tool calls as top-level `text` and `tool_use` events with a `part`.
+    tail -n +1 -f "$RUNS/$name.jsonl" | jq -R -r --unbuffered '
+      fromjson? // empty |
       if .type=="assistant" then (.message.content[]? | if .type=="text" then "SAY  " + (.text|.[0:160]) elif .type=="tool_use" then "TOOL " + .name + " " + ((.input.command // .input.file_path // .input.pattern // "")|tostring|.[0:120]) else empty end)
+      elif .type=="text" then "SAY  " + ((.part.text // "")|.[0:160])
+      elif .type=="tool_use" then
+        (.part.state // {}) as $state |
+        (($state.input.command // $state.input.filePath // $state.input.pattern // "")|tostring|.[0:120]) as $what |
+        if (($state.error // "")|test("permission|prevents you from using|rejected"; "i")) then "DENIED " + (.part.tool // "") + " " + $what
+        else "TOOL " + (.part.tool // "") + " " + $what + (if $state.status then " [" + $state.status + "]" else "" end) end
       elif .type=="result" then "DONE cost=$" + ((.total_cost_usd // 0)|tostring) + " " + ((.structured_output.status // .subtype // "")|tostring)
       elif .type=="system" and .subtype=="permission_denied" then "DENIED " + ((.tool_input.command // .tool_name // "")|tostring|.[0:120])
       else empty end' 2>/dev/null ;;
