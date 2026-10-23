@@ -1,1 +1,2 @@
 fw-vests-shells plans/figurewright/task-fw-vests-shells.md gate --agent opencode --budget 4
+fw-vests-shells plans/figurewright/task-fw-vests-shells-fix-1.md gate --budget 3
