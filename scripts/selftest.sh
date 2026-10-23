@@ -4,6 +4,17 @@ set -euo pipefail
 WS="$(cd "$(dirname "$0")/.." && pwd)"
 for f in "$WS"/bin/ws "$WS"/scripts/*.sh; do bash -n "$f" && echo "syntax ok  ${f#"$WS"/}"; done
 if command -v shellcheck >/dev/null; then shellcheck -S warning "$WS"/bin/ws "$WS"/scripts/*.sh && echo "shellcheck ok" || { echo "shellcheck FAILED"; exit 1; }; fi
+# The two orchestrator briefs cannot drift on commands: every bin/ws command CLAUDE.md names is named in AGENTS.md too.
+claude_ws=$(grep -oE 'bin/ws [a-z][a-z-]*' "$WS/CLAUDE.md" | sort -u || true)
+agents_ws=$(grep -oE 'bin/ws [a-z][a-z-]*' "$WS/AGENTS.md" | sort -u || true)
+missing_ws=$(comm -23 <(printf '%s\n' "$claude_ws") <(printf '%s\n' "$agents_ws"))
+[ -z "$missing_ws" ] && echo "AGENTS.md names every bin/ws command CLAUDE.md names ok" || { echo "AGENTS.md parity FAILED: missing: $missing_ws"; exit 1; }
+# OpenCode's project config must stay valid JSON and load the private preferences and both orchestrator lessons files.
+jq -e '.share == "disabled"
+  and (.instructions | index("CLAUDE.local.md"))
+  and (.instructions | index("lessons/orchestrator.md"))
+  and (.instructions | index("lessons/orchestrator.local.md"))' "$WS/opencode.json" >/dev/null \
+  && echo "opencode.json loads the private preferences and lessons ok" || { echo "opencode.json FAILED"; exit 1; }
 T=$(mktemp -d); slug=$(basename "$T" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')
 # Cleanup runs on every exit (a failed check, a kill, a crash), so the scratch project never outlives the test.
 trap '[ -n "${srvpid:-}" ] && kill "$srvpid" 2>/dev/null; rm -rf "$T" "$WS/plans/$slug" "$WS/runs/$slug" "$WS/plans/$slug-b" "$WS/runs/$slug-b" "$WS/plans/$slug-t" "$WS/runs/$slug-t"; rm -f "$WS/projects/$slug.conf" "$WS/projects/$slug-b.conf" "$WS/projects/$slug-t.conf"' EXIT
@@ -481,10 +492,11 @@ esac
 jq -c --arg t "$t" 'if .type == "text" then .part.text = $t else . end' "$OC_SAMPLE"
 STUB
 chmod +x "$T/ocbin/opencode"; ocr="$WS/runs/$slug"
-oc() { PATH="$T/ocbin:$PATH" OC_CALLS="$T/oc-calls" OC_CHILD="$T/oc-child" OC_SAMPLE="$WS/scripts/fixtures/opencode-sample.jsonl" WS_ZDR_PAGE="$Z" WS_TODAY="${OC_TODAY:-2026-10-31}" OC_STUB="$1" "${@:2}"; }
+# exec replaces the calling subshell, so a backgrounded `oc ... &` has the helper's own PID and a TERM reaches its trap.
+oc() { PATH="$T/ocbin:$PATH" OC_CALLS="$T/oc-calls" OC_CHILD="$T/oc-child" OC_SAMPLE="$WS/scripts/fixtures/opencode-sample.jsonl" WS_ZDR_PAGE="$Z" WS_TODAY="${OC_TODAY:-2026-10-31}" OC_STUB="$1" exec "${@:2}"; }
 # Runs the launcher alone on the stand-in: $1 the stand-in's mode, $2 the run name, $3 the budget.
-ocb() { rm -f "$T/oc-calls" "$T/oc-child"; oc "$1" "$WS/scripts/opencode-builder.sh" --model opencode-go/deepseek-v4.1-flash --budget "$3" --config "$ocr/demo.opencode.json" \
-  --log "$ocr/$2.jsonl" --name "ws:$slug:$2" "$T/task.md" > "$ocr/$2.jsonl" 2>&1; }
+ocb() { rm -f "$T/oc-calls" "$T/oc-child"; ( oc "$1" "$WS/scripts/opencode-builder.sh" --model opencode-go/deepseek-v4.1-flash --budget "$3" --config "$ocr/demo.opencode.json" \
+  --log "$ocr/$2.jsonl" --name "ws:$slug:$2" "$T/task.md" > "$ocr/$2.jsonl" 2>&1 ); }
 out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run --agent opencode demo "$T/task.md" 2>&1) && x=0 || x=1
 cfg="$ocr/demo.opencode.json"; allowed=$(jq -r '.permission.bash | to_entries[] | select(.value == "allow") | .key' "$cfg" 2>/dev/null | sort)
 [ "$x" = 0 ] && grep -qx 'agent: opencode model: opencode-go/deepseek-v4.1-flash' <<< "$out" && grep -qF '"git push *": "deny"' <<< "$out" \
@@ -518,9 +530,7 @@ so=$(grep '"type":"result"' "$ocr/ocslow.jsonl" | tail -1 | jq -c .structured_ou
 kill "$child" 2>/dev/null || true
 # The TERM trap stops the same group: a signal to the launcher must not leave the stand-in's child behind.
 rm -f "$T/oc-calls" "$T/oc-child"
-PATH="$T/ocbin:$PATH" OC_CALLS="$T/oc-calls" OC_CHILD="$T/oc-child" OC_SAMPLE="$WS/scripts/fixtures/opencode-sample.jsonl" \
-  WS_ZDR_PAGE="$Z" WS_TODAY=2026-10-31 OC_STUB=slow \
-  "$WS/scripts/opencode-builder.sh" --model opencode-go/deepseek-v4.1-flash --budget 100 --config "$ocr/demo.opencode.json" \
+oc slow "$WS/scripts/opencode-builder.sh" --model opencode-go/deepseek-v4.1-flash --budget 100 --config "$ocr/demo.opencode.json" \
   --log "$ocr/octerm.jsonl" --name "ws:$slug:octerm" "$T/task.md" > "$ocr/octerm.jsonl" 2>&1 &
 bpid=$!
 for _ in $(seq 100); do [ -s "$T/oc-child" ] && break; sleep 0.1; done
@@ -583,7 +593,8 @@ tout=$(cat "$T/tail.out")
 [ -n "$tout" ] && grep -q 'SAY  ' <<< "$tout" && grep -q 'DENIED bash git push origin main' <<< "$tout" \
   && grep -q 'TOOL write a.txt \[completed\]' <<< "$tout" && ! grep -q 'opencode-builder' <<< "$tout" \
   && echo "ws tail shows OpenCode events and skips non-JSON notes ok" || ofail "ws tail OpenCode" "$tout"
-# opencode_run.py names variables in words; a single letter is only the loop counter i or the throwaway _.
+# opencode_run.py names variables in words, including for-loop and comprehension targets; a single letter is only
+# the loop counter i or the throwaway _.
 python3 - "$WS/scripts/opencode_run.py" <<'PY' && echo "opencode_run names variables in words ok" || { echo "opencode_run single-letter names FAILED"; of=1; }
 import ast, sys
 tree = ast.parse(open(sys.argv[1]).read())
@@ -594,7 +605,9 @@ for node in ast.walk(tree):
             if len(arg.arg) == 1 and arg.arg not in ("i", "_"):
                 bad.append(arg.arg)
         continue
-    if isinstance(node, ast.Assign):
+    if isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+        targets = [node.target]
+    elif isinstance(node, ast.Assign):
         targets = node.targets
     elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
         targets = [node.target]

@@ -14,6 +14,13 @@ config.sh               defaults: budgets, timeout, memory caps, models, timezon
                         browser command, attribution words.
 config.local.sh         optional private overrides, sourced after config.sh (your own names for WS_ATTRIBUTION_RE).
 CLAUDE.local.md         optional private orchestrator preferences; Claude Code loads it beside CLAUDE.md.
+AGENTS.md               the same orchestrator brief for OpenCode, with OpenCode's wait, question and session-start
+                        mechanisms in place of Claude Code's. selftest keeps its bin/ws commands in step with CLAUDE.md.
+opencode.json           OpenCode project config: loads CLAUDE.local.md and the two orchestrator lessons files by
+                        reference, and disables session sharing. No model is set; the operator chooses.
+.opencode/commands/cold-start.md  `/cold-start`: prints scripts/cold-start.sh --brief, the session-start context
+                        Claude Code gets from its hook.
+docs/opencode-orchestrator.md    which OpenCode pages back each substitution, and how the two briefs avoid drift.
 scripts/lib.sh          shared helpers; loads projects/<slug>.conf into variables.
 scripts/cold-start.sh   ground truth in ~20 s. Git state, worktrees, running builders, servers, in-flight block.
 scripts/dispatch.sh     creates the worktree, builds the builder prompt and grant, runs claude -p in the background,
@@ -99,7 +106,8 @@ state/current           the last project opened with `ws <slug>`; what a termina
 | Change the timeouts | `WS_DEFAULT_TIMEOUT` and `WS_LIGHT_TIMEOUT` in `config.sh`; `scripts/dispatch.sh` picks the light one when the task says `Track: light`. |
 | Change the builder memory cap | `WS_BUILDER_MEM` in `config.sh` (systemd `MemoryMax` form, empty = none); `scripts/dispatch.sh` wraps the run in `systemd-run --user --scope` when systemd is there. |
 | Change where worktrees live | `WT_ROOT` in `scripts/lib.sh`. They are under `<project>/.worktrees/` (excluded via `.git/info/exclude`) so the project's own `CLAUDE.md` applies to builders and this workspace's does not. |
-| Change the orchestrator's instructions | `CLAUDE.md`. Keep it short; long instruction files are how v1 spent 50,000 tokens before starting work. |
+| Change the orchestrator's instructions | `CLAUDE.md`, and the same meaning in `AGENTS.md` for OpenCode; selftest fails when a `bin/ws` command named in one is missing from the other. Keep both short; long instruction files are how v1 spent 50,000 tokens before starting work. |
+| Change the OpenCode config, or what a session starts with | `opencode.json`; `.opencode/commands/cold-start.md` for `/cold-start`. `docs/opencode-orchestrator.md` names the page behind each choice. |
 | Change what runs without the orchestrator | `scripts/chain.sh`: what stops a chain, the automatic fix round (`WS_CHAIN_FIX_ROUNDS`), how suggestions carry forward. |
 | Check another rule mechanically | `scripts/precheck.sh`; print `FLAG  rule N:` lines. A rule a script checks reliably can leave the reviewer's attention. |
 | Change what the audit looks for | `scripts/audit.py` (the command patterns and the findings). |
@@ -113,6 +121,7 @@ state/current           the last project opened with `ws <slug>`; what a termina
 - **The merge runs the tests, not a hook, and not the builder.** A hook runs after the fact; the merge script undoes the merge if the suite fails, so main never holds a red commit. Builders run only the test files for what they changed: builders running the full suite too measured 48% of all builder time on one project, whose suite ran 28 minutes for a day before anyone measured it. The merge prints the suite's time.
 - **Evidence lives in the workspace, not the product.** Committed evidence stays in a product's history for good: one product repo carries 180 MB of logs and renders it will never read. Builders write to `.ws-evidence/` in the worktree; the merge moves it to `runs/<slug>/evidence/<name>/`.
 - **Memory is a flat file per role.** No tiers, no decay, no server. If a lessons file passes the cap, prune it; cold-start will nag.
+- **Both client briefs ship together.** A project published from this repository through `RELEASE_PATHS` needs `AGENTS.md`, `opencode.json` and `.opencode/` beside `CLAUDE.md` (and `docs/opencode-orchestrator.md` with them), or the public tree can only be driven by Claude Code. `opencode.json` names `CLAUDE.local.md` and `lessons/orchestrator.local.md`, which stay private; a public tree ships those files or removes the two entries. The project conf is where `RELEASE_PATHS` lives; this file cannot edit it.
 - **Plans live here, not in the project.** The product repo carries product. A builder gets its task in its prompt and never reads this folder.
 - **Parallel builders are a CPU decision.** In a 42-hour build with two or three builders running most of a day, the usage limit stopped no run. What parallel runs did cost was the merge gate: a render-heavy builder alongside a merge made the suite two to three times slower. Spikes and light builds in parallel are fine; merge when nothing heavy is running.
 
