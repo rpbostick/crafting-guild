@@ -1,6 +1,6 @@
 # DeepSeek V4.1 Flash in Crafting Guild
 
-**In flight right now:** nothing. Patrick took the laptop offline (2026-10-22 16:56 MDT); start nothing until he is back. Conserve Claude usage until Monday (the weekly reset).
+**In flight right now:** nothing (2026-10-22 18:51 MDT). Done today: VSCodium set up (settings, keybindings, snippets; Claude Code and OpenCode extensions from Open VSX); Hermes on DeepSeek (self-hosted-models a5ea355: three jobs passed in a minute or less, heat task 29/38 against Claude's 38/38); the OpenCode builder launcher merged (ebc6ad4, build $2.70, review $3.33), checked by one real run: the env config wins over a project opencode.json, ungranted commands and writes outside the worktree are refused, the denial parser catches all four. Review suggestions (7) to carry into the next task on scripts/opencode_run.py / opencode-builder.sh: rindex guard, kill the process group, ws tail for OpenCode logs, the reason when there is no text, a note when --effort is dropped, a newline before the result line, longer names.
 
 ## When Patrick is back (2026-10-22 16:59 MDT, his words: "2 and 1, let's start benchmarking DeepSeek and use our Crafting Guild orchestrator (you) to validate it as we go. i want to get the tools online so we can be using opencode tokens today or tomorrow to build everything out. then we'll get to the other parts.")
 1. VSCodium (he runs the apt commands, then settings and extensions).
