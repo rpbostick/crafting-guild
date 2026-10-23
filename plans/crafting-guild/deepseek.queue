@@ -1,0 +1,4 @@
+# DeepSeek builds (OpenCode launcher), each reviewed by Claude; then the bench extension by a Claude builder. Tooling: merges on tests.
+cg-opencode-polish plans/crafting-guild/task-cg-opencode-polish.md --agent opencode --budget 2
+cg-agents-md plans/crafting-guild/task-cg-agents-md.md --agent opencode --budget 3
+cg-bench-agents plans/crafting-guild/task-cg-bench-agents.md --budget 6
