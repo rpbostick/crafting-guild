@@ -244,7 +244,7 @@ bench_run() {
   local trials=1 par=1 dry=false a t tr row total=0 already=0 failed=0 label; local -a arms=() tasks=() rows=()
   REVIEW=claude
   while [ $# -gt 0 ]; do
-    case "$1" in --trials) trials="$2"; shift 2 ;; --parallel) par="$2"; shift 2 ;; --arm) arms+=("$2"); shift 2 ;; --review) REVIEW="${2:-}"; shift 2 ;; --dry-run) dry=true; shift ;; -*) die "unknown flag $1" ;; *) tasks+=("$1"); shift ;; esac
+    case "$1" in --trials) trials="$2"; shift 2 ;; --parallel) par="$2"; shift 2 ;; --arm) arms+=("$2"); shift 2 ;; --review) [ $# -ge 2 ] || die "--review takes none or claude"; REVIEW="$2"; shift 2 ;; --dry-run) dry=true; shift ;; -*) die "unknown flag $1" ;; *) tasks+=("$1"); shift ;; esac
   done
   case "$trials$par" in *[!0-9]*|'') die "--trials and --parallel take whole numbers" ;; esac
   [ "$trials" -ge 1 ] && [ "$par" -ge 1 ] || die "--trials and --parallel are at least 1"

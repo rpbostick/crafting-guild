@@ -658,5 +658,8 @@ out2=$(wsb bench run "$slug2" --arm old=HEAD,agent=opencode --dry-run bx) && x2=
 [ "$x" = 0 ] && grep -q 'agent default model default review claude' <<< "$out" && [ "$x2" = 1 ] && grep -q 'arm old was HEAD agent= model= in earlier runs' <<< "$out2" \
   && echo "bench reads an arms.tsv row without agent and model ok" || bfail "bench old arms row" "$out
 $out2"
+# --review with no value is a usage error, not a parse loop that never ends (shift 2 past the end leaves $1 in place).
+out=$(PATH="$T/stub:$PATH" timeout 10 "$WS/bin/ws" bench run "$slug2" --arm old=HEAD --review 2>&1) && x=0 || x=$?
+[ "$x" = 1 ] && grep -q -- '--review takes none or claude' <<< "$out" && echo "bench --review without a value fails loud ok" || bfail "bench --review without a value (exit $x)" "$out"
 [ "$bf" = 0 ] || exit 1
 echo "selftest passed"
