@@ -11,7 +11,8 @@ ws <slug>                       open an orchestrator session for a registered pr
 ws init <path> [--tests CMD] [--branch B] [--yes]   register a project (and retire v1 hooks if found)
 ws list                         registered projects
 ws status [slug]                cold-start: ground truth in twenty seconds
-ws dispatch [flags] <name> <task-file>   run a builder (see scripts/dispatch.sh for flags)
+ws dispatch [flags] <name> <task-file>   run a builder (see scripts/dispatch.sh for flags); --agent opencode runs it
+                                through OpenCode on a zero-retention model (--model provider/model, WS_OPENCODE_MODEL)
 ws wait <name> [minutes]        block until the run finishes; exit 0 if its result checks out
 ws tail <name>                  follow a run's log as readable lines
 ws runs [slug]                  runs and their results
