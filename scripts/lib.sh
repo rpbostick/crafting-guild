@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # Shared helpers. Source, don't run. Every script starts with: . "$(dirname "$0")/lib.sh"
 WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The settings config.sh lets the environment override (written there as ${VAR-default}): a value set in the
+# environment wins over config.sh and config.local.sh alike, so a test can run with the bench hours off.
+ws_env=$(declare -p WS_BENCH_HOURS WS_BENCH_OUTSIDE WS_MERGE_TEST_TIMEOUT 2>/dev/null | sed 's/^declare -[a-z-]*/declare -gx/' || true)
 # shellcheck source=../config.sh
 . "$WS/config.sh"
 # Private overrides (your own names for WS_ATTRIBUTION_RE, a different browser): kept out of a published copy.
 # shellcheck source=/dev/null
 [ -f "$WS/config.local.sh" ] && . "$WS/config.local.sh"
+[ -n "$ws_env" ] && eval "$ws_env"; unset ws_env
 # The lessons directory; the selftest points it at a scratch copy.
 WS_LESSONS_DIR="${WS_LESSONS_DIR:-$WS/lessons}"
 die() { echo "ws: $*" >&2; exit 1; }
@@ -27,7 +31,7 @@ resolve_slug() {
 # shellcheck disable=SC2034  # the conf's variables are read by the scripts that call load_project
 load_project() {
   SLUG="$(resolve_slug "${1:-}")"
-  PROJECT_PATH="" PROJECT_BRANCH="master" TEST_CMD="" PREVIEW_CMD=""; EXTRA_TOOLS=(); CREDIT_PATHS=(); ATTRIBUTION_EXEMPT=(); RELEASE_PATHS=(); RELEASE_MAJOR_BRANCHES=""; SITE_SYNC=(); SITE_PROJECT="" SITE_URL="" SITE_ROOT=""; unset MERGE_NPM_FLAGS
+  PROJECT_PATH="" PROJECT_BRANCH="master" TEST_CMD="" PREVIEW_CMD=""; EXTRA_TOOLS=(); CREDIT_PATHS=(); ATTRIBUTION_EXEMPT=(); RELEASE_PATHS=(); RELEASE_MAJOR_BRANCHES=""; SITE_SYNC=(); SITE_PROJECT="" SITE_URL="" SITE_ROOT=""; WORKTREE_ENV_FILE=""; WORKTREE_ENV=(); BENCH_TEST_CMD=""; COLD_START_CMD=""; unset MERGE_NPM_FLAGS
   # shellcheck disable=SC1090
   . "$WS/projects/$SLUG.conf"
   [ -d "$PROJECT_PATH/.git" ] || [ -f "$PROJECT_PATH/.git" ] || die "project path $PROJECT_PATH is not a git repo"
@@ -40,6 +44,17 @@ attribution_exempt() {
   local p; for p in "${CREDIT_PATHS[@]}"; do printf ':!%s\n' "$p"; done
   # Generated files (bundles that inline third-party code) whose sources are checked instead.
   for p in "${ATTRIBUTION_EXEMPT[@]}"; do printf ':!%s\n' "$p"; done
+}
+# Pathspecs exempt from the home-path check: ATTRIBUTION_EXEMPT alone, the files that are private by design or
+# generated (a project conf holds its PROJECT_PATH). Licences, manifests and CREDIT_PATHS are still checked.
+private_exempt() {
+  local p; for p in "${ATTRIBUTION_EXEMPT[@]}"; do printf ':!%s\n' "$p"; done
+}
+# The first 5 lines that <tip> adds over <base> in <repo> naming the home directory or the username, outside
+# private_exempt. Only added lines count, so old evidence already on the main branch can't block.
+home_path_leaks() {
+  local exempt; mapfile -t exempt < <(private_exempt)
+  git -C "$1" diff -U0 "$2...$3" -- . "${exempt[@]}" | grep -E '^\+[^+]' | grep -nF -e "$HOME" -e "-of-$USER" -e "/$USER/" | head -5 || true
 }
 # A role's lessons as pasted into its prompt: lessons/<role>.md, then lessons/<role>.local.md when it exists
 # (private, operator-specific lessons that a published copy leaves out).
@@ -64,3 +79,51 @@ branch_of() { echo "agent/$1"; }
 short() { git -C "$PROJECT_PATH" rev-parse --short "$1" 2>/dev/null || echo "$1"; }
 # The final `result` event of a stream-json log, or nothing if the run has not ended.
 result_json() { grep '"type":"result"' "$1" 2>/dev/null | tail -1; }
+# An automatic fix round's task: the review's blocking findings, the original task demoted for context, and the
+# original's "## Commands" section kept at level 2, since dispatch grants only from that heading (a fix round
+# that cannot re-run its tests ends partial).
+write_fix_task() { # <task> <review.json> <round> <reviewed-sha> <out>
+  local task="$1" rv="$2" n="$3" tip="$4" out="$5" cmds
+  cmds=$(awk '/^## Commands/{f=1; print; next} /^## /{f=0} f' "$task")
+  {
+    echo "# Fix round $n for \`$(basename "$task")\`"; echo
+    echo "The review of this branch at $tip found blocking issues. Fix each one, with a test where the finding is about behaviour, commit, and re-run the covering test files through ws-run. Do nothing else; suggestions are carried to a later task."
+    echo; echo "## Blocking findings"; jq -r '.blocking[] | "- `\(.file):\(.line)` (rule \(.rule)): \(.why)"' "$rv"
+    [ -n "$cmds" ] && { echo; printf '%s\n' "$cmds"; }
+    echo; echo "## The original task (for context)"; sed 's/^#/##/' "$task"
+  } > "$out"
+}
+# Append a merged step's review suggestions to the next step's task and commit that file alone in <repo> (the
+# workspace), so plans stay committed: when the project is the workspace, an uncommitted carry makes the next merge
+# refuse a dirty checkout. Prints the carried lines; nothing to carry (none, or all filtered by WS_ATTRIBUTION_RE)
+# prints nothing and leaves the file alone. A failed commit (a hook, another commit in progress) returns 1.
+carry_suggestions() { # <review.json> <from-name> <next-task> <repo>
+  local rv="$1" name="$2" nt="$3" repo="$4" carry abs
+  carry=$(jq -r '.suggestions[] | "- `\(.file):\(.line)`: \(.why)"' "$rv")
+  [ -n "${WS_ATTRIBUTION_RE:-}" ] && carry=$(printf '%s\n' "$carry" | grep -viE "$WS_ATTRIBUTION_RE" || true)
+  [ -n "$carry" ] || return 0
+  printf '\n## Carried from the %s review (suggestions; do them where the code is yours to touch)\n%s\n' "$name" "$carry" >> "$nt"
+  abs=$(realpath "$nt")
+  # add first: a task file never committed is unknown to `git commit -- <path>`. The pathspec commit leaves
+  # anything else staged in the workspace out of it.
+  git -C "$repo" add -- "$abs" && git -C "$repo" commit -q -m "chain: suggestions from the $name review carried into $(basename "$nt")" -- "$abs" || return 1
+  printf '%s\n' "$carry"
+}
+# Git-ignored files a builder made in its worktree (a generated recording, a download) vanish with the
+# worktree at merge. Copy the small ones to <dest>, keeping their paths, and print what was kept and what was
+# too big; dependency, build and cache folders, .ws-evidence and links (.worktree-links) are skipped.
+keep_ignored_outputs() { # <worktree> <dest>
+  local wt="$1" dest="$2" f size kept=0 big=()
+  while IFS= read -r f; do
+    case "$f" in node_modules/*|*/node_modules/*|.ws-evidence/*|dist/*|build/*|.venv/*|coverage/*|.cache/*|*/__pycache__/*|*.pyc|.worktrees/*) continue ;; esac
+    [ -L "$wt/$f" ] && continue; [ -f "$wt/$f" ] || continue
+    size=$(stat -c %s "$wt/$f")
+    if [ "$size" -gt 20971520 ]; then big+=("$f"); continue; fi
+    mkdir -p "$dest/$(dirname "$f")"; cp -p "$wt/$f" "$dest/$f"; kept=$((kept+1))
+    [ "$kept" -le 10 ] && echo "kept ignored file: $f"
+  done < <(git -C "$wt" ls-files --others --ignored --exclude-standard 2>/dev/null)
+  [ "$kept" -gt 10 ] && echo "kept $kept ignored files in all"
+  [ "$kept" -gt 0 ] && echo "ignored files the builder made are kept under ${dest#"$WS"/}/ (move any the project needs into place)"
+  [ ${#big[@]} -gt 0 ] && echo "warning: discarded ignored files over 20 MB: ${big[*]}"
+  return 0
+}

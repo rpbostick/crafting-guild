@@ -1,7 +1,10 @@
 # Crafting Guild settings. Sourced by every script. Edit freely; nothing else reads these.
 # config.local.sh, when present, is sourced after this file: put private values there (your own names below).
 WS_TZ=""                        # calendar for dates written into plans ("Europe/Lisbon"); empty = this machine's local time
-WS_DEFAULT_BUDGET="10"          # dollars, --max-budget-usd for a builder run
+WS_BENCH_HOURS="${WS_BENCH_HOURS-}"             # hours the bench replays back to back, "22-07" (WS_TZ, else local); outside them half pace; empty = always back to back
+WS_BENCH_OUTSIDE="${WS_BENCH_OUTSIDE-half}"        # outside WS_BENCH_HOURS: "half" (half pace) or "wait" (no replays: the bench runs inside the hours only)
+WS_MERGE_TEST_TIMEOUT="${WS_MERGE_TEST_TIMEOUT-1800}"  # seconds the merge gate's test run (and merge.sh --test-only) may take before it is killed and the merge undone; a runner that never exits after its tests would otherwise hold the merge lock
+WS_DEFAULT_BUDGET="10"         # dollars, --max-budget-usd for a builder run
 WS_REVIEW_BUDGET="8"            # dollars, for a review run
 WS_DEFAULT_TIMEOUT="120m"       # wall-clock cap for a builder run (timeout(1) form)
 WS_LIGHT_TIMEOUT="45m"          # cap for a task marked 'Track: light'
@@ -16,7 +19,13 @@ WS_MODEL="opus"                   # builder model alias ("sonnet", "opus", ...);
 WS_REVIEW_MODEL="fable"         # reviewer model alias; empty = default
 WS_REVIEW_MODEL_LIGHT="opus"    # reviewer for a branch whose task is marked `Track: light`; empty = WS_REVIEW_MODEL
 WS_EFFORT=""                    # builder effort (low|medium|high|xhigh|max); empty = default
-WS_LESSONS_CAP="40"             # cold-start warns when a lessons/ file (shared or .local.md) passes this many lines
+WS_AGENT="${WS_AGENT:-claude}"  # what runs a builder: "claude" (claude -p) or "opencode" (scripts/opencode-builder.sh); ws dispatch --agent overrides
+WS_OPENCODE_MODEL="opencode-go/deepseek-v4.1-flash"   # builder model for --agent opencode (provider/model); --model overrides
+# OpenCode model IDs and the names OpenCode's Go page gives them in its privacy table, which zdr-check reads: a model
+# not listed here is refused, since its retention cannot be checked.
+WS_OPENCODE_MODEL_NAMES=("opencode-go/deepseek-v4.1-flash=DeepSeek V4.1 Flash")
+WS_WEB_MAX_MB="${WS_WEB_MAX_MB:-20}"   # ws web refuses a file larger than this many MB (the environment may set it for one call)
+WS_LESSONS_CAP="40"            # cold-start warns when a lessons/ file (shared or .local.md) passes this many lines
 # Words that attribute work to people or to this process. ws merge refuses a branch that adds a line
 # matching them (case-insensitive ERE), and ws dispatch refuses a task file that contains them: repos
 # state reasons, the workspace's plans keep who and when. Exempt: LICENSE*, package manifests, license

@@ -2,6 +2,31 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.6.0
+
+- Builders can run on OpenCode (`ws dispatch --agent opencode`, `WS_AGENT`, `WS_OPENCODE_MODEL`; default model `opencode-go/deepseek-v4.1-flash`). The task's grants become OpenCode's permission config (every other command and any write outside the worktree is denied), the run stops at its budget from the per-step costs OpenCode reports, the JSON result is checked against the same schema, and the result check, review, chain and merge work as for Claude Code. `ws tail` reads OpenCode logs too.
+- `scripts/zdr-check.sh`: an OpenCode Go model is used only while OpenCode's page lists it as not used for training, kept 0 days, and under an unlapsed retention agreement; the launcher refuses it otherwise.
+- The orchestrator can run under OpenCode: `AGENTS.md` (the brief, with OpenCode's mechanisms where Claude Code's differ), `opencode.json` (loads the private preferences and lessons when present; missing files are skipped), `/cold-start`, and `docs/opencode-orchestrator.md`. A self-test check keeps the `bin/ws` commands named in `CLAUDE.md` and `AGENTS.md` the same.
+- `ws bench`: an arm can name its agent and model (`--arm L=<ref>,agent=opencode,model=<id>`), `--review none` grades on tests and done-when only, and `report --baseline recorded` compares with the tasks' first runs as recorded, without replaying them.
+
+## 2.5.4 (not released separately: part of 2.6.0)
+
+- `ws release` authors the public commit and tag as GitHub's no-reply address for the public repository's owner (or `RELEASE_NAME`/`RELEASE_EMAIL` from the conf), so the private repository's e-mail never reaches the public history.
+- `ws release` publishes a GitHub Pages site when the conf sets `PAGES_BUILD` (and `PAGES_DIR`, default `dist`): it builds from a clean clone of the new tag, scans the output for home paths and keys, and pushes it to the public repository's `gh-pages` branch.
+- `ws release`: the e-mail check skips third-party licence texts, manifests and lockfiles (as the attribution check already did), so a dependency author's address in `THIRD_PARTY_LICENSES` or `package-lock.json` no longer stops a first release.
+- `ws merge` takes a per-project lock (`runs/<project>/merge.lock`), so two lanes that finish together merge one after the other instead of both working in the same main checkout. A second merge says it is waiting.
+- `ws review`: when the reviewer model has reached its usage limit, the review runs once more on the light-track model (`WS_REVIEW_MODEL_LIGHT`) instead of failing, so a chain doesn't stop on it.
+- `ws chain`: an automatic fix round's task keeps the original task's `## Commands` section, so the fix builder gets the same grants and can re-run its tests. Before, the section was demoted with the rest of the original task, the fix round got none of those grants, and it ended partial.
+- Result check: a done-when item's evidence path is read without the punctuation after it (`.ws-evidence/a.log: 192 functions` names `.ws-evidence/a.log`), and a bare file name is also looked for in `.ws-evidence/`. Before, a trailing colon failed a run whose evidence was there, and some citations weren't checked at all.
+- `ws chain` resumes a stopped run: a `NO RESULT` file (what a run stopped by hand or a closed session leaves) counts as no result, and a worktree with no run whose task has a line starting `Resume:` is dispatched again. Before, the chain stopped on the stale file as a failed check.
+- Builders may run `git check-ignore` (read-only), and the builder lessons say to read files outside the worktree with the Read and Grep tools: the automation audit found Bash `grep`, `ls` and `git show --output` on outside paths among the most frequent denials.
+- `ws chain` and the result check read a weekly limit's reset time ("resets Oct 19, 4am"), not only a clock time ("resets 8pm"), and never roll a dated reset to the next day. Before, a review that hit the weekly limit stopped the chain with "reset time unknown".
+- `ws wait` checks a saved failing result again when the result check has changed since, so restarting `ws chain` after a fix to the check carries on instead of stopping on the old verdict.
+- `ws merge` keeps the git-ignored files a builder made (a generated recording, a download) under `runs/<project>/evidence/<name>/ignored/` and names them, instead of discarding them with the worktree. Dependency, build and cache folders, `.ws-evidence` and linked paths are skipped; files over 20 MB are named, not kept.
+- `ws dispatch` names the paths `.worktree-links` links into a worktree as read-only in the builder's prompt (writing through them is denied), and says where to save files that must outlive the run.
+- `ws review` names any other project's plan that mentions the branch, so a branch kept waiting on purpose (for a demo or a recording) isn't merged by mistake.
+- Builders may run `sha256sum` and `file` by default (both read-only), so checking a download no longer costs a denied call. `unzip` still has to be named in a task's `## Commands`.
+
 ## 2.5.3
 
 - `ws dispatch`: a glob in a task's `## Commands` is not expanded against the workspace's files. `` `node *` `` is granted as `Bash(node*)`; before, it became `Bash(node agents*)` from the folder listing.

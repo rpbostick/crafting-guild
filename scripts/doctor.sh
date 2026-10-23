@@ -52,6 +52,12 @@ else
   git -C "$PROJECT_PATH" remote get-url origin >/dev/null 2>&1 && ok "remote origin (merges push to it)" || warn "no remote origin: merges stay local" "git -C $PROJECT_PATH remote add origin <url>"
   excl="$(git -C "$PROJECT_PATH" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/info/exclude"
   grep -qx .worktrees "$excl" 2>/dev/null && ok ".worktrees is excluded from the project's git" || warn ".worktrees is not in $excl" "ws init $PROJECT_PATH --force (backs up the conf) or add the line by hand"
+  # The merge gate runs jest from the main checkout, where each builder worktree is a copy of the repo.
+  jcfg="$(ls "$PROJECT_PATH"/jest.config.* 2>/dev/null | head -n1)"
+  if [ -n "$jcfg" ] || grep -q '"jest"' "$PROJECT_PATH/package.json" 2>/dev/null; then
+    grep -qE 'roots|\.worktrees' ${jcfg:-"$PROJECT_PATH/package.json"} && ok "jest is scoped away from .worktrees/" \
+      || warn "jest config sets neither roots nor a .worktrees ignore: the merge gate collects every worktree's tests" "set roots: ['<rootDir>/src'] (or testPathIgnorePatterns: ['/.worktrees/'])"
+  fi
   [ -n "$PREVIEW_CMD" ] && ok "preview command set" || echo "note  no PREVIEW_CMD: ws serve is off for $SLUG"
 fi
 

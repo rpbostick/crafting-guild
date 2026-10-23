@@ -11,7 +11,8 @@ ws <slug>                       open an orchestrator session for a registered pr
 ws init <path> [--tests CMD] [--branch B] [--yes]   register a project (and retire v1 hooks if found)
 ws list                         registered projects
 ws status [slug]                cold-start: ground truth in twenty seconds
-ws dispatch [flags] <name> <task-file>   run a builder (see scripts/dispatch.sh for flags)
+ws dispatch [flags] <name> <task-file>   run a builder (see scripts/dispatch.sh for flags); --agent opencode runs it
+                                through OpenCode on a zero-retention model (--model provider/model, WS_OPENCODE_MODEL)
 ws wait <name> [minutes]        block until the run finishes; exit 0 if its result checks out
 ws tail <name>                  follow a run's log as readable lines
 ws runs [slug]                  runs and their results
@@ -20,8 +21,21 @@ ws merge <name> <sha>           merge a reviewed branch, test, push, clean up
 ws chain <queue-file>           run a queue of steps: dispatch, wait, review (one automatic fix round), merge, next;
                                 stops on a failure, a gate or a judgment call (run it under run_in_background)
 ws chain-wait                   wait on the project's running chain (from any session) and print where it stopped
+ws web <name>                   the web sources a run asked for (builders have no web access) and what was done with each
+ws web <name> approve <n|all> [--url <url>]   fetch each approved URL (curl, http(s) only, at most WS_WEB_MAX_MB) into
+                                the worktree's .ws-evidence/given/web/ with a sidecar; a search is answered with --url
+ws web <name> deny <n> "<reason>"   record why a request is not given (the resume task says so)
+ws web <name> resume [dispatch flags]   write a resume task naming the files, then re-dispatch the same builder name
 ws precheck <name>              the checklist rules a script can check (ws review runs it first)
 ws audit [days]                 what builders keep doing by hand, from the run logs (default 30 days)
+ws bench add <name>...          add merged runs to the project's replay corpus (plans/<slug>/bench/)
+ws bench run <slug> --arm L=<git-ref|dir>[,agent=claude|opencode][,model=M] --arm L2=... [--review none|claude]
+         [--trials N] [--parallel P] [--dry-run] [tasks...]
+                                replay corpus tasks from their base commit under each arm of builder instructions
+                                (and agent and model), blind-review (unless --review none) and test each run, record
+                                it (runs/<slug>/bench/runs.tsv); resumable
+ws bench report [--baseline L|recorded] <slug>...   quality first, then cost, per arm (agent, model) and task; flags
+                                a quality drop; recorded = the corpus tasks' first runs as recorded, not replayed
 ws stop <name>                  stop a running builder
 ws serve <name|main> [port]     start the project's preview server from a worktree (or the main checkout)
 ws serve stop [name|main]       stop it;  ws serve list
@@ -137,11 +151,20 @@ case "$cmd" in
     grep -E "review at|merged \(|STOP|fix round|carried|chain (start|done)" "$RUNS/chain.log" 2>/dev/null | tail -20
     st=$(cat "$RUNS/chain.status" 2>/dev/null || echo "no status"); echo "status: $st"
     case "$st" in done*) exit 0 ;; *gated*) exit 4 ;; *) exit 1 ;; esac ;;
+  web) "$WS/scripts/web.sh" ${proj:+--project "$proj"} "$@" ;;
   precheck) "$WS/scripts/precheck.sh" ${proj:+--project "$proj"} "$@" ;;
+  bench) "$WS/scripts/bench.sh" ${proj:+--project "$proj"} "$@" ;;
   audit) load_project "$proj"; python3 "$WS/scripts/audit.py" "$SLUG" "$PROJECT_PATH" "$TEST_CMD" "$RUNS" "$WS/plans/$SLUG" "${1:-30}" ;;
   wait)
     name="${1:?ws wait <name> [minutes]}"; mins="${2:-150}"; load_project "$proj"
     for _ in $(seq 1 $((mins*6))); do
+      # A saved FAIL from an older result check is checked again, so a fixed check unblocks a stopped chain.
+      if [ -f "$RUNS/$name.result.txt" ] && [ ! -f "$RUNS/$name.pid" ] && [ -f "$RUNS/$name.jsonl" ] \
+        && [ "$WS/scripts/check-result.sh" -nt "$RUNS/$name.result.txt" ] && grep -q '^FAIL' "$RUNS/$name.result.txt"; then
+        since=$(sed -n 's/^since=//p' "$RUNS/$name.task.txt" 2>/dev/null)
+        "$WS/scripts/check-result.sh" --project "$SLUG" ${since:+--since "$since"} "$name" > "$RUNS/$name.result.txt.new" 2>&1 || true
+        mv "$RUNS/$name.result.txt.new" "$RUNS/$name.result.txt"
+      fi
       if [ -f "$RUNS/$name.result.txt" ] && [ ! -f "$RUNS/$name.pid" ]; then cat "$RUNS/$name.result.txt"; grep -q '^FAIL\|^NO RESULT\|^TIMEOUT\|^LIMIT' "$RUNS/$name.result.txt" && exit 1 || exit 0; fi
       [ -f "$RUNS/$name.pid" ] || [ -f "$RUNS/$name.jsonl" ] || die "no run named $name"
       # A run whose wrapper died with it (the usage limit can take both) never writes its result: write it here.
@@ -154,8 +177,17 @@ case "$cmd" in
     done; echo "still running after $mins minutes"; exit 3 ;;
   tail)
     name="${1:?ws tail <name>}"; load_project "$proj"
-    tail -n +1 -f "$RUNS/$name.jsonl" | jq -r --unbuffered '
+    # `opencode-builder: ...` notes and OpenCode's stderr sit beside the JSON events: fromjson? skips those lines.
+    # OpenCode carries its text and tool calls as top-level `text` and `tool_use` events with a `part`.
+    tail -n +1 -f "$RUNS/$name.jsonl" | jq -R -r --unbuffered '
+      fromjson? // empty |
       if .type=="assistant" then (.message.content[]? | if .type=="text" then "SAY  " + (.text|.[0:160]) elif .type=="tool_use" then "TOOL " + .name + " " + ((.input.command // .input.file_path // .input.pattern // "")|tostring|.[0:120]) else empty end)
+      elif .type=="text" then "SAY  " + ((.part.text // "")|.[0:160])
+      elif .type=="tool_use" then
+        (.part.state // {}) as $state |
+        (($state.input.command // $state.input.filePath // $state.input.pattern // "")|tostring|.[0:120]) as $what |
+        if (($state.error // "")|test("permission|prevents you from using|rejected"; "i")) then "DENIED " + (.part.tool // "") + " " + $what
+        else "TOOL " + (.part.tool // "") + " " + $what + (if $state.status then " [" + $state.status + "]" else "" end) end
       elif .type=="result" then "DONE cost=$" + ((.total_cost_usd // 0)|tostring) + " " + ((.structured_output.status // .subtype // "")|tostring)
       elif .type=="system" and .subtype=="permission_denied" then "DENIED " + ((.tool_input.command // .tool_name // "")|tostring|.[0:120])
       else empty end' 2>/dev/null ;;
@@ -195,7 +227,8 @@ case "$cmd" in
     name="${1:?ws stop <name>}"; load_project "$proj"; pf="$RUNS/$name.pid"; [ -f "$pf" ] || die "no running $name"
     pkill -TERM -P "$(cat "$pf")" 2>/dev/null; sleep 2; pkill -KILL -P "$(cat "$pf")" 2>/dev/null; echo "stopped $name; its worktree is untouched" ;;
   *)
-    slug="$(resolve_slug "$cmd")"; load_project "$slug"
+    # die inside $(...) ends only the subshell: without the exit, an unknown word opened a session on the pinned project.
+    slug="$(resolve_slug "$cmd")" || exit 1; load_project "$slug"
     echo "$slug" > "$WS/state/current"
     cd "$WS" && WS_PROJECT="$slug" exec claude --add-dir "$PROJECT_PATH" --name "ws $slug" "$@" ;;
 esac

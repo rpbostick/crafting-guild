@@ -100,6 +100,10 @@ agent:  ws merge hats-1 3f2a9c1  -> tests passed, pushed, worktree removed
 
 Builders never push and never touch the main checkout.
 
+Builders can also run on [OpenCode](https://github.com/anomalyco/opencode) (MIT) instead of Claude Code: `ws dispatch --agent opencode` (or `WS_AGENT="opencode"` in `config.sh`) runs `opencode run` with a `provider/model` ID, by default `WS_OPENCODE_MODEL`. Only zero-retention models run: before anything starts, `scripts/zdr-check.sh` reads OpenCode's Go page and refuses a model that is used for training, keeps data, or whose retention agreement has lapsed. The same grants become OpenCode permissions (nothing left at "ask"), the budget is enforced from each step's cost, and the run ends with the same checked result, so wait, chain, review and merge work as they do for Claude.
+
+The orchestrator itself runs under OpenCode too: start `opencode` in this folder with `WS_PROJECT=<slug>` set (or let it follow `state/current`). OpenCode reads `AGENTS.md`, and `opencode.json` loads the private preferences and the orchestrator lessons by reference, with session sharing disabled. Type `/cold-start` first: it prints the same session-start context Claude Code's hook injects. `bin/ws wait` and `bin/ws chain` run in the foreground with an explicit shell timeout rather than as background tasks; `docs/opencode-orchestrator.md` maps the rest and names the OpenCode page behind each choice.
+
 ## Commands
 
 `ws help` prints them all. The main ones:
@@ -110,7 +114,7 @@ Builders never push and never touch the main checkout.
 | `ws init <path> [--tests CMD] [--branch B] [--dry-run] [--force]` | register a project; `--dry-run` shows the conf and changes first; an existing conf is replaced only with `--force`, after a backup, keeping keys init does not write |
 | `ws doctor` | check this machine and the selected project, with a fix for each failure |
 | `ws list`, `ws status [slug]`, `ws version` | registered projects; cold-start by hand; the version |
-| `ws dispatch [--budget N] [--timeout T] [--model M] [--effort E] [--allow RULE]... <name> <task-file>` | run a builder (`--dry-run` or `--print-prompt` to see what it would get) |
+| `ws dispatch [--budget N] [--timeout T] [--model M] [--effort E] [--agent claude\|opencode] [--allow RULE]... <name> <task-file>` | run a builder (`--dry-run` or `--print-prompt` to see what it would get) |
 | `ws wait <name>`, `ws tail <name>`, `ws runs`, `ws stop <name>` | wait for, watch, list, stop runs |
 | `ws serve <name\|main> [port]`, `ws serve stop [name]` | preview server from a worktree or the main checkout |
 | `ws review <name>`, `ws precheck <name>` | review the branch (prints the verdict and the SHA to merge); the mechanical checks alone |

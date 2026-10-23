@@ -102,6 +102,13 @@ problems=$(printf '%s\n' "$doc" | grep -E '^(FAIL|warn)  ' | sed 's/^/  /')
 fixes=$(printf '%s\n' "$doc" | grep -A1 '^FAIL' | grep '^      fix:' | sed 's/^      /    /')
 if [ -n "$problems" ]; then printf '%s\n' "$problems"; [ -n "$fixes" ] && printf '%s\n' "$fixes"; else echo "  ok: every check passes"; fi
 [ "$dx" -ne 0 ] && echo "  a required check failed: dispatches and chains will fail until it is fixed (ws doctor shows each fix)"
+# A project's own flag line, from COLD_START_CMD in its conf. It runs in the project with a timeout and
+# prints only when it prints something: a missing deployment, database or account is silent, and cold start
+# never fails on it. The command filters for its own flag; cold start prints what it says.
+if [ -n "${COLD_START_CMD:-}" ]; then
+  flag=$(cd "$PROJECT_PATH" && timeout 20 bash -c "$COLD_START_CMD" 2>/dev/null || true)
+  if [ -n "$flag" ]; then echo; echo "--- project flag ---"; printf '%s\n' "$flag" | sed 's/^/  /'; fi
+fi
 $brief && exit 0
 echo
 echo "--- workspace ---"

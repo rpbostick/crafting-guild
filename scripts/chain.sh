@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run a queue of plan steps end to end: dispatch, wait, review, merge, next. Stops and says why when a step
-# needs a person or a judgment: a failed or partial run, a review that is not `merge` after the automatic fix
+# needs a person or a judgment: a failed or partial run, a run asking for web sources (ws web), a review that is not `merge` after the automatic fix
 # rounds, a step marked `gate` (shown to the operator before its merge), a failed merge. Run it in the background
 # and act on the stop; running it again resumes where the queue stands (merged steps are skipped).
 # Usage: chain.sh [--project slug] <queue-file>
@@ -56,8 +56,11 @@ for i in "${!steps[@]}"; do
   status running "$name"
   wt="$(worktree_dir "$name")"
   if running "$name"; then log "$name: a run is going; waiting for it"
-  elif [ -d "$wt" ] && [ -f "$RUNS/$name.result.txt" ]; then log "$name: worktree and result exist; going to review"
-  elif [ -d "$wt" ]; then stop "$name" "worktree exists with no run and no result (a stopped run?); resume it with a task that says so"
+  # A "NO RESULT" file is what a stopped run leaves: no result, not a failed one.
+  elif [ -d "$wt" ] && [ -f "$RUNS/$name.result.txt" ] && ! grep -q '^NO RESULT' "$RUNS/$name.result.txt"; then log "$name: worktree and result exist; going to review"
+  elif [ -d "$wt" ] && grep -q '^Resume:' "$task"; then log "$name: stopped run; its task has a Resume note, dispatching it again"
+    ws dispatch "${flags[@]}" "$name" "$task" 2>&1 | tee -a "$tee_to" | tail -1; running "$name" || stop "$name" "resume dispatch failed (see $logf)"
+  elif [ -d "$wt" ]; then stop "$name" "worktree exists with no run and no result (a stopped run?); add a line starting 'Resume:' to its task and run the chain again"
   else ws dispatch "${flags[@]}" "$name" "$task" 2>&1 | tee -a "$tee_to" | tail -1; running "$name" || stop "$name" "dispatch failed (see $logf)"; fi
   fix=0
   while :; do
@@ -77,6 +80,9 @@ for i in "${!steps[@]}"; do
       status running "$name"; continue
     fi
     [ "$rc" -eq 0 ] || stop "$name" "the run's result did not check out (runs/$SLUG/$name.result.txt)"
+    # A builder asking for web sources waits on a decision only the orchestrator makes: what to fetch.
+    nweb=$(grep -c '^web   request' "$RUNS/$name.result.txt" 2>/dev/null || true)
+    [ "${nweb:-0}" -gt 0 ] && stop "$name" "web requests: the builder asked for $nweb source(s); list them with ws web $name, approve or deny each, then ws web $name resume and run the chain again"
     grep -q '^done:' "$RUNS/$name.result.txt" || stop "$name" "the builder did not finish (status $(head -1 "$RUNS/$name.result.txt" | cut -d: -f1)); see its open questions"
     tip=$(git -C "$wt" rev-parse HEAD)
     rv="$RUNS/$name.review.json"
@@ -87,8 +93,8 @@ for i in "${!steps[@]}"; do
       while :; do
         ws review "$name" >> "$logf" 2>&1; [ -f "$rv" ] && [ "$(jq -r .reviewed_sha "$rv")" = "$tip" ] && break
         if [ "$(jq -r '.api_error_status // empty' "$rv.raw" 2>/dev/null)" = 429 ]; then
-          msg=$(jq -r '.result // ""' "$rv.raw"); when=$(printf '%s' "$msg" | sed -nE 's/.*resets ([0-9]{1,2}(:[0-9]{2})? ?[ap]m).*/\1/p'); tz=$(printf '%s' "$msg" | sed -nE 's/.*resets [^(]*\(([^)]+)\).*/\1/p')
-          ep=""; [ -n "$when" ] && ep=$(TZ="${tz:-${WS_TZ:-}}" date -d "$when" +%s 2>/dev/null); [ -n "$ep" ] && [ "$ep" -le "$(date +%s)" ] && ep=$((ep + 86400))
+          msg=$(jq -r '.result // ""' "$rv.raw"); when=$(printf '%s' "$msg" | sed -nE 's/.*resets ([A-Z][a-z]{2} [0-9]{1,2}, )?([0-9]{1,2}(:[0-9]{2})? ?[ap]m).*/\1\2/p' | tr -d ,); dated=$(printf '%s' "$when" | grep -c '^[A-Z]'); tz=$(printf '%s' "$msg" | sed -nE 's/.*resets [^(]*\(([^)]+)\).*/\1/p')
+          ep=""; [ -n "$when" ] && ep=$(TZ="${tz:-${WS_TZ:-}}" date -d "$when" +%s 2>/dev/null); [ -n "$ep" ] && [ "$dated" = 0 ] && [ "$ep" -le "$(date +%s)" ] && ep=$((ep + 86400))
           case "$ep" in ''|*[!0-9]*) stop "$name" "the review hit the usage limit, reset time unknown: $msg" ;; esac
           rlimits=$((rlimits+1)); [ "$rlimits" -le 3 ] || stop "$name" "the review hit the usage limit 3 times"
           wake=$((ep + 120)); status waiting "$name: review hit the usage limit, retrying at $(date -d "@$wake" '+%H:%M')"; log "$name: review hit the usage limit; retrying at $(date -d "@$wake" '+%H:%M')"
@@ -103,12 +109,7 @@ for i in "${!steps[@]}"; do
     fix=$((fix+1)); [ "$fix" -le "$max_fix" ] || stop "$name" "still fix-first after $max_fix automatic fix round(s); see runs/$SLUG/$name.review.md"
     # Automatic fix round: the same builder, its blocking findings as the task.
     ft="$(dirname "$task")/$(basename "$task" .md)-fix-auto-$fix.md"
-    {
-      echo "# Fix round $fix for \`$(basename "$task")\`"; echo
-      echo "The review of this branch at $(short "$tip") found blocking issues. Fix each one, with a test where the finding is about behaviour, commit, and re-run the covering test files through ws-run. Do nothing else; suggestions are carried to a later task."
-      echo; echo "## Blocking findings"; jq -r '.blocking[] | "- `\(.file):\(.line)` (rule \(.rule)): \(.why)"' "$rv"
-      echo; echo "## The original task (for context)"; sed 's/^#/##/' "$task"
-    } > "$ft"
+    write_fix_task "$task" "$rv" "$fix" "$(short "$tip")" "$ft"
     log "$name: fix-first; automatic fix round $fix ($ft)"
     ws dispatch "${flags[@]}" "$name" "$ft" 2>&1 | tee -a "$tee_to" | tail -1; running "$name" || stop "$name" "fix dispatch failed (see $logf)"
   done
@@ -119,9 +120,12 @@ for i in "${!steps[@]}"; do
   if [ $((i+1)) -lt ${#steps[@]} ] && [ "$(jq '.suggestions|length' "$rv")" -gt 0 ]; then
     set -f; eval "nf=( ${steps[$((i+1))]} )"; set +f; nt="${nf[1]:-}"
     if [ -f "$nt" ] && ! [ -d "$(worktree_dir "${nf[0]}")" ] && ! grep -q "^## Carried from the $name review" "$nt"; then
-      carry=$(jq -r '.suggestions[] | "- `\(.file):\(.line)`: \(.why)"' "$rv")
-      [ -n "${WS_ATTRIBUTION_RE:-}" ] && carry=$(printf '%s\n' "$carry" | grep -viE "$WS_ATTRIBUTION_RE" || true)
-      [ -n "$carry" ] && printf '\n## Carried from the %s review (suggestions; do them where the code is yours to touch)\n%s\n' "$name" "$carry" >> "$nt" && log "$name: suggestions carried into $nt"
+      if ! carry=$(carry_suggestions "$rv" "$name" "$nt" "$WS" 2>&1); then
+        log "$name: committing the carried suggestions failed: $carry"
+        # The section is in the file now, so the next run's guard skips the carry: the commit is left to the reader.
+        stop "${nf[0]}" "the suggestions carried into $nt could not be committed in the workspace; fix the cause above, run: git -C $WS commit -m 'chain: suggestions from the $name review carried into $(basename "$nt")' -- $(realpath "$nt"); then run the chain again"
+      fi
+      [ -n "$carry" ] && log "$name: suggestions carried into $nt and committed"
     fi
   fi
 done

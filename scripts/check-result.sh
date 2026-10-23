@@ -15,10 +15,10 @@ fi
 # A run stopped by the usage limit: say so, with the reset time as an epoch, so ws chain can wait and resume.
 if [ "$(printf '%s' "$res" | jq -r '.api_error_status // empty')" = 429 ]; then
   msg=$(printf '%s' "$res" | jq -r '.result // ""')
-  when=$(printf '%s' "$msg" | sed -nE 's/.*resets ([0-9]{1,2}(:[0-9]{2})? ?[ap]m).*/\1/p'); tz=$(printf '%s' "$msg" | sed -nE 's/.*resets [^(]*\(([^)]+)\).*/\1/p')
+  when=$(printf '%s' "$msg" | sed -nE 's/.*resets ([A-Z][a-z]{2} [0-9]{1,2}, )?([0-9]{1,2}(:[0-9]{2})? ?[ap]m).*/\1\2/p' | tr -d ,); dated=$(printf '%s' "$when" | grep -c '^[A-Z]'); tz=$(printf '%s' "$msg" | sed -nE 's/.*resets [^(]*\(([^)]+)\).*/\1/p')
   ep=""; [ -n "$when" ] && ep=$(TZ="${tz:-${WS_TZ:-}}" date -d "$when" +%s 2>/dev/null); # The reset is the next such clock time after the run stopped (the log's last write), not after this check:
-  # a result rebuilt once the reset has passed must not land a day late.
-  stopped=$(stat -c %Y "$log" 2>/dev/null || date +%s); [ -n "$ep" ] && [ "$ep" -le "$stopped" ] && ep=$((ep + 86400))
+  # a result rebuilt once the reset has passed must not land a day late. A weekly limit names its day ("resets Oct 19, 4am"): never rolled.
+  stopped=$(stat -c %Y "$log" 2>/dev/null || date +%s); [ -n "$ep" ] && [ "$dated" = 0 ] && [ "$ep" -le "$stopped" ] && ep=$((ep + 86400))
   echo "LIMIT: $msg"; echo "reset_epoch=${ep:-unknown}"; echo "partial work, if any, is in $wt"; exit 3
 fi
 problems=0; flag() { echo "FAIL  $*"; problems=$((problems+1)); }; ok() { echo "ok    $*"; }
@@ -59,8 +59,10 @@ if [ "$(printf '%s' "$so" | jq 'has("done_when")')" = true ]; then
     line="done-when $st ($basis): $(printf '%s' "$item" | head -c 120)"
     if [ "$st" != met ]; then echo "note  $line"; continue; fi
     if [ "$basis" = inferred ]; then echo "note  $line: inferred, not run ($(printf '%s' "$ev" | head -c 120))"; continue; fi
-    path=${ev%% *}; path=${path%,}; path=${path//\`/}
-    if [[ "$path" == */* || "$path" == *.log || "$path" == *.png || "$path" == *.txt ]] && [[ "$path" != http* ]] && [ ! -e "$wt/$path" ] && ! git -C "$wt" cat-file -e "${path}^{commit}" 2>/dev/null; then
+    # First word of the evidence, without the punctuation of the sentence it opens (".ws-evidence/a.log: 192");
+    # a bare file name ("a.log") is looked up in .ws-evidence/ too.
+    path=${ev%% *}; path=${path//\`/}; while [[ "$path" == *[,:\;.\)] ]]; do path=${path%?}; done
+    if [[ "$path" == */* || "$path" == *.log || "$path" == *.png || "$path" == *.txt ]] && [[ "$path" != http* ]] && [ ! -e "$wt/$path" ] && [ ! -e "$wt/.ws-evidence/$path" ] && ! git -C "$wt" cat-file -e "${path}^{commit}" 2>/dev/null; then
       flag "$line: evidence $path is not in the worktree"
     else ok "$line"; fi
   done < <(printf '%s' "$so" | jq -r '.done_when[] | [.status, .basis, (.item | gsub("[\t\n]"; " ")), (.evidence | gsub("[\t\n]"; " "))] | @tsv')
@@ -74,5 +76,11 @@ if [ -n "$since" ]; then
 fi
 d=$(git -C "$wt" status --short -uno | wc -l); u=$(git -C "$wt" status --short | grep -c "^??" || true); [ "$d" -gt 0 ] && echo "note  $d modified tracked file(s) left uncommitted"; [ "$u" -gt 0 ] && echo "note  $u untracked file(s) in the worktree (logs, caches)"
 nq=$(printf '%s' "$so" | jq '.open_questions | length'); [ "$nq" -gt 0 ] && echo "note  open questions: $(printf '%s' "$so" | jq -c '.open_questions')"
+# Web sources the builder asked for (builders have no web access): ws chain stops on these lines, ws web answers them.
+nweb=$(printf '%s' "$so" | jq '.web_requests // [] | length')
+[ "$nweb" -gt 0 ] && [ "$(printf '%s' "$so" | jq -r '.status')" = "done" ] && flag "status done, but the result asks for $nweb web source(s)"
+printf '%s' "$so" | jq -r '.web_requests // [] | to_entries[] | .value as $r
+  | "web   request \(.key + 1): \(if ($r.url // "") != "" then $r.url else "search: \($r.query // "(no url or query)")" end); why: \($r.why // ""); needed: \($r.needed // "")"
+  | gsub("[\t\n]"; " ") | .[0:400]'
 echo "cost=\$$cost ${dur}min $tok tip=$(git -C "$wt" rev-parse --short HEAD)"
 [ "$problems" -eq 0 ]

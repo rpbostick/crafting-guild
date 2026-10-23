@@ -4,9 +4,22 @@ set -euo pipefail
 WS="$(cd "$(dirname "$0")/.." && pwd)"
 for f in "$WS"/bin/ws "$WS"/scripts/*.sh; do bash -n "$f" && echo "syntax ok  ${f#"$WS"/}"; done
 if command -v shellcheck >/dev/null; then shellcheck -S warning "$WS"/bin/ws "$WS"/scripts/*.sh && echo "shellcheck ok" || { echo "shellcheck FAILED"; exit 1; }; fi
+# The two orchestrator briefs cannot drift on commands: a bin/ws command named in one is named in the other.
+claude_ws=$(grep -oE 'bin/ws [a-z][a-z-]*' "$WS/CLAUDE.md" | sort -u || true)
+agents_ws=$(grep -oE 'bin/ws [a-z][a-z-]*' "$WS/AGENTS.md" | sort -u || true)
+only_claude=$(comm -23 <(printf '%s\n' "$claude_ws") <(printf '%s\n' "$agents_ws"))
+only_agents=$(comm -13 <(printf '%s\n' "$claude_ws") <(printf '%s\n' "$agents_ws"))
+[ -z "$only_claude$only_agents" ] && echo "CLAUDE.md and AGENTS.md name the same bin/ws commands ok" \
+  || { echo "brief parity FAILED: only in CLAUDE.md: ${only_claude:-none}; only in AGENTS.md: ${only_agents:-none}"; exit 1; }
+# OpenCode's project config must stay valid JSON and load the private preferences and both orchestrator lessons files.
+jq -e '.share == "disabled"
+  and (.instructions | index("CLAUDE.local.md"))
+  and (.instructions | index("lessons/orchestrator.md"))
+  and (.instructions | index("lessons/orchestrator.local.md"))' "$WS/opencode.json" >/dev/null \
+  && echo "opencode.json loads the private preferences and lessons ok" || { echo "opencode.json FAILED"; exit 1; }
 T=$(mktemp -d); slug=$(basename "$T" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')
 # Cleanup runs on every exit (a failed check, a kill, a crash), so the scratch project never outlives the test.
-trap 'rm -rf "$T" "$WS/plans/$slug" "$WS/runs/$slug"; rm -f "$WS/projects/$slug.conf"' EXIT
+trap '[ -n "${srvpid:-}" ] && kill "$srvpid" 2>/dev/null; rm -rf "$T" "$WS/plans/$slug" "$WS/runs/$slug" "$WS/plans/$slug-b" "$WS/runs/$slug-b" "$WS/plans/$slug-t" "$WS/runs/$slug-t"; rm -f "$WS/projects/$slug.conf" "$WS/projects/$slug-b.conf" "$WS/projects/$slug-t.conf"' EXIT
 git -C "$T" init -q -b main; echo hi > "$T/a.txt"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm init
 printf '#!/bin/sh\nexit 0\n' > "$T/t.sh"; chmod +x "$T/t.sh"
 printf 'n\n' | "$WS/bin/ws" init "$T" --tests "sh t.sh" >/dev/null && echo "init ok (non-interactive path)"
@@ -23,11 +36,54 @@ out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>
 # The resume path: a worktree that exists before the dry run is reused and kept.
 git -C "$T" worktree add -q -b agent/demo "$T/.worktrees/demo" main
 out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>&1); grep -q "reusing worktree" <<< "$out" && [ -d "$T/.worktrees/demo" ] && echo "resume path ok" || { echo "resume path FAILED"; exit 1; }
+# merge: a test command that never exits fails the merge at WS_MERGE_TEST_TIMEOUT; the merge is undone, the lock
+# released, and the command's own children are killed with it (bash forks the sleep, so only a group kill ends it).
+slug3="$slug-t"; M="$T/$slug3"; mkdir -p "$M"; git -C "$M" init -q -b main; echo a > "$M/a.txt"
+git -C "$M" add -A; git -C "$M" -c user.name=t -c user.email=t@t commit -qm init; printf 'n\n' | "$WS/bin/ws" init "$M" --tests "sleep 60.$$; true" >/dev/null
+m0=$(git -C "$M" rev-parse HEAD); git -C "$M" checkout -q -b agent/mt; echo b > "$M/b.txt"; git -C "$M" add b.txt; git -C "$M" -c user.name=t -c user.email=t@t commit -qm b
+mtip=$(git -C "$M" rev-parse HEAD); git -C "$M" checkout -q main; t0=$(date +%s)
+out=$(WS_MERGE_TEST_TIMEOUT=2 timeout 50 "$WS/scripts/merge.sh" --project "$slug3" --no-review mt "$mtip" 2>&1) && x=0 || x=1; secs=$(( $(date +%s) - t0 ))
+[ "$x" = 1 ] && [ "$secs" -lt 20 ] && grep -q 'timed out after 2 s' <<< "$out" && grep -q 'merge undone' <<< "$out" && [ "$(git -C "$M" rev-parse HEAD)" = "$m0" ] \
+  && ! git -C "$M" merge-base --is-ancestor "$mtip" main && flock -n "$WS/runs/$slug3/merge.lock" true && ! pgrep -fx "sleep 60.$$" >/dev/null \
+  && echo "merge test timeout undoes the merge and frees the lock ok" || { echo "merge test timeout FAILED: exit $x after ${secs}s"; echo "$out"; exit 1; }
+rm -rf "$M"  # later checks commit everything under $T; a nested repo there would be swept in
+# bench: WS_BENCH_HOURS gates when a replay may start, across midnight too.
+hrs=$(sed -n '/^in_bench_hours()/,/^}/p' "$WS/scripts/bench.sh")
+bash -c "$hrs"'
+  WS_BENCH_HOURS=22-07; in_bench_hours 23 && in_bench_hours 3 && ! in_bench_hours 7 && ! in_bench_hours 12 || exit 1
+  WS_BENCH_HOURS=09-17; in_bench_hours 09 && ! in_bench_hours 17 && ! in_bench_hours 2 || exit 1
+  WS_BENCH_HOURS=; in_bench_hours 12' && echo "bench hours ok" || { echo "bench hours FAILED"; exit 1; }
+# bench_hour reads the local clock when WS_TZ is empty (TZ="" would be UTC) and the named zone otherwise.
+bh=$(sed -n '/^bench_hour()/p' "$WS/scripts/bench.sh")
+[ "$(WS_TZ="" bash -c "$bh; bench_hour")" = "$(date +%H)" ] && [ "$(WS_TZ=Asia/Tokyo bash -c "$bh; bench_hour")" = "$(TZ=Asia/Tokyo date +%H)" ] \
+  && echo "bench hour ok" || { echo "bench hour FAILED"; exit 1; }
+# WS_BENCH_OUTSIDE=wait holds a replay outside the hours until they start (the clock reads 12, then 12, then 23).
+wfh=$(sed -n '/^wait_for_hours()/,/^}/p' "$WS/scripts/bench.sh")
+out=$(bash -c "$hrs
+$wfh"'
+  c=$(mktemp); echo 0 > "$c"  # bench_hour runs in $(...), so its call count lives in a file
+  bench_hour() { local n=$(( $(cat "$c") + 1 )); echo "$n" > "$c"; [ "$n" -lt 3 ] && echo 12 || echo 23; }; bench_last_start=""
+  WS_BENCH_HOURS=22-07 WS_BENCH_OUTSIDE=wait WS_BENCH_POLL=0; wait_for_hours; echo "calls=$(cat "$c")"; rm -f "$c"' 2>&1)
+grep -q "waiting for them" <<< "$out" && grep -q "calls=3" <<< "$out" && echo "bench night-only ok" || { echo "bench night-only FAILED: $out"; exit 1; }
+# dispatch: --input copies a file into the worktree's .ws-evidence/; a missing one is refused.
+echo grid > "$T/input.u8"
+"$WS/scripts/dispatch.sh" --project "$slug" --dry-run --input "$T/input.u8" demo "$T/task.md" >/dev/null 2>&1 && cmp -s "$T/input.u8" "$T/.worktrees/demo/.ws-evidence/input.u8" \
+  && ! "$WS/scripts/dispatch.sh" --project "$slug" --dry-run --input "$T/missing.u8" demo "$T/task.md" >/dev/null 2>&1 && echo "dispatch input ok" || { echo "dispatch input FAILED"; exit 1; }
 grep -qx '.worktrees' "$T/.git/info/exclude" && grep -qx '.ws-evidence' "$T/.git/info/exclude" && echo "exclude ok"
 [ -d "$T/.worktrees/demo/.ws-evidence" ] && echo "evidence dir ok"
 grep -q 'timeout: 120m' <<< "$out" && echo "full-track timeout ok"
 printf '# light task\n**Track: light.**\nFix a typo.\n' > "$T/light.md"
 out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/light.md" 2>&1); grep -q 'timeout: 45m' <<< "$out" && echo "light-track timeout ok"
+# chain's automatic fix task keeps the original's "## Commands" grants (a fix round once could not re-run its tests).
+printf '# cmd task\n\n## Commands\n`shellcheck *`, `bash tests/*`\n\n## Done when\n- x\n' > "$T/cmd.md"
+printf '{"blocking":[{"file":"a.sh","line":3,"rule":3,"why":"wrong header"}]}\n' > "$T/rv.json"
+( . "$WS/scripts/lib.sh"; write_fix_task "$T/cmd.md" "$T/rv.json" 1 abc123 "$T/cmd-fix.md" )
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/cmd-fix.md" 2>&1)
+grep -q 'Bash(shellcheck\*)' <<< "$out" && grep -q 'Bash(bash\*)' <<< "$out" && grep -q 'wrong header' "$T/cmd-fix.md" && echo "fix task keeps grants ok" || { echo "fix task grants FAILED:"; cat "$T/cmd-fix.md"; exit 1; }
+# dispatch: paths in .worktree-links are named in the prompt as read-only links.
+printf 'roms\n# a comment\n' > "$T/.worktree-links"
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --print-prompt demo "$T/task.md" 2>&1); rm -f "$T/.worktree-links"
+grep -q 'Linked paths: `roms` are links into the main checkout' <<< "$out" && echo "prompt names linked paths ok" || { echo "linked paths note FAILED"; grep -n 'Linked' <<< "$out"; exit 1; }
 # lessons: a role's .local.md reaches its prompt after the shared file, and cold-start names the orchestrator's.
 L="$T/lessons"; mkdir -p "$L"; printf -- '- shared lesson marker\n' > "$L/builder.md"; printf -- '- local lesson marker\n' > "$L/builder.local.md"
 printf -- '- o\n' > "$L/orchestrator.md"; printf -- '- p\n- q\n' > "$L/orchestrator.local.md"
@@ -45,6 +101,13 @@ out=$(cr "{\"status\":\"done\",$base,\"done_when\":[{\"item\":\"a\",\"status\":\
 [ "$x" = 1 ] && grep -q 'status done, but 1 done-when' <<< "$out" && grep -q 'ok    done-when met (observed): a' <<< "$out" && grep -q 'unknowns' <<< "$out" && echo "check-result done-when ok" || { echo "check-result done-when FAILED"; echo "$out"; exit 1; }
 out=$(cr "{\"status\":\"done\",$base,\"done_when\":[{\"item\":\"a\",\"status\":\"met\",\"basis\":\"observed\",\"evidence\":\".ws-evidence/missing.log\"}]}") && x=0 || x=1
 [ "$x" = 1 ] && grep -q 'evidence .ws-evidence/missing.log is not in the worktree' <<< "$out" && echo "check-result missing evidence ok" || { echo "check-result evidence FAILED"; echo "$out"; exit 1; }
+out=$(cr "{\"status\":\"done\",$base,\"done_when\":[{\"item\":\"a\",\"status\":\"met\",\"basis\":\"observed\",\"evidence\":\".ws-evidence/t.log: 192 functions.\"}]}") && x=0 || x=1
+[ "$x" = 0 ] && grep -q 'ok    done-when met (observed): a' <<< "$out" && echo "check-result evidence followed by a colon ok" || { echo "check-result evidence colon FAILED"; echo "$out"; exit 1; }
+out=$(cr "{\"status\":\"done\",$base,\"done_when\":[{\"item\":\"a\",\"status\":\"met\",\"basis\":\"observed\",\"evidence\":\"t.log: exit 0\"}]}") && x=0 || x=1
+[ "$x" = 0 ] && echo "check-result bare evidence name ok" || { echo "check-result bare evidence name FAILED"; echo "$out"; exit 1; }
+# wait: a saved FAIL older than check-result.sh is checked again (the last cr call above passes).
+printf 'FAIL  stale check\n' > "$WS/runs/$slug/demo.result.txt"; touch -d '2000-01-01' "$WS/runs/$slug/demo.result.txt"
+"$WS/bin/ws" --project "$slug" wait demo 1 >/dev/null 2>&1 && ! grep -q 'stale check' "$WS/runs/$slug/demo.result.txt" && echo "wait re-checks a stale FAIL ok" || { echo "wait re-check FAILED"; cat "$WS/runs/$slug/demo.result.txt"; exit 1; }
 out=$(cr "{\"status\":\"done\",$base,\"done_when\":[{\"item\":\"a\",\"status\":\"met\",\"basis\":\"inferred\",\"evidence\":\"reads right\"}]}") && x=0 || x=1
 [ "$x" = 0 ] && grep -q 'inferred, not run' <<< "$out" && echo "check-result inferred note ok" || { echo "check-result inferred FAILED"; echo "$out"; exit 1; }
 # review: the prompt carries the task's done-when and the builder's report of it.
@@ -54,6 +117,28 @@ echo w > "$T/.worktrees/demo/w.txt"; git -C "$T/.worktrees/demo" add w.txt; git 
 out=$("$WS/bin/ws" --project "$slug" review --print-prompt demo 2>&1 || true)
 grep -q 'The widget renders.' <<< "$out" && grep -q 'partial (inferred): The widget renders. | evidence: no browser here' <<< "$out" && echo "review prompt done-when ok" || { echo "review prompt done-when FAILED"; echo "$out" | head -40; exit 1; }
 rm -f "$WS/runs/$slug/demo.jsonl"
+# merge: ignored files a builder made are kept; dependencies, evidence and links are not.
+K=$(mktemp -d); KD=$(mktemp -d); mkdir -p "$K/movies" "$K/node_modules/x" "$K/.ws-evidence" "$K/out"; git -C "$K" init -q
+printf 'movies/*.json\nnode_modules/\n.ws-evidence/\nlinked\n' > "$K/.gitignore"; echo m > "$K/movies/a.json"; echo n > "$K/node_modules/x/i.js"; echo e > "$K/.ws-evidence/l.log"; ln -s "$K/out" "$K/linked"
+out=$( . "$WS/scripts/lib.sh"; keep_ignored_outputs "$K" "$KD/kept" )
+[ -f "$KD/kept/movies/a.json" ] && [ ! -e "$KD/kept/node_modules" ] && [ ! -e "$KD/kept/.ws-evidence" ] && [ ! -e "$KD/kept/linked" ] && grep -q 'kept ignored file: movies/a.json' <<< "$out" && echo "merge keeps ignored outputs ok" || { echo "keep ignored outputs FAILED:"; echo "$out"; find "$KD"; exit 1; }; rm -rf "$K" "$KD"
+# review: a branch named in another project's plan is pointed out before the merge.
+P="$T/plans"; mkdir -p "$P/$slug" "$P/other"; printf 'demo is ours\n' > "$P/$slug/a.md"
+out=$(WS_PLANS_DIR="$P" "$WS/bin/ws" --project "$slug" review --print-prompt demo 2>&1 || true)
+! grep -q "named in other projects" <<< "$out" || { echo "review other plans FAILED: own plan counted"; exit 1; }
+printf 'keep demo unmerged until recorded\n' > "$P/other/p.md"
+out=$(WS_PLANS_DIR="$P" "$WS/bin/ws" --project "$slug" review --print-prompt demo 2>&1 || true)
+grep -q "demo is named in other projects' plans; read them before merging: plans/other/p.md" <<< "$out" && echo "review names other plans ok" || { echo "review other plans FAILED:"; echo "$out" | head -5; exit 1; }
+# review: a reviewer model at its usage limit is retried once on the light-track model (a stand-in claude on PATH).
+mkdir -p "$T/fakebin"; cat > "$T/fakebin/claude" <<'FAKE'
+#!/bin/bash
+cat >/dev/null
+case " $* " in *" --model zz-limited "*) echo '{"result":"You have reached your zz-limited limit."}' ;;
+  *) echo '{"total_cost_usd":0,"structured_output":{"verdict":"merge","summary":"stand-in","blocking":[],"suggestions":[]}}' ;; esac
+FAKE
+chmod +x "$T/fakebin/claude"
+out=$(PATH="$T/fakebin:$PATH" WS_REVIEW_MODEL_LIGHT=zz-fallback "$WS/bin/ws" --project "$slug" review --model zz-limited demo 2>&1 || true)
+grep -q 'zz-limited is at its usage limit; reviewing on' <<< "$out" && grep -q 'Verdict: merge' <<< "$out" && echo "review limit fallback ok" || { echo "review limit fallback FAILED:"; echo "$out"; exit 1; }
 [ "$("$WS/bin/ws" version)" = "Crafting Guild v$(cat "$WS/VERSION")" ] && echo "version ok" || { echo "version FAILED"; exit 1; }
 "$WS/bin/ws" --project "$slug" runs | grep -q "runs for $slug:" && echo "--project ok"
 { "$WS/bin/ws" --project "$slug" wait nosuchrun 1 || true; } 2>&1 | grep -q 'no run named' && echo "--project wait ok"
@@ -86,6 +171,62 @@ printf '# cmd task\n## Commands\nUse `git -C .ws-evidence/scratch/x log -1`, `gi
 "$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/cmds.md" >/dev/null 2>&1 || true
 g="$WS/runs/$slug/demo.grants"; grep -qxF 'npx foo*' "$g" && grep -qxF 'python3*' "$g" && grep -qxF 'npm run*' "$g" && ! grep -q '^pip' "$g" && ! grep -q '^rm' "$g" && ! grep -q '^git stash' "$g" && ! grep -q '^\.ws-evidence' "$g" && grep -qxF 'git -C .ws-evidence/scratch/x log*' "$g" && ! grep -qxF 'git*' "$g" && grep -qxF 'node*' "$g" && ! grep -q '^node [a-z]' "$g" && echo "commands grants ok" || { echo "commands grants FAILED:"; cat "$g"; exit 1; }
 grep -q "/bin/ws-run" <<< "$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>&1)" && [ -s "$WS/runs/$slug/demo.grants" ] && ! grep -q ws-run "$WS/runs/$slug/demo.grants" && echo "ws-run grant ok"
+# dispatch: every builder may run git check-ignore; git -C is not granted by default (a prefix rule cannot keep its
+# path inside the worktree), and the lessons say what to use instead, and how to save a file from git.
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --print-prompt demo "$T/task.md" 2>&1)
+grep -qF 'Bash(git check-ignore*)' <<< "$(grep '^tools:' <<< "$out")" && ! grep -qF 'Bash(git -C' <<< "$(grep '^tools:' <<< "$out")" \
+  && grep -qF 'not `git -C <dir>`' <<< "$out" && grep -qF 'Write a file from git with `git show <ref>:<path>` and the Write tool' <<< "$out" \
+  && echo "git grants and lessons ok" || { echo "git grants and lessons FAILED:"; grep -E '^tools:|git -C|git show <ref>' <<< "$out"; exit 1; }
+# dispatch: WORKTREE_ENV lines go into WORKTREE_ENV_FILE in the worktree, only when git ignores that file there;
+# a file with other content is backed up under .ws-evidence/ with a warning before it is replaced.
+cf="$WS/projects/$slug.conf"; cp "$cf" "$T/conf.env.keep"
+printf 'WORKTREE_ENV_FILE=".env.local"\nWORKTREE_ENV=("A_ROOT=/tmp/a" "B_SRC=b c")\n' >> "$cf"
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>&1) && x=0 || x=1
+[ "$x" = 1 ] && grep -q '\.env\.local is not git-ignored' <<< "$out" && [ ! -e "$W/.env.local" ] && echo "env file refused when not ignored ok" || { echo "env file not-ignored FAILED:"; echo "$out"; exit 1; }
+echo .env.local >> "$T/.git/info/exclude"
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>&1) || true
+[ "$(cat "$W/.env.local" 2>/dev/null)" = "$(printf 'A_ROOT=/tmp/a\nB_SRC=b c')" ] && echo "env file written ok" || { echo "env file write FAILED:"; echo "$out"; exit 1; }
+echo 'OTHER=1' > "$W/.env.local"
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/task.md" 2>&1) || true
+grep -q 'warning: .env.local in the worktree had other content' <<< "$out" && grep -qx 'OTHER=1' "$W"/.ws-evidence/.env.local.before-* && grep -qx 'A_ROOT=/tmp/a' "$W/.env.local" \
+  && echo "env file replacement warns ok" || { echo "env file replacement FAILED:"; echo "$out"; exit 1; }
+# dispatch: a bad WORKTREE_ENV conf refuses a fresh dispatch and leaves no worktree and no agent/<name> branch.
+for bad in 'WORKTREE_ENV=("A=1")|WORKTREE_ENV_FILE is not' 'WORKTREE_ENV_FILE="/tmp/e"\nWORKTREE_ENV=("A=1")|must be a path inside' \
+  'WORKTREE_ENV_FILE="../e"\nWORKTREE_ENV=("A=1")|must be a path inside' 'WORKTREE_ENV_FILE=".env.local"\nWORKTREE_ENV=("not a pair")|is not KEY=value' \
+  'WORKTREE_ENV_FILE=".env.local"\nWORKTREE_ENV=("A=1\nB=2")|embedded newline'; do
+  cp "$T/conf.env.keep" "$cf"; printf '%b\n' "${bad%%|*}" >> "$cf"
+  out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run envbad "$T/task.md" 2>&1) && x=0 || x=1
+  [ "$x" = 1 ] && grep -q "${bad#*|}" <<< "$out" && [ ! -e "$T/.worktrees/envbad" ] && ! git -C "$T" show-ref --quiet refs/heads/agent/envbad \
+    || { echo "env conf refusal FAILED (${bad#*|}):"; echo "$out"; exit 1; }
+done
+echo "env conf errors refused, no worktree or branch left ok"
+cp "$T/conf.env.keep" "$cf"
+# merge and precheck: the home-path check skips the project's private files (ATTRIBUTION_EXEMPT), nothing else.
+printf 'ATTRIBUTION_EXEMPT=("private/*")\n' >> "$cf"
+mkdir -p "$W/private" "$W/public"; echo "at $HOME/x" > "$W/private/x"; git -C "$W" add private/x; git -C "$W" -c user.name=t -c user.email=t@t commit -qm private
+priv=$( . "$WS/scripts/lib.sh"; load_project "$slug"; home_path_leaks "$T" main "$(git -C "$W" rev-parse HEAD)" )
+pc_priv=$("$WS/scripts/precheck.sh" --project "$slug" demo 2>&1 || true)
+echo "at $HOME/x" > "$W/public/x"; git -C "$W" add public/x; git -C "$W" -c user.name=t -c user.email=t@t commit -qm public
+pub=$( . "$WS/scripts/lib.sh"; load_project "$slug"; home_path_leaks "$T" main "$(git -C "$W" rev-parse HEAD)" )
+pc_pub=$("$WS/scripts/precheck.sh" --project "$slug" demo 2>&1 || true)
+[ -z "$priv" ] && grep -qF "$HOME/x" <<< "$pub" && ! grep -q 'home paths' <<< "$pc_priv" && grep -q 'FLAG  rule 18: home paths' <<< "$pc_pub" \
+  && echo "home-path check skips private files ok" || { echo "home-path check FAILED: private=[$priv] public=[$pub]"; grep 'rule 18' <<< "$pc_priv$pc_pub"; exit 1; }
+cp "$T/conf.env.keep" "$cf"
+# chain: suggestions carried into the next task are committed in the workspace repo, that file only (an uncommitted
+# carry once made the next merge of a workspace-as-project refuse a dirty checkout).
+R="$T/carry-repo"; mkdir -p "$R/plans/p"; git -C "$R" init -q -b main; printf '# next\n' > "$R/plans/p/next.md"; echo o > "$R/other.txt"
+git -C "$R" add -A; git -C "$R" -c user.name=t -c user.email=t@t commit -qm init; echo staged > "$R/other.txt"; git -C "$R" add other.txt
+printf '{"suggestions":[{"file":"a.sh","line":7,"why":"carried marker"}]}\n' > "$T/sugg.json"
+out=$( . "$WS/scripts/lib.sh"; GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t carry_suggestions "$T/sugg.json" prev-step "$R/plans/p/next.md" "$R" 2>&1 ) && x=0 || x=1
+st=$(git -C "$R" status --short -uno -- plans); shown=$(git -C "$R" show HEAD -- plans/p/next.md 2>&1)
+[ "$x" = 0 ] && [ -z "$st" ] && grep -q '^+## Carried from the prev-step review' <<< "$shown" && grep -q 'carried marker' <<< "$shown" \
+  && [ "$(git -C "$R" show --name-only --format= HEAD)" = plans/p/next.md ] && [ "$(git -C "$R" diff --cached --name-only)" = other.txt ] \
+  && echo "chain commits carried suggestions ok" || { echo "chain carry commit FAILED: exit $x status [$st]"; echo "$out"; echo "$shown"; exit 1; }
+# The same identity as above, so only the hook can stop the commit; HEAD stays and the hook's words come back.
+printf '#!/bin/sh\necho hook-said-no >&2\nexit 1\n' > "$R/.git/hooks/pre-commit"; chmod +x "$R/.git/hooks/pre-commit"; h0=$(git -C "$R" rev-parse HEAD)
+out=$( . "$WS/scripts/lib.sh"; GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t carry_suggestions "$T/sugg.json" again "$R/plans/p/next.md" "$R" 2>&1 ) && x=0 || x=1
+[ "$x" = 1 ] && grep -q 'hook-said-no' <<< "$out" && [ "$(git -C "$R" rev-parse HEAD)" = "$h0" ] && [ -n "$(git -C "$R" status --short -- plans/p/next.md)" ] \
+  && echo "chain carry reports a failed commit ok" || { echo "chain carry failed-commit FAILED: exit $x"; echo "$out"; exit 1; }
 # chain: a merged step is skipped on a long history (grep -q under pipefail once re-dispatched one).
 python3 - "$T" <<'PY'
 import subprocess, sys, time
@@ -111,6 +252,166 @@ grep -q 'stopped .*setup: ws doctor' "$WS/runs/$slug/chain.status" && echo "chai
 printf '%s\n' '{"type":"result","is_error":true,"api_error_status":429,"result":"You'"'"'ve hit your session limit \u00b7 resets 3:50pm (America/Denver)"}' > "$WS/runs/$slug/demo.jsonl"
 cr=$("$WS/scripts/check-result.sh" --project "$slug" demo 2>&1 || true)
 grep -q '^LIMIT' <<< "$cr" && grep -qE '^reset_epoch=[0-9]+$' <<< "$cr" && echo "usage-limit result ok" || { echo "usage-limit result FAILED:"; echo "$cr"; exit 1; }
+# web: a result with two web requests (a URL and a search) is printed by check-result and listed by ws web; the chain
+# stops on it; approving the URL fetches it from a local server into the worktree's .ws-evidence/given/web/ with a
+# sidecar; a non-http(s) URL and a file over WS_WEB_MAX_MB are refused; a search is not fetched; a denial is recorded;
+# resume writes a task naming the file and the denial, with the original's Commands. Every check runs and the section
+# fails at its end, so a missing piece shows each check it breaks.
+wf=0; wfail() { echo "$1 FAILED:"; printf '%s\n' "${2:-}" | sed -n 1,25p; wf=1; }
+WV="$T/web/srv"; mkdir -p "$WV"; printf 'source marker\n' > "$WV/spec.txt"; head -c 2097152 /dev/zero > "$WV/big.bin"
+python3 -u -m http.server 0 --bind 127.0.0.1 --directory "$WV" > "$T/web/srv.log" 2>&1 & srvpid=$!
+port=""; for _ in $(seq 100); do port=$(sed -n 's/.* port \([0-9]*\).*/\1/p' "$T/web/srv.log" | head -1); [ -n "$port" ] && break; sleep 0.1; done
+[ -n "$port" ] || { echo "web test server did not start:"; cat "$T/web/srv.log"; exit 1; }
+WW="$T/.worktrees/webrun"; git -C "$T" worktree add -q -b agent/webrun "$WW" main; RW="$WS/runs/$slug"
+printf '# web task\n\nRead the spec.\n\n## Commands\n`shellcheck *`, `bash tests/*`\n\n## Done when\n- the spec is read\n' > "$T/webtask.md"
+printf 'task=%s\n' "$T/webtask.md" > "$RW/webrun.task.txt"
+wreq="[{\"url\":\"http://127.0.0.1:$port/spec.txt\",\"why\":\"the format\",\"needed\":\"the header layout\"},{\"query\":\"smb3 disassembly\",\"why\":\"the routines\",\"needed\":\"the run meter\"}]"
+printf '{"type":"result","total_cost_usd":0.1,"duration_ms":60000,"usage":{},"permission_denials":[],"structured_output":{"status":"partial",%s,"done_when":[{"item":"the spec is read","status":"open","basis":"inferred","evidence":"no source"}],"web_requests":%s}}\n' "$base" "$wreq" > "$RW/webrun.jsonl"
+out=$("$WS/scripts/check-result.sh" --project "$slug" webrun 2>&1) && x=0 || x=1; printf '%s\n' "$out" > "$RW/webrun.result.txt"
+[ "$x" = 0 ] && grep -q "^web   request 1: http://127.0.0.1:$port/spec.txt" <<< "$out" && grep -q '^web   request 2: search: smb3 disassembly' <<< "$out" \
+  && echo "check-result prints web requests ok" || wfail "check-result web requests" "$out"
+out=$(cr "{\"status\":\"done\",$base,\"done_when\":[],\"web_requests\":$wreq}") && x=0 || x=1
+[ "$x" = 1 ] && grep -q 'FAIL  status done, but the result asks for 2 web source(s)' <<< "$out" && echo "check-result refuses done with web requests ok" || wfail "check-result done with web requests" "$out"
+out=$("$WS/bin/ws" --project "$slug" web webrun 2>&1) && x=0 || x=1
+[ "$x" = 0 ] && grep -q "1  url    http://127.0.0.1:$port/spec.txt" <<< "$out" && grep -q '2  search smb3 disassembly' <<< "$out" && grep -q 'needed: the header layout' <<< "$out" \
+  && grep -q 'needed: the run meter' <<< "$out" && echo "ws web lists requests ok" || wfail "ws web list" "$out"
+printf 'webrun %s\n' "$T/webtask.md" > "$T/web.queue"
+out=$(timeout 60 "$WS/bin/ws" --project "$slug" chain "$T/web.queue" 2>&1 || true)
+grep -q 'stopped .*webrun: web requests' "$RW/chain.status" 2>/dev/null && echo "chain stops on web requests ok" || wfail "chain web requests" "$out
+$(cat "$RW/chain.status" 2>/dev/null)"
+G="$WW/.ws-evidence/given/web"
+out=$("$WS/bin/ws" --project "$slug" web webrun approve 1 --url file:///etc/passwd 2>&1) && x=0 || x=1
+[ "$x" = 1 ] && grep -q 'not an http(s) URL' <<< "$out" && [ -z "$(ls -A "$G" 2>/dev/null)" ] && echo "ws web refuses a non-http scheme ok" || wfail "ws web scheme refusal" "$out"
+out=$(WS_WEB_MAX_MB=1 "$WS/bin/ws" --project "$slug" web webrun approve 1 --url "http://127.0.0.1:$port/big.bin" 2>&1) && x=0 || x=1
+[ "$x" = 1 ] && grep -q 'over the 1 MB cap' <<< "$out" && [ -z "$(ls -A "$G" 2>/dev/null)" ] && echo "ws web refuses an oversize file ok" || wfail "ws web size refusal" "$out
+$(ls -la "$G" 2>&1)"
+out=$("$WS/bin/ws" --project "$slug" web webrun approve 1 2>&1) && x=0 || x=1; sc="$G/1-spec.txt.source.txt"
+[ "$x" = 0 ] && [ "$(cat "$G/1-spec.txt" 2>/dev/null)" = "source marker" ] && grep -qx "url=http://127.0.0.1:$port/spec.txt" "$sc" && grep -qx 'bytes=14' "$sc" \
+  && grep -qx "sha256=$(sha256sum "$WV/spec.txt" | cut -d' ' -f1)" "$sc" && grep -qE '^fetched=[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$sc" && [ ! -x "$G/1-spec.txt" ] \
+  && echo "ws web fetches an approved URL with its sidecar ok" || wfail "ws web fetch" "$out
+$(cat "$sc" 2>&1)"
+out=$("$WS/bin/ws" --project "$slug" web webrun approve 2 2>&1) && x=0 || x=1
+[ "$x" = 1 ] && grep -q 'a search is not fetched' <<< "$out" && echo "ws web does not fetch a search ok" || wfail "ws web search" "$out"
+out=$("$WS/bin/ws" --project "$slug" web webrun resume --dry-run 2>&1) && x=0 || x=1
+[ "$x" = 1 ] && grep -q 'request(s) 2 have no fetched file and no denial' <<< "$out" && [ ! -e "$T/webtask-web-1.md" ] && echo "ws web resume waits for every answer ok" || wfail "ws web resume open" "$out"
+out=$("$WS/bin/ws" --project "$slug" web webrun deny 2 "the spec covers the run meter" 2>&1) && x=0 || x=1
+lo=$("$WS/bin/ws" --project "$slug" web webrun 2>&1 || true)
+[ "$x" = 0 ] && grep -q 'denied: the spec covers the run meter' <<< "$lo" && grep -q 'fetched: .ws-evidence/given/web/1-spec.txt' <<< "$lo" && echo "ws web deny records its reason ok" || wfail "ws web deny" "$out
+$lo"
+out=$("$WS/bin/ws" --project "$slug" web webrun resume --dry-run 2>&1) && x=0 || x=1; rt="$T/webtask-web-1.md"
+[ "$x" = 0 ] && grep -qF '`.ws-evidence/given/web/1-spec.txt`' "$rt" && grep -q 'the spec covers the run meter' "$rt" && grep -qx '## Commands' "$rt" && grep -qF '`shellcheck *`, `bash tests/*`' "$rt" \
+  && grep -qF 'Bash(shellcheck*)' <<< "$(grep '^tools:' <<< "$out")" && grep -qF 'Bash(bash*)' <<< "$(grep '^tools:' <<< "$out")" && [ -f "$RW/webrun.web.tsv" ] \
+  && echo "ws web resume writes a task with the files and the Commands ok" || wfail "ws web resume" "$out
+$(cat "$rt" 2>&1)"
+kill "$srvpid" 2>/dev/null || true; srvpid=""; git -C "$T" worktree remove --force "$WW"; git -C "$T" branch -q -D agent/webrun
+[ "$wf" = 0 ] || exit 1
+# bench: replays of a merged task under two arms of builder instructions. A second scratch project holds the replays;
+# a merge lock held in the first makes the run wait. Every check here runs and the section fails at its end, so a
+# missing piece shows each check it breaks.
+bf=0; bfail() { echo "$1 FAILED:"; printf '%s\n' "${2:-}" | sed -n 1,25p; bf=1; }
+# Every ws call below runs with a stand-in claude first on PATH, so no check can start a real session.
+mkdir -p "$T/stub" "$T/stub-log"; cat > "$T/stub/claude" <<'STUB'
+#!/bin/bash
+case " $* " in
+  *" stream-json "*)
+    printf '%s\n' "$@" > "$STUB_LOG/build-$(date +%s%N).args"
+    # One build stopped by the usage limit, its reset already past (a dated reset is never rolled to tomorrow).
+    if [ -f "$STUB_LOG/../limit-once" ]; then rm -f "$STUB_LOG/../limit-once"
+      printf '{"type":"result","is_error":true,"api_error_status":429,"num_turns":1,"total_cost_usd":0,"duration_ms":1,"result":"You'"'"'ve hit your session limit \u00b7 resets %s (UTC)"}\n' "$(date -u -d '-1 hour' '+%b %-d, %-I%P')"; exit 0; fi
+    echo x > bench-out.txt; git add bench-out.txt; git -c user.name=t -c user.email=t@t commit -qm "bench stub"; sha=$(git rev-parse HEAD)
+    echo '{"type":"assistant","message":{"id":"m1","content":[],"usage":{"input_tokens":1,"cache_read_input_tokens":99,"cache_creation_input_tokens":0,"output_tokens":4}}}'
+    printf '{"type":"result","num_turns":1,"total_cost_usd":0.25,"duration_ms":60000,"usage":{"output_tokens":4,"cache_read_input_tokens":99},"permission_denials":[],"structured_output":{"status":"done","summary":"s","files_changed":["bench-out.txt"],"commits":["%s"],"tests":null,"denied":[],"done_when":[{"item":"one","status":"met","basis":"inferred","evidence":"r"},{"item":"two","status":"met","basis":"inferred","evidence":"r"}],"unknowns":[],"open_questions":[]}}\n' "$sha" ;;
+  *) printf '%s\n' "$@" > "$STUB_LOG/other-$(date +%s%N).args"; cat >/dev/null; echo '{"total_cost_usd":0,"structured_output":{"verdict":"merge","summary":"stand-in","blocking":[],"suggestions":[]}}' ;;
+esac
+STUB
+chmod +x "$T/stub/claude"
+# The bench waits on scratch locks: this suite runs inside ws merge's test gate, whose own lock is held meanwhile.
+wsb() { PATH="$T/stub:$PATH" STUB_LOG="$T/stub-log" WS_BENCH_POLL=1 WS_BENCH_HOURS='' WS_BENCH_LOCKS="$T/locks/runs/*/merge.lock" WS_TASK_HISTORY="${H:-}" timeout 300 "$WS/bin/ws" "$@" 2>&1; }
+# ws: a word that is neither a command nor a project fails; it once opened a session on the pinned project.
+out=$(WS_PROJECT="$slug" wsb no-such-word) && x=0 || x=1
+[ "$x" = 1 ] && grep -q "unknown project 'no-such-word'" <<< "$out" && [ -z "$(ls "$T/stub-log")" ] && echo "unknown word starts no session ok" || bfail "unknown word" "$out"
+slug2="$slug-b"; B="$T/$slug2"; mkdir -p "$B"; git -C "$B" init -q -b main; printf '#!/bin/sh\nexit 0\n' > "$B/t.sh"; echo a > "$B/a.txt"
+git -C "$B" add -A; git -C "$B" -c user.name=t -c user.email=t@t commit -qm init; printf 'n\n' | "$WS/bin/ws" init "$B" --tests "sh t.sh" >/dev/null
+base2=$(git -C "$B" rev-parse HEAD); git -C "$B" checkout -q -b agent/bx; echo b > "$B/b.txt"; git -C "$B" add b.txt; git -C "$B" -c user.name=t -c user.email=t@t commit -qm b
+git -C "$B" checkout -q main; git -C "$B" -c user.name=t -c user.email=t@t merge -q --no-ff agent/bx -m "Merge agent/bx: a step (reviewed at abc)"
+echo c > "$B/c.txt"; git -C "$B" add c.txt; git -C "$B" -c user.name=t -c user.email=t@t commit -qm later
+# The task as dispatched is version one: version two was committed after the first dispatch started.
+H="$T/hist"; mkdir -p "$H/plans/$slug2"; git -C "$H" init -q -b main; now=$(date +%s)
+printf '# bx task\n\nversion one\n\n## Done when\n- one\n- two\n' > "$H/plans/$slug2/task-bx.md"; git -C "$H" add -A
+GIT_COMMITTER_DATE="$((now-7200)) +0000" GIT_AUTHOR_DATE="$((now-7200)) +0000" git -C "$H" -c user.name=t -c user.email=t@t commit -qm v1
+printf '# bx task\n\nversion two\n' > "$H/plans/$slug2/task-bx.md"
+GIT_COMMITTER_DATE="$((now-3600)) +0000" GIT_AUTHOR_DATE="$((now-3600)) +0000" git -C "$H" -c user.name=t -c user.email=t@t commit -qam v2
+# The first dispatch's record was moved aside by a fix round (<name>.<stamp>.task.txt); its transcript is hand-counted:
+# message contexts 1000 (m1, logged twice), 3000 and 2000, so peak 3000 and mean 2000.
+RB="$WS/runs/$slug2"; mkdir -p "$RB"
+printf 'task=%s\nstarted=%s\nbudget=7\ntimeout=120m\n' "$H/plans/$slug2/task-bx.md" "$(date -d "@$((now-5400))" '+%Y-%m-%d %H:%M %Z')" > "$RB/bx.20260101T000000Z.task.txt"
+printf 'task=%s\nstarted=%s\nbudget=3\ntimeout=120m\n' "$H/plans/$slug2/task-bx-fix-auto-1.md" "$(date '+%Y-%m-%d %H:%M %Z')" > "$RB/bx.task.txt"
+cat > "$RB/bx.20260101T000000Z.jsonl" <<'JSONL'
+{"type":"system","subtype":"init","model":"claude-opus-5-5"}
+{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"a"}],"usage":{"input_tokens":10,"cache_read_input_tokens":900,"cache_creation_input_tokens":90,"output_tokens":5}}}
+{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}],"usage":{"input_tokens":10,"cache_read_input_tokens":900,"cache_creation_input_tokens":90,"output_tokens":40}}}
+{"type":"user","message":{"content":[{"type":"tool_result","content":"a.txt"}]}}
+{"type":"assistant","message":{"id":"m2","content":[{"type":"text","text":"b"}],"usage":{"input_tokens":5,"cache_read_input_tokens":2900,"cache_creation_input_tokens":95,"output_tokens":7}}}
+{"type":"assistant","message":{"id":"m3","content":[{"type":"text","text":"c"}],"usage":{"input_tokens":1,"cache_read_input_tokens":1999,"cache_creation_input_tokens":0,"output_tokens":3}}}
+{"type":"result","num_turns":3,"total_cost_usd":0.5,"duration_ms":150000,"usage":{"output_tokens":55,"cache_read_input_tokens":5799},"permission_denials":[{"tool_name":"Bash","tool_input":{"command":"rm x"}}]}
+JSONL
+printf '# a cut-off line follows\n{"type":"assist\n' >> "$RB/bx.20260101T000000Z.jsonl"
+printf 'bx plans/elsewhere.md gate --allow "Bash(make *)"\n' > "$WS/plans/$slug2/steps.queue"
+out=$(wsb --project "$slug2" bench add bx) && x=0 || x=1
+row=$(awk -F'\t' '$1=="bx"' "$WS/plans/$slug2/bench/corpus.tsv" 2>/dev/null || true)
+[ "$x" = 0 ] && [ "$(cut -f2 <<< "$row")" = "$base2" ] && [ "$(cut -f3-7 <<< "$row")" = "$(printf '7\tfull\t0.5\t3\t3000')" ] && [ "$(cut -f8 <<< "$row")" = '--allow Bash\(make\ \*\)' ] \
+  && [ "$(cat "$WS/plans/$slug2/bench/bx.md" 2>/dev/null)" = "$(git -C "$H" show "HEAD~1:plans/$slug2/task-bx.md")" ] && echo "bench add ok" || bfail "bench add" "$out
+row: $row"
+m=$(python3 "$WS/scripts/bench.py" metrics "$RB/bx.20260101T000000Z.jsonl" 2>&1 || true)
+[ "$m" = "turns=3 peak_context=3000 mean_context=2000 output_tokens=55 cache_reads=5799 cost=0.5 minutes=2.5 denied=1" ] && echo "bench metrics ok" || bfail "bench metrics" "$m"
+# dispatch --base branches from that commit and drops the merge-main grant; --instructions replaces the sheet and lessons.
+A="$T/arm-beta"; mkdir -p "$A/agents" "$A/lessons"; printf '# beta sheet marker\n' > "$A/agents/builder.md"; printf -- '- beta lesson marker\n' > "$A/lessons/builder.md"
+printf '# t\nDo it.\n' > "$T/bt.md"
+out=$("$WS/scripts/dispatch.sh" --project "$slug2" --print-prompt --base "$base2" --instructions "$A" dbase "$T/bt.md" 2>&1 || true)
+grep -qx "base: $base2" <<< "$out" && grep -q 'beta sheet marker' <<< "$out" && grep -q 'beta lesson marker' <<< "$out" && ! grep -q '^## How you work' <<< "$out" \
+  && ! grep -qF 'Bash(git merge main)' <<< "$(grep '^tools:' <<< "$out")" && [ ! -e "$B/.worktrees/dbase" ] && echo "dispatch --base and --instructions ok" || bfail "dispatch --base/--instructions" "$out"
+# report: a constructed drop (lean fails what base passes, the same in both trials) is flagged; equal arms are not.
+RA="$WS/runs/$slug/bench"; mkdir -p "$RA"
+fx() { printf 'run\ttask\tarm\ttrial\tbase\tstate\ttests\tdw_met\tdw_total\tverdict\tblocking\tturns\tpeak_context\tmean_context\toutput_tokens\tcache_reads\tcost\tminutes\tdenied\n'
+  for t in t1 t2; do for tr in 1 2; do printf 'r%s%s\t%s\tbase\t%s\tb\tdone\tpass\t2\t2\tmerge\t0\t10\t1000\t500\t10\t100\t1.0\t5\t0\n' "$t" "$tr" "$t" "$tr"; printf 'l%s%s\t%s\tlean\t%s\tb\tdone\t%s\n' "$t" "$tr" "$t" "$tr" "$1"; done; done; }
+fx "$(printf 'fail\t1\t2\tfix-first\t2\t8\t900\t400\t9\t90\t0.8\t4\t0')" > "$RA/runs.tsv"
+out=$(wsb bench report "$slug" || true)
+grep -q 'quality drop: lean' <<< "$out" && grep -q 'n is small' <<< "$out" && echo "bench report flags a quality drop ok" || bfail "bench report drop" "$out"
+fx "$(printf 'pass\t2\t2\tmerge\t0\t8\t900\t400\t9\t90\t0.8\t4\t0')" > "$RA/runs.tsv"
+out=$(wsb bench report "$slug" || true)
+! grep -qi 'quality drop' <<< "$out" && grep -q 'lean' <<< "$out" && echo "bench report equal arms ok" || bfail "bench report equal arms" "$out"
+# run: the stand-in claude builds (one commit, done-when met) and reviews (merge); a held merge lock in the first
+# project makes the run wait; prompts carry no arm label; worktrees and branches go, evidence stays.
+benchrun() { wsb bench run "$slug2" "$@"; }
+out=$(benchrun --trials 1 --arm armalpha=HEAD --arm "armbeta=$A" bx --dry-run) || true
+[ "$(grep -c "^would dispatch bench-[0-9a-f]\{8\} .*base $base2 budget \$7" <<< "$out")" = 2 ] && [ -z "$(ls "$T/stub-log")" ] && [ ! -e "$WS/runs/$slug2/bench/runs.tsv" ] \
+  && echo "bench run --dry-run dispatches nothing ok" || bfail "bench run --dry-run" "$out"
+mkdir -p "$T/locks/runs/$slug"; ( flock 9; touch "$T/locked"; sleep 4 ) 9>"$T/locks/runs/$slug/merge.lock" & lk=$!
+for _ in $(seq 100); do [ -f "$T/locked" ] && break; sleep 0.1; done
+out=$(benchrun --trials 1 --arm armalpha=HEAD --arm "armbeta=$A" bx) && x=0 || x=1; wait "$lk" || true
+grep -qF "waiting for a merge to finish ($T/locks/runs/$slug/merge.lock is held)" <<< "$out" && echo "bench waits on another project's merge ok" || bfail "bench merge wait" "$out"
+rt="$WS/runs/$slug2/bench/runs.tsv"
+[ "$x" = 0 ] && [ "$(awk -F'\t' 'NR>1 && $6=="done" && $7=="pass" && $8==2 && $9==2 && $10=="merge" && $11==0 && $12==1 && $13==100 && $17==0.25' "$rt" 2>/dev/null | wc -l)" = 2 ] \
+  && echo "bench run records both arms ok" || bfail "bench run records" "$out
+$(cat "$rt" 2>/dev/null)"
+p=$(cat "$T"/stub-log/build-*.args 2>/dev/null || true); ran=$(awk -F'\t' 'NR>1{print "agent/"$1}' "$rt" 2>/dev/null | sort | paste -sd' ' || true)
+[ -n "$ran" ] && [ "$(grep -oE 'agent/bench-[0-9a-f]{8}' <<< "$p" | sort -u | paste -sd' ')" = "$ran" ] && ! grep -qE 'armalpha|armbeta|arm-beta' <<< "$p" \
+  && grep -q 'beta sheet marker' <<< "$p" && grep -q '^## How you work' <<< "$p" && grep -qxF 'Bash(make *)' <<< "$p" \
+  && [ -z "$(git -C "$B" branch --list 'agent/bench-*')" ] && ! ls -d "$B"/.worktrees/bench-* >/dev/null 2>&1 \
+  && [ "$(ls "$WS/runs/$slug2/bench/evidence/"*/test-only.log 2>/dev/null | wc -l)" = 2 ] && echo "bench runs are opaque and cleaned up ok" || bfail "bench opaque names and cleanup" "$ran"
+n0=$(ls "$T/stub-log" | wc -l); out=$(benchrun --trials 1 --arm armalpha=HEAD --arm "armbeta=$A" bx) || true
+[ "$(ls "$T/stub-log" | wc -l)" = "$n0" ] && grep -q '2 of 2 runs already done' <<< "$out" && echo "bench run resumes ok" || bfail "bench resume" "$out"
+touch "$T/limit-once"; out=$(benchrun --trials 2 --arm armalpha=HEAD --arm "armbeta=$A" bx) && x=0 || x=1
+[ "$x" = 0 ] && grep -q 'hit the usage limit; replaying it from the base' <<< "$out" && [ ! -e "$T/limit-once" ] \
+  && [ "$(awk -F'\t' 'NR>1 && $6=="done" && $7=="pass" && $10=="merge" && $17==0.25' "$rt" | wc -l)" = 4 ] \
+  && echo "bench replays a run stopped by the usage limit ok" || bfail "bench usage limit" "$out
+$(cat "$rt" 2>/dev/null)"
+out=$(wsb bench report "$slug" "$slug2" || true)
+grep -q "^== $slug2" <<< "$out" && grep -q "^== $slug " <<< "$out" && grep -q '^== total' <<< "$out" && echo "bench report over several projects ok" || bfail "bench report several" "$out"
+[ "$bf" = 0 ] || exit 1
+# What the checks above made inside $T stays out of its commits below: a nested repo is added as a gitlink that stays
+# dirty, and the stand-in's saved prompts hold home paths the release audit refuses.
+printf '%s/\n' carry-repo hist "$slug2" stub stub-log arm-beta locks web >> "$T/.git/info/exclude"
 # release: a first release, a refused existing version, a caught home path, a second release on top, a refused
 # dirty checkout; the public main always has exactly the project's main tree.
 git -C "$T" worktree remove --force "$T/.worktrees/demo"
@@ -158,4 +459,207 @@ echo 'bash scripts/run-e2e.sh' > "$A/scripts/run-all-tests.sh"; echo 'CHECKS=("s
 touch "$A/scripts/smoke-e2e-check.js" "$A/scripts/orphan-e2e-check.js"; git -C "$A" add -A
 au=$(python3 "$WS/scripts/audit.py" demo "$A" "bash scripts/run-all-tests.sh" "$T/no-runs" "$T/no-plans" 30 2>&1 || true)
 grep -q 'orphan-e2e-check' <<< "$au" && ! grep -q 'smoke-e2e-check' <<< "$au" && echo "audit follows gate scripts ok" || { echo "audit gate FAILED:"; echo "$au"; exit 1; }
+# lessons-check: a private lesson that restates a shared one with nothing of its own fails, one that keeps only
+# its incident passes, and the workspace's own private lessons pass.
+LC="$T/lessons-check"; mkdir -p "$LC"; printf -- '- Ask before any infrastructure change (replacing a layer, adding a service).\n' > "$LC/orchestrator.md"
+printf -- '- Ask before any infrastructure change (replacing a layer, adding a service). He wants to be in the loop.\n' > "$LC/orchestrator.local.md"
+lc=$(python3 "$WS/scripts/lessons-check.py" "$LC" 2>&1) && { echo "lessons-check missed a duplicate:"; echo "$lc"; exit 1; }
+grep -q 'DUPLICATE' <<< "$lc" || { echo "lessons-check duplicate FAILED:"; echo "$lc"; exit 1; }
+printf -- '- Ask before any infrastructure change: a replaced layer cost two days (demo, 2026-10-01).\n' > "$LC/orchestrator.local.md"
+lc=$(python3 "$WS/scripts/lessons-check.py" "$LC" 2>&1) && echo "lessons-check fixture ok" || { echo "lessons-check specific FAILED:"; echo "$lc"; exit 1; }
+lc=$(python3 "$WS/scripts/lessons-check.py" "$WS/lessons" 2>&1) && echo "private lessons add to the shared ones ok" || { echo "private lessons restate shared ones:"; grep -B1 -A1 'DUPLICATE' <<< "$lc"; exit 1; }
+# zdr-check: a model passes only while its page row says no training and 0 days, and a starred row's dated agreement holds.
+Z="$T/go.html"; printf '<td>DeepSeek V4.1 Flash</td><td>Not used</td><td>0 days*</td> <td>Muse Spark 1.3 Contributor</td><td>Yes</td><td>Not ZDR</td> <td>Hy3</td><td>Not used</td><td>0 days</td><p>DeepSeek: ZDR agreement is renewed monthly. The current agreement is valid through October 31, 2026.</p>' > "$Z"
+WS_TODAY=2026-10-31 "$WS/scripts/zdr-check.sh" --page "$Z" >/dev/null && "$WS/scripts/zdr-check.sh" --page "$Z" Hy3 >/dev/null \
+  && ! WS_TODAY=2026-11-01 "$WS/scripts/zdr-check.sh" --page "$Z" >/dev/null && ! "$WS/scripts/zdr-check.sh" --page "$Z" "Muse Spark 1.3 Contributor" >/dev/null \
+  && ! "$WS/scripts/zdr-check.sh" --page "$Z" "Absent Model" >/dev/null && echo "zdr-check ok" || { echo "zdr-check FAILED"; exit 1; }
+# OpenCode builders: a stand-in opencode first on PATH replays a real OpenCode log (one bash call, two step costs, a
+# final text) with the final text set by OC_STUB, and records each call, so no check can reach a real model.
+# Every check runs and the section fails at its end.
+of=0; ofail() { echo "$1 FAILED:"; printf '%s\n' "${2:-}" | sed -n 1,25p; of=1; }
+# A process is stopped when it is gone or only a zombie; a live sleep or wrapper is not.
+stopped() { local stat; stat=$(ps -o stat= -p "$1" 2>/dev/null); [ -z "$stat" ] || [ "${stat:0:1}" = Z ]; }
+mkdir -p "$T/ocbin"; cat > "$T/ocbin/opencode" <<'STUB'
+#!/bin/bash
+case " $* " in *" --session "*) call=continue ;; *) call=first ;; esac
+echo "$call stdin=$(readlink /proc/self/fd/0) config=$(jq -r '.permission.bash["*"]' <<< "${OPENCODE_CONFIG_CONTENT:-{\}}")" >> "$OC_CALLS"
+valid='{"status":"done","summary":"stand-in","files_changed":[],"commits":[],"tests":null,"denied":[],"done_when":[{"item":"x","status":"met","basis":"inferred","evidence":"r"}],"unknowns":[],"open_questions":[]}'
+case "$OC_STUB" in
+  valid) t="Done. $valid" ;; invalid) t='{"status":"done"}' ;;
+  fix) [ "$call" = continue ] && t="$valid" || t='{"status":"done"}' ;;
+  cutoff) t='{"status":"done"' ;;
+  nonl) out=$(jq -c --arg t "$valid" 'if .type == "text" then .part.text = $t else . end' "$OC_SAMPLE"); printf '%s' "$out"; exit 0 ;;
+  slow) head -3 "$OC_SAMPLE"; sleep 30 & echo $! > "${OC_CHILD:-/dev/null}"; wait ;;
+esac
+jq -c --arg t "$t" 'if .type == "text" then .part.text = $t else . end' "$OC_SAMPLE"
+STUB
+chmod +x "$T/ocbin/opencode"; ocr="$WS/runs/$slug"
+# exec replaces the calling subshell, so a backgrounded `oc ... &` has the helper's own PID and a TERM reaches its trap.
+oc() { PATH="$T/ocbin:$PATH" OC_CALLS="$T/oc-calls" OC_CHILD="$T/oc-child" OC_SAMPLE="$WS/scripts/fixtures/opencode-sample.jsonl" WS_ZDR_PAGE="$Z" WS_TODAY="${OC_TODAY:-2026-10-31}" OC_STUB="$1" exec "${@:2}"; }
+# Runs the launcher alone on the stand-in: $1 the stand-in's mode, $2 the run name, $3 the budget.
+ocb() { rm -f "$T/oc-calls" "$T/oc-child"; ( oc "$1" "$WS/scripts/opencode-builder.sh" --model opencode-go/deepseek-v4.1-flash --budget "$3" --config "$ocr/demo.opencode.json" \
+  --log "$ocr/$2.jsonl" --name "ws:$slug:$2" "$T/task.md" > "$ocr/$2.jsonl" 2>&1 ); }
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run --agent opencode demo "$T/task.md" 2>&1) && x=0 || x=1
+cfg="$ocr/demo.opencode.json"; allowed=$(jq -r '.permission.bash | to_entries[] | select(.value == "allow") | .key' "$cfg" 2>/dev/null | sort)
+[ "$x" = 0 ] && grep -qx 'agent: opencode model: opencode-go/deepseek-v4.1-flash' <<< "$out" && grep -qF '"git push *": "deny"' <<< "$out" \
+  && [ -s "$ocr/demo.grants" ] && [ -z "$(sort "$ocr/demo.grants" | comm -23 - <(printf '%s\n' "$allowed"))" ] \
+  && [ "$(jq -r '[.permission.bash["git push *", "git config *", "git rebase *", "*"]] | unique | join(",")' "$cfg")" = deny ] \
+  && ! grep -q '"ask"' "$cfg" && [ "$(jq -r '[.share, .permission.external_directory, .permission.webfetch] | join(",")' "$cfg")" = disabled,deny,deny ] \
+  && echo "dispatch --agent opencode dry run shows the agent, model and permissions ok" || ofail "opencode dry run" "$out"
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run --agent opencode --model deepseek demo "$T/task.md" 2>&1) && x=0 || x=1
+[ "$x" = 1 ] && grep -q 'takes a provider/model ID' <<< "$out" && echo "opencode model without a provider refused ok" || ofail "opencode bare model" "$out"
+# OpenCode has no effort setting, so a dispatch that sets one says it is ignored instead of dropping it silently.
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run --agent opencode --effort high demo "$T/task.md" 2>&1) && x=0 || x=1
+[ "$x" = 0 ] && grep -q "note: OpenCode ignores --effort 'high'" <<< "$out" && echo "opencode effort note ok" || ofail "opencode effort note" "$out"
+# A full dispatch on the stand-in: the run ends with a result line check-result accepts.
+rm -f "$T/oc-calls"; out=$(oc valid "$WS/scripts/dispatch.sh" --project "$slug" --agent opencode --budget 1 ocrun "$T/task.md" 2>&1) || true
+for _ in $(seq 200); do [ -f "$ocr/ocrun.pid" ] || break; sleep 0.1; done
+res=$(cat "$ocr/ocrun.result.txt" 2>/dev/null || true)
+[ ! -f "$ocr/ocrun.pid" ] && grep -q '^done: stand-in' <<< "$res" && ! grep -q '^FAIL' <<< "$res" && grep -q 'ok    no denied calls' <<< "$res" \
+  && grep -q '^cost=\$0.001591' <<< "$res" && [ "$(cat "$T/oc-calls" 2>/dev/null)" = "first stdin=/dev/null config=deny" ] \
+  && echo "opencode run ends with a result check-result accepts ok" || ofail "opencode run result" "$out
+$res
+$(tail -3 "$ocr/ocrun.jsonl" 2>/dev/null)"
+git -C "$T" worktree remove --force "$T/.worktrees/ocrun" 2>/dev/null; git -C "$T" branch -q -D agent/ocrun 2>/dev/null || true
+# Over the budget: the first step's cost passes it, the stand-in's whole process group is stopped (its sleep child
+# too), and the run is reported partial.
+t0=$(date +%s); ocb slow ocslow 0.001; secs=$(( $(date +%s) - t0 ))
+child=$(cat "$T/oc-child" 2>/dev/null || true)
+so=$(grep '"type":"result"' "$ocr/ocslow.jsonl" | tail -1 | jq -c .structured_output)
+[ "$secs" -lt 15 ] && [ -n "$child" ] && stopped "$child" && [ "$(jq -r .status <<< "$so")" = partial ] \
+  && grep -q 'over the \$0.001 budget' <<< "$so" && [ "$(cat "$T/oc-calls")" = "first stdin=/dev/null config=deny" ] \
+  && echo "opencode run over budget is stopped and partial ok" || ofail "opencode budget stop (${secs}s)" "$(cat "$ocr/ocslow.jsonl")"
+kill "$child" 2>/dev/null || true
+# The TERM trap stops the same group: a signal to the launcher must not leave the stand-in's child behind.
+rm -f "$T/oc-calls" "$T/oc-child"
+oc slow "$WS/scripts/opencode-builder.sh" --model opencode-go/deepseek-v4.1-flash --budget 100 --config "$ocr/demo.opencode.json" \
+  --log "$ocr/octerm.jsonl" --name "ws:$slug:octerm" "$T/task.md" > "$ocr/octerm.jsonl" 2>&1 &
+bpid=$!
+for _ in $(seq 100); do [ -s "$T/oc-child" ] && break; sleep 0.1; done
+child=$(cat "$T/oc-child" 2>/dev/null || true)
+kill -TERM "$bpid" 2>/dev/null || true
+wait "$bpid" 2>/dev/null || true
+[ -n "$child" ] && stopped "$child" && echo "opencode TERM trap stops the process group ok" || ofail "opencode TERM trap" "child=${child:-none}"
+kill "$child" 2>/dev/null || true
+# An invalid final JSON gets exactly one continue: a valid reply there is the result; a second invalid one leaves it null.
+ocb fix ocfix 1; so=$(grep '"type":"result"' "$ocr/ocfix.jsonl" | tail -1 | jq -c .structured_output)
+[ "$(cut -d' ' -f1 "$T/oc-calls" | paste -sd,)" = first,continue ] && [ "$(jq -r .summary <<< "$so")" = stand-in ] \
+  && echo "opencode invalid result is fixed by one continue ok" || ofail "opencode continue fixes" "$(cat "$T/oc-calls" "$ocr/ocfix.jsonl")"
+ocb invalid ocbad 1; res=$("$WS/scripts/check-result.sh" --project "$slug" ocbad 2>&1) && x=0 || x=1
+[ "$(cut -d' ' -f1 "$T/oc-calls" | paste -sd,)" = first,continue ] && [ "$(grep '"type":"result"' "$ocr/ocbad.jsonl" | jq -c .structured_output)" = null ] \
+  && [ "$x" = 1 ] && grep -q 'FAIL  no structured result' <<< "$res" && echo "opencode result still invalid after one continue is null ok" || ofail "opencode continue fails" "$(cat "$T/oc-calls")
+$res"
+# A reply cut off after its opening brace is no JSON, not a crash: one continue, then a null result and a FAIL with
+# the cost, so a truncated final message does not look like a launcher failure.
+ocb cutoff occut 1 || true; res=$("$WS/scripts/check-result.sh" --project "$slug" occut 2>&1) && x=0 || x=1
+[ "$(cut -d' ' -f1 "$T/oc-calls" | paste -sd,)" = first,continue ] && [ "$(grep '"type":"result"' "$ocr/occut.jsonl" | tail -1 | jq -c .structured_output)" = null ] \
+  && [ "$x" = 1 ] && grep -q 'FAIL  no structured result' <<< "$res" && grep -q '^cost=\$' <<< "$res" \
+  && echo "opencode cut-off JSON is no result and fails with the cost ok" || ofail "opencode cut-off JSON" "$(cat "$T/oc-calls")
+$res
+$(tail -3 "$ocr/occut.jsonl")"
+# The result line starts a line even when OpenCode's last event did not end in a newline.
+ocb nonl ocnl 1
+grep -q '^{"type":"result"' "$ocr/ocnl.jsonl" && echo "opencode result starts on its own line ok" || ofail "opencode result newline" "$(tail -c 300 "$ocr/ocnl.jsonl")"
+# No text part (auth missing, a provider error): the result carries the log's last non-JSON lines, so the FAIL says why.
+printf '%s\n' '{"type":"step_start","part":{}}' 'Error: no auth for provider opencode-go' > "$T/oc-notext.jsonl"
+r=$(python3 -I "$WS/scripts/opencode_run.py" result "$T/oc-notext.jsonl" "$WS/schema/result.json" 1 0 | jq -r .result)
+[ "$r" = "Error: no auth for provider opencode-go" ] && echo "opencode textless run reports the log's error ok" || ofail "opencode textless result" "$r"
+# A model zdr-check refuses (the fixture's agreement has lapsed by this date) never starts the stand-in.
+OC_TODAY=2026-11-01 ocb valid ocrefused 1 || true; res=$("$WS/scripts/check-result.sh" --project "$slug" ocrefused 2>&1 || true)
+[ ! -e "$T/oc-calls" ] && grep -q 'no structured result: refused: zdr-check: DeepSeek V4.1 Flash: the DeepSeek ZDR agreement lapsed' <<< "$res" \
+  && echo "opencode model refused by zdr-check never starts ok" || ofail "opencode zdr refusal" "$res
+$(cat "$ocr/ocrefused.jsonl")"
+# Denied tool calls in an OpenCode log reach the result line as Claude's permission_denials.
+jq -c 'if .type == "tool_use" then .part.state = {"status":"error","input":{"command":"git push origin"},"error":"The user has specified a rule which prevents you from using this specific tool call."} else . end' \
+  "$WS/scripts/fixtures/opencode-sample.jsonl" > "$T/oc-denied.jsonl"
+d=$(python3 -I "$WS/scripts/opencode_run.py" result "$T/oc-denied.jsonl" "$WS/schema/result.json" 1 0 | jq -c '[.permission_denials[] | .tool_input.command // .tool_name]')
+[ "$d" = '["git push origin"]' ] && echo "opencode denials reported ok" || ofail "opencode denials" "$d"
+# A real OpenCode 1.19.1 log: exactly its four refused calls (git push, rm, a write outside, python3), not the two
+# calls that succeeded.
+df=$(python3 -I "$WS/scripts/opencode_run.py" result "$WS/scripts/fixtures/opencode-denied.jsonl" "$WS/schema/result.json" 1 0 \
+  | jq -c '.permission_denials | map(.tool_input.command // .tool_input.filePath)') || true
+[ "$(jq -r length <<< "$df")" = 4 ] && [ "$(jq -r '.[0]' <<< "$df")" = "git push origin main" ] \
+  && [ "$(jq -r '.[1]' <<< "$df")" = "rm -f nothing.txt" ] && [ "$(jq -r '.[2]' <<< "$df")" = "/tmp/demo/outside.txt" ] \
+  && [ "$(jq -r '.[3]' <<< "$df")" = "python3 -c 'print(1)'" ] \
+  && echo "real OpenCode log's four denials parsed ok" || ofail "opencode denied fixture" "$df"
+# ws tail reads OpenCode's text and tool events, marks a denied call, and skips the launcher's non-JSON notes.
+{
+  echo 'opencode-builder: note'
+  jq -c 'select(.type=="text")' "$WS/scripts/fixtures/opencode-sample.jsonl"
+  printf '%s\n' '{"type":"tool_use","part":{"tool":"bash","state":{"status":"error","error":"prevents you from using this tool call","input":{"command":"git push origin main"}}}}'
+  printf '%s\n' '{"type":"tool_use","part":{"tool":"write","state":{"status":"completed","input":{"filePath":"a.txt"}}}}'
+} > "$WS/runs/$slug/tailoc.jsonl"
+setsid "$WS/bin/ws" --project "$slug" tail tailoc > "$T/tail.out" 2>&1 &
+tpid=$!; sleep 1; kill -TERM -- "-$tpid" 2>/dev/null || true; wait "$tpid" 2>/dev/null || true
+tout=$(cat "$T/tail.out")
+[ -n "$tout" ] && grep -q 'SAY  ' <<< "$tout" && grep -q 'DENIED bash git push origin main' <<< "$tout" \
+  && grep -q 'TOOL write a.txt \[completed\]' <<< "$tout" && ! grep -q 'opencode-builder' <<< "$tout" \
+  && echo "ws tail shows OpenCode events and skips non-JSON notes ok" || ofail "ws tail OpenCode" "$tout"
+# opencode_run.py names variables in words, including for-loop and comprehension targets; a single letter is only
+# the loop counter i or the throwaway _.
+single_letter_check=$(cat <<'PY'
+import ast, sys
+tree = ast.parse(open(sys.argv[1]).read())
+bad = []
+for node in ast.walk(tree):
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
+            if len(arg.arg) == 1 and arg.arg not in ("i", "_"):
+                bad.append(arg.arg)
+        continue
+    if isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+        targets = [node.target]
+    elif isinstance(node, ast.Assign):
+        targets = node.targets
+    elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+        targets = [node.target]
+    else:
+        continue
+    for target in targets:
+        for name in ast.walk(target):
+            if isinstance(name, ast.Name) and len(name.id) == 1 and name.id not in ("i", "_"):
+                bad.append(name.id)
+if bad:
+    print("single-letter names:", sorted(set(bad)))
+sys.exit(1 if bad else 0)
+PY
+)
+python3 -c "$single_letter_check" "$WS/scripts/opencode_run.py" && echo "opencode_run names variables in words ok" || { echo "opencode_run single-letter names FAILED"; of=1; }
+# The check itself still catches a single-letter for-loop target and a comprehension target.
+printf 'for x in []:\n    pass\n' > "$T/letters-for.py"; printf 'names = [y for y in []]\n' > "$T/letters-comp.py"
+! python3 -c "$single_letter_check" "$T/letters-for.py" >/dev/null && ! python3 -c "$single_letter_check" "$T/letters-comp.py" >/dev/null \
+  && echo "single-letter check catches loop and comprehension targets ok" || { echo "single-letter check missed a loop or comprehension target"; of=1; }
+[ "$of" = 0 ] || exit 1
+# bench with another agent: an arm built by the stand-in opencode, not reviewed, beside the recorded first run of bx
+# (its record was moved aside by a later round, so its tests and verdict are unknown; its done-when is read here).
+printf 'ok    done-when met observed: one\nnote  done-when partial inferred: two\n' > "$RB/bx.20260101T000000Z.result.txt"
+rm -f "$T/oc-calls"; n0=$(ls "$T/stub-log" | wc -l)
+ds_arm="ds=HEAD,agent=opencode,model=opencode-go/deepseek-v4.1-flash"
+out=$(PATH="$T/ocbin:$PATH" OC_CALLS="$T/oc-calls" OC_SAMPLE="$WS/scripts/fixtures/opencode-sample.jsonl" WS_ZDR_PAGE="$Z" WS_TODAY=2026-10-31 OC_STUB=valid \
+  wsb bench run "$slug2" --arm "$ds_arm" --review none bx) && x=0 || x=1
+dsrow=$(awk -F'\t' '$3=="ds"' "$rt" || true); armrow=$(awk -F'\t' '$1=="ds"' "$WS/runs/$slug2/bench/arms.tsv" || true)
+[ "$x" = 0 ] && [ "$(cut -d' ' -f1 "$T/oc-calls" 2>/dev/null)" = first ] && [ "$(ls "$T/stub-log" | wc -l)" = "$n0" ] \
+  && [ "$(cut -f6,10 <<< "$dsrow")" = "$(printf 'done\tunreviewed')" ] && [ "$(cut -f17 <<< "$dsrow")" = 0.0016 ] \
+  && [ "$(cut -f2,4,5 <<< "$armrow")" = "$(printf 'HEAD\topencode\topencode-go/deepseek-v4.1-flash')" ] && grep -q 'not reviewed (--review none)' <<< "$out" \
+  && echo "bench arm on opencode dispatches through the launcher, unreviewed ok" || bfail "bench opencode arm" "$out
+$dsrow
+$armrow"
+out=$(wsb bench report --baseline recorded "$slug2" || true); rec=$(awk -F'\t' '$3=="recorded"' "$WS/runs/$slug2/bench/recorded.tsv" 2>/dev/null || true)
+grep -qE '^  agent +.*opencode.*claude|^  agent +.*claude.*opencode' <<< "$out" && grep -q 'opencode-go/deepseek-v4.1-flash' <<< "$out" && grep -q 'claude-opus-5-5' <<< "$out" \
+  && grep -q '^baseline arm: recorded$' <<< "$out" && grep -q 'notional per-token prices' <<< "$out" && grep -q 'arm ds: not reviewed (--review none).*empty by choice' <<< "$out" \
+  && grep -q '^    recorded (claude claude-opus-5-5): tests 0/0  done-when 1/2  merge 0/0' <<< "$out" && grep -q '^    ds (opencode opencode-go/deepseek-v4.1-flash): ' <<< "$out" \
+  && [ "$(cut -f7,8,9,10,17,18 <<< "$rec")" = "$(printf '\t1\t2\t\t0.5\t2.5')" ] \
+  && echo "bench report --baseline recorded prints the recorded first run beside the opencode arm ok" || bfail "bench report recorded" "$out
+$rec"
+# An arms.tsv row from before arms had an agent (three fields) is the same arm without keys, and a different one with them.
+printf 'old\tHEAD\t%s\n' "$(git -C "$WS" rev-parse HEAD)" >> "$WS/runs/$slug2/bench/arms.tsv"
+out=$(wsb bench run "$slug2" --arm old=HEAD --dry-run bx) && x=0 || x=1
+out2=$(wsb bench run "$slug2" --arm old=HEAD,agent=opencode --dry-run bx) && x2=0 || x2=1
+[ "$x" = 0 ] && grep -q 'agent default model default review claude' <<< "$out" && [ "$x2" = 1 ] && grep -q 'arm old was HEAD agent= model= in earlier runs' <<< "$out2" \
+  && echo "bench reads an arms.tsv row without agent and model ok" || bfail "bench old arms row" "$out
+$out2"
+# --review with no value is a usage error, not a parse loop that never ends (shift 2 past the end leaves $1 in place).
+out=$(PATH="$T/stub:$PATH" timeout 10 "$WS/bin/ws" bench run "$slug2" --arm old=HEAD --review 2>&1) && x=0 || x=$?
+[ "$x" = 1 ] && grep -q -- '--review takes none or claude' <<< "$out" && echo "bench --review without a value fails loud ok" || bfail "bench --review without a value (exit $x)" "$out"
+[ "$bf" = 0 ] || exit 1
 echo "selftest passed"
