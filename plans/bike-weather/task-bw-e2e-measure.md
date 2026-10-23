@@ -25,3 +25,10 @@ The caps' values, the token design, the client, and the release builder.
 - The measured rows table is in `server/bench/RESULTS.md` and the estimates in `abuse-limits.md` are replaced with it (marked measured).
 - The bound assertion is in the suite and names the measured figure.
 - `npm --prefix server test` and `npm --prefix server run typecheck` pass.
+
+## Carried from the bw-deploy-dry-run review (suggestions; do them where the code is yours to touch)
+- `server/scripts/deploy-dry-run.sh:10`: the check writes to `<repo>/.ws-evidence/scratch/deploy-check`, which no tracked `.gitignore` covers; a normal checkout running `npm run deploy:check` is left with untracked files. `mktemp -d` with a trap, or a gitignored folder under `server/`, would keep the check repeatable for anyone.
+- `server/scripts/deploy-dry-run.sh:13`: the variable `worker` holds the D1 database name, not the Worker name; both are `bike-weather-ratings`, so a rename would point the script at the wrong one. Rename it to `database`.
+- `server/scripts/deploy-dry-run.sh:76`: a second `shopt -s nullglob` after line 27; remove it.
+- `server/scripts/deploy-dry-run.sh:1`: the broken-migration proof is one hand run. A small test that adds a broken migration to a temp copy and asserts a non-zero exit would keep the check from regressing.
+- The script echoes an absolute bundle path; printing it relative to the server folder reads better and keeps home paths out of the evidence.
