@@ -30,3 +30,7 @@ The draft and its notes are the prior work; `docs/research/ratings-sharing.md` a
 - `docs/privacy-policy.md` is committed, reads as final (placeholders marked), and is consistent with the merged code; each factual claim traces to a repo file.
 - `docs/privacy-policy-gaps.md` lists every pre-publication item and every unverified claim.
 - Nothing is published and `src/privacy/policy.ts` is unchanged.
+
+## Carried from the bw-share-followups review (suggestions; do them where the code is yours to touch)
+- `src/share/shareQueue.ts:333`: The comment calls the 500-token cap 'the only brake', but server/src/installs.ts:3 says the cap is service-wide ('Across the whole service ... a UTC day'), not per install. So a single client stuck in the 401 loop uses up mints for every install. Saying 'service-wide' in the comment would make the trade-off accurate.
+- `src/share/installToken.test.ts:46`: Rule 2: since a failing run before the change can't exist, a one-off mutation check would show the pin really bites. For example, make installsUrl strip a trailing slash and record the failure in .ws-evidence/. The same goes for removing the `delete state.lastAttemptAt` line against the new shareQueue test.
