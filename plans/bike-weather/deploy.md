@@ -2,7 +2,7 @@
 
 **In flight right now**
 
-**2026-10-22 22:20 MDT:** `bw-share-nits` dispatched ($2, light): the carried review suggestions from `bw-install-token` (a 401 waits 24 h before re-minting; `installsUrl('https://host')` yields `https://installs`; `stopSharing` keeps the token; the docstring says the mint runs outside the turn) and two doc lines plus one comment from `bw-heat-cleanup`.
+**2026-10-22 22:31 MDT:** nothing running. `bw-share-nits` merged 620cd81. The endpoint is built and tested locally; steps 2 (Cloudflare account), 3 (D1 + deploy), 4 (cron), 7 (policy) and 8 (endpoint set) are what remain, and step 2 is the gate.
 **Option A merged (2026-10-22 22:12 MDT, f085131, suite 166 s, $0.12 + review $2.58):** `POST /v1/installs` (SHA-256 hash only, 500 new tokens a UTC day), a Bearer token on `POST /v1/ratings` with 30 ratings / 3 uploads / 2 contributor keys a UTC day (429 keeps the queue), a cleanup in `scheduled`, the client token (`src/share/installToken.ts`) and `MAX_BATCH` 30. The caps are read-then-write: two concurrent batches from one token could store up to 60 in a day; a conditional upsert would close it if it ever matters.
 
 **Step 5 done (2026-10-22 21:55 MDT, direct commit 8ac59c8):** cold start has a generic `COLD_START_CMD` from a project's conf (20 s timeout, prints only when it prints something); Bike Weather's runs `retention-status.sh --remote --flagged`, tested both ways on a local D1. It stays silent until the database is deployed.
