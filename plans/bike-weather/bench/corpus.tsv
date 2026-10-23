@@ -9,3 +9,7 @@ bw-today-followups	00a52e5495c6b281094ebabd0fecf0aa2b6b6917	8	light	5.1594	203	2
 bw-heat	3bee118c8d6d824e944299b8a45cdd98c3f28812	15	full	4.1153	83	175912	
 bw-templates	afd9f03419465976612f10f6bace4958be90e39b	15	full	8.7003	251	304120	--budget 15
 bw-recommend-core	40e8dc2854428520bce07a0534b79d7f1df3e024	20	full	6.3948	102	233457	
+bw-key-index	76ab1b5c539d87bf7eaae937bee0f85dcba45e12	2	light	1.1523	47	73472	--budget 2
+bw-anon-order	451ddcc43e3cbe0f769059d46114d4dfdbbbdeae	3	light	0.772	33	62483	--budget 3
+bw-policy-notice	faf9d4f69304d0835ff2e5354ac6a29012b2b073	4	light	1.4767	55	94885	--budget 4
+bw-anonymize	613d4df3017b0fd9aace8e02ebd678894ecae732	5	light	1.7359	68	103193	--budget 5
