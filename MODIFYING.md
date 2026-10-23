@@ -58,16 +58,25 @@ scripts/site.sh         `ws site`: copies a project's SITE_SYNC files (or its Gi
 scripts/audit.py        `ws audit`: repeated hand work in the run logs. Writes runs/<slug>/audit.last for cold-start.
 scripts/transcript.py   reads a run log (runs/<slug>/<name>.jsonl): its events, and a run's turns, peak and mean
                         context (once per message id), output tokens, cache reads, cost, minutes, denied calls.
-scripts/bench.sh        `ws bench`: replays merged tasks from their base commit under two or more arms of builder
-                        instructions (a workspace git ref, or a directory with agents/builder.md and lessons/builder*.md).
-                        `add` builds the corpus (plans/<slug>/bench/: the task as first dispatched, from this repo's
-                        history at its start time, and corpus.tsv); `run` dispatches each task x arm x trial under an
-                        opaque bench-<8 hex> name (dispatch --base --instructions), waits while any project's merge lock
-                        is held, reviews blind, tests the tip with `merge.sh --test-only`, records the run in
-                        runs/<slug>/bench/runs.tsv, removes the worktree and branch, keeps evidence/<run>/; resumable.
-scripts/bench.py        the bench's tables (corpus.tsv, runs.tsv, locked writes) and `ws bench report`: per arm, quality
-                        (tests passed, done-when met, merge verdicts, blocking findings) before cost; "quality drop" when
-                        an arm's rate is below the baseline's by more than the trial spread; several slugs and a total.
+scripts/bench.sh        `ws bench`: replays merged tasks from their base commit under one or more arms of builder
+                        instructions (a workspace git ref, or a directory with agents/builder.md and lessons/builder*.md),
+                        each optionally with `,agent=<claude|opencode>` and `,model=<id>` after it (dispatch --agent
+                        --model, replacing the first run's --model). arms.tsv keeps label, spec, resolved ref, agent and
+                        model; a three-field row from before is the same arm without keys. The label `recorded` is
+                        reserved. `add` builds the corpus (plans/<slug>/bench/: the task as first dispatched, from this
+                        repo's history at its start time, and corpus.tsv); `run` dispatches each task x arm x trial under
+                        an opaque bench-<8 hex> name (dispatch --base --instructions), waits while any project's merge
+                        lock is held, reviews blind (`--review claude`, the default) or not at all (`--review none`),
+                        tests the tip with `merge.sh --test-only`, records the run in runs/<slug>/bench/runs.tsv,
+                        removes the worktree and branch, keeps evidence/<run>/; resumable. `report --baseline recorded`
+                        first writes recorded.tsv: each corpus task's first run from its dispatch record (cost, minutes,
+                        done-when; tests and verdict only when no later round of the task followed), no replay.
+scripts/bench.py        the bench's tables (corpus.tsv, runs.tsv, recorded.tsv, locked writes) and `ws bench report`: per
+                        arm, its agent and model, quality (tests passed, done-when met, merge verdicts, blocking
+                        findings) before cost; cost as each agent reports it (OpenCode's is Go's notional per-token
+                        prices); an unknown measure (an unreviewed run's verdict) is left out, not counted as a zero;
+                        "quality drop" when an arm's rate is below the baseline's by more than the trial spread; several
+                        slugs and a total.
 scripts/statusline.sh   the Claude Code status line: each running builder (elapsed time, tool calls, seconds since
                         its last output, budget), then preview servers. No git calls.
 scripts/lessons-check.py pairs each lessons/<role>.local.md bullet with the shared bullet it restates (difflib
@@ -106,12 +115,13 @@ state/current           the last project opened with `ws <slug>`; what a termina
 | Change the timeouts | `WS_DEFAULT_TIMEOUT` and `WS_LIGHT_TIMEOUT` in `config.sh`; `scripts/dispatch.sh` picks the light one when the task says `Track: light`. |
 | Change the builder memory cap | `WS_BUILDER_MEM` in `config.sh` (systemd `MemoryMax` form, empty = none); `scripts/dispatch.sh` wraps the run in `systemd-run --user --scope` when systemd is there. |
 | Change where worktrees live | `WT_ROOT` in `scripts/lib.sh`. They are under `<project>/.worktrees/` (excluded via `.git/info/exclude`) so the project's own `CLAUDE.md` applies to builders and this workspace's does not. |
-| Change the orchestrator's instructions | `CLAUDE.md`, and the same meaning in `AGENTS.md` for OpenCode; selftest fails when a `bin/ws` command named in one is missing from the other. Keep both short; long instruction files are how v1 spent 50,000 tokens before starting work. |
+| Change the orchestrator's instructions | `CLAUDE.md`, and the same meaning in `AGENTS.md` for OpenCode; selftest fails when a `bin/ws` command named in either is missing from the other. Keep both short; long instruction files are how v1 spent 50,000 tokens before starting work. |
 | Change the OpenCode config, or what a session starts with | `opencode.json`; `.opencode/commands/cold-start.md` for `/cold-start`. `docs/opencode-orchestrator.md` names the page behind each choice. |
 | Change what runs without the orchestrator | `scripts/chain.sh`: what stops a chain, the automatic fix round (`WS_CHAIN_FIX_ROUNDS`), how suggestions carry forward. |
 | Check another rule mechanically | `scripts/precheck.sh`; print `FLAG  rule N:` lines. A rule a script checks reliably can leave the reviewer's attention. |
 | Change what the audit looks for | `scripts/audit.py` (the command patterns and the findings). |
 | Measure a change to what builders are told | `ws bench`: `ws --project <slug> bench add <name>...` for merged runs, write the new rules in a directory (`agents/builder.md`, `lessons/builder.md`), then `ws bench run <slug> --trials 2 --arm current=HEAD --arm new=<dir>` (`--dry-run` first) and `ws bench report <slug> [<slug2>]`. Adopt it only with no quality drop. A project whose `TEST_CMD` installs dependencies sets `BENCH_TEST_CMD` to its tests alone. |
+| Compare another agent or model with Claude's first runs | `ws bench run <slug> --arm ds=HEAD,agent=opencode,model=opencode-go/deepseek-v4.1-flash --review none <tasks>`, then `ws bench report --baseline recorded <slug>`: the recorded arm reads the first runs' records, so no Claude builder is spent. |
 | Add a subcommand | a `case` arm in `bin/ws`, calling a script in `scripts/`. Use `load_project "$proj"` so a leading `--project <slug>` works; the scripts take `--project` themselves. |
 
 ## Design decisions worth knowing before you change them

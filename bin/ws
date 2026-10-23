@@ -29,10 +29,13 @@ ws web <name> resume [dispatch flags]   write a resume task naming the files, th
 ws precheck <name>              the checklist rules a script can check (ws review runs it first)
 ws audit [days]                 what builders keep doing by hand, from the run logs (default 30 days)
 ws bench add <name>...          add merged runs to the project's replay corpus (plans/<slug>/bench/)
-ws bench run <slug> --arm L=<git-ref|dir> --arm L2=... [--trials N] [--parallel P] [--dry-run] [tasks...]
-                                replay corpus tasks from their base commit under each arm of builder instructions,
-                                blind-review and test each run, record it (runs/<slug>/bench/runs.tsv); resumable
-ws bench report [--baseline L] <slug>...   quality first, then cost, per arm and task; flags a quality drop
+ws bench run <slug> --arm L=<git-ref|dir>[,agent=claude|opencode][,model=M] --arm L2=... [--review none|claude]
+         [--trials N] [--parallel P] [--dry-run] [tasks...]
+                                replay corpus tasks from their base commit under each arm of builder instructions
+                                (and agent and model), blind-review (unless --review none) and test each run, record
+                                it (runs/<slug>/bench/runs.tsv); resumable
+ws bench report [--baseline L|recorded] <slug>...   quality first, then cost, per arm (agent, model) and task; flags
+                                a quality drop; recorded = the corpus tasks' first runs as recorded, not replayed
 ws stop <name>                  stop a running builder
 ws serve <name|main> [port]     start the project's preview server from a worktree (or the main checkout)
 ws serve stop [name|main]       stop it;  ws serve list

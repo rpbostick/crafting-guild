@@ -5,19 +5,27 @@
   bench.py corpus-add <corpus.tsv> <name> <base> <budget> <track> <flags> <first-run.jsonl or "">
   bench.py runs-get <runs.tsv> <task> <arm> <trial>          prints "<run>\t<state>" when the row exists
   bench.py runs-start <runs.tsv> <run> <task> <arm> <trial> <base>
-  bench.py runs-finish <runs.tsv> <run> <tests> <result.txt> <review.json> <run.jsonl> <task.md>
+  bench.py runs-finish <runs.tsv> <run> <tests> <result.txt> <review.json or "-"> <run.jsonl> <task.md>
+  bench.py recorded-add <recorded.tsv> <task> <base> <first-run.jsonl> <first-run result.txt> <review.json or "-"> <task.md>
   bench.py report [--baseline ARM] <slug>=<runs.tsv>...
 
+A review.json of "-" means no review ran: by choice (--review none) in runs-finish, or because a later round of the
+task replaced the first run's review in recorded-add.
 Writes take an exclusive lock on <file>.lock: parallel replays record into one runs.tsv at once.
 """
 import fcntl, json, os, re, sys
 from contextlib import contextmanager
-from transcript import run_metrics
+from transcript import events, run_metrics
 
 CORPUS_COLS = ["name", "base", "budget", "track", "cost", "turns", "peak_context", "flags"]
 RUNS_COLS = ["run", "task", "arm", "trial", "base", "state", "tests", "dw_met", "dw_total", "verdict", "blocking",
              "turns", "peak_context", "mean_context", "output_tokens", "cache_reads", "cost", "minutes", "denied"]
 METRIC_KEYS = ["turns", "peak_context", "mean_context", "output_tokens", "cache_reads", "cost", "minutes", "denied"]
+# arms.tsv rows: label, spec, resolved ref, then agent and model. Rows written before arms had an agent hold only
+# the first three, and those arms ran Claude on dispatch's default model.
+ARMS_COLS = ["label", "spec", "resolved", "agent", "model"]
+RECORDED = "recorded"
+UNREVIEWED = "unreviewed"
 SMALL_N = 30
 
 
@@ -107,15 +115,55 @@ def done_when_from_check(result_txt):
     return met, reported
 
 
+def review_measures(review_json):
+    """Verdict and blocking count; "none" is a review that ran and gave no verdict, distinct from no review at all."""
+    if review_json == "-":
+        return UNREVIEWED, ""
+    if not os.path.exists(review_json):
+        return "none", ""
+    review = json.load(open(review_json))
+    return review.get("verdict") or "none", len(review.get("blocking") or [])
+
+
+def run_model(jsonl):
+    """The model a Claude run log's init event names; empty when the log has none (an OpenCode log)."""
+    for event in events(jsonl):
+        if event.get("type") == "system" and event.get("subtype") == "init":
+            return event.get("model") or ""
+    return ""
+
+
+def recorded_add(path, task, base, jsonl, result_txt, review_json, task_md):
+    """The corpus task's first run as it was recorded, as one row of the arm "recorded": no replay, no spend.
+
+    Its tests count as passed only when no later round followed (review_json is then that run's review), since the
+    merge's test gate then ran on that run's tip; after a later round they are unknown, not failed."""
+    met, reported = done_when_from_check(result_txt)
+    verdict, blocking = review_measures(review_json)
+    if verdict == UNREVIEWED:
+        verdict = ""
+    exists = os.path.exists(jsonl)
+    measures = run_metrics(jsonl) if exists else {k: "" for k in METRIC_KEYS}
+    row = {"run": f"{RECORDED}-{task}", "task": task, "arm": RECORDED, "trial": "1", "base": base, "state": "done",
+           "tests": "pass" if review_json != "-" else "", "dw_met": met if reported else "",
+           "dw_total": max(reported, done_when_items(task_md)) if reported else "",
+           "verdict": verdict, "blocking": blocking, **measures}
+    with locked(path):
+        rows = [r for r in read_tsv(path, RUNS_COLS) if r["task"] != task] + [row]
+        write_tsv(path, RUNS_COLS, rows)
+        arms_path = os.path.join(os.path.dirname(path), "recorded-arms.tsv")
+        model = run_model(jsonl) if exists else ""
+        models = {r["model"] for r in read_tsv(arms_path, ARMS_COLS) if r["model"]} | ({model} if model else set())
+        write_tsv(arms_path, ARMS_COLS, [{"label": RECORDED, "spec": "first runs as recorded", "resolved": "",
+                                          "agent": "claude", "model": ",".join(sorted(models))}])
+
+
 def runs_finish(path, run, tests, result_txt, review_json, jsonl, task_md):
     # A run stopped by the usage limit did nothing; recording it would score an empty branch as a passing run.
     if os.path.exists(result_txt) and open(result_txt).read().startswith("LIMIT"):
         sys.exit(f"bench: {run} stopped at the usage limit; not recorded (run the bench again after the reset)")
     met, reported = done_when_from_check(result_txt)
-    verdict, blocking = "none", ""
-    if os.path.exists(review_json):
-        review = json.load(open(review_json))
-        verdict, blocking = review.get("verdict") or "none", len(review.get("blocking") or [])
+    verdict, blocking = review_measures(review_json)
     measures = run_metrics(jsonl) if os.path.exists(jsonl) else {k: "" for k in METRIC_KEYS}
     with locked(path):
         rows = read_tsv(path, RUNS_COLS)
@@ -142,10 +190,11 @@ def mean(values):
 
 
 def per_run_quality(row):
+    """A measure left empty (a recorded run's tests after a later round, a run not reviewed) is unknown, not a zero."""
     met, total = number(row["dw_met"]), number(row["dw_total"])
-    return {"tests passed": 1.0 if row["tests"] == "pass" else 0.0,
+    return {"tests passed": None if row["tests"] == "" else 1.0 if row["tests"] == "pass" else 0.0,
             "done-when met": met / total if total else None,
-            "merge verdicts": 1.0 if row["verdict"] == "merge" else 0.0}
+            "merge verdicts": None if row["verdict"] in ("", UNREVIEWED) else 1.0 if row["verdict"] == "merge" else 0.0}
 
 
 def arm_rate(rows, measure):
@@ -183,7 +232,19 @@ def spread_text(values):
     return f"{fmt(mean(values))} [{fmt(min(values))}-{fmt(max(values))}]"
 
 
-def report(title, rows, baseline):
+def read_arms(path):
+    """label -> (agent, model) from an arms.tsv. Old rows lack the last two fields; an empty one is what dispatch chose
+    (WS_AGENT, then WS_MODEL or the corpus flags), shown as "default"."""
+    info = {}
+    if os.path.exists(path):
+        for line in open(path).read().splitlines():
+            fields = line.split("\t") + [""] * len(ARMS_COLS)
+            if fields[0] and fields[0] != "label":
+                info[fields[0]] = (fields[3] or "default", fields[4] or "default")
+    return info
+
+
+def report(title, rows, baseline, arm_info):
     done = [r for r in rows if r["state"] == "done"]
     unfinished = len(rows) - len(done)
     arms = list(dict.fromkeys(r["arm"] for r in done))
@@ -191,6 +252,17 @@ def report(title, rows, baseline):
     if not arms:
         print("no finished runs")
         return
+    agent_of = {a: arm_info.get(a, ("default", "default"))[0] for a in arms}
+    model_of = {a: arm_info.get(a, ("default", "default"))[1] for a in arms}
+    print("cost $ is as each agent reports it"
+          + ("; OpenCode's step costs are OpenCode Go's notional per-token prices, not what the subscription charges"
+             if "opencode" in agent_of.values() else ""))
+    if RECORDED in arms:
+        print(f"arm {RECORDED}: the corpus tasks' first runs as recorded, not replayed; their tests and review verdict "
+              "are known only where no later round followed")
+    for arm in arms:
+        if all(r["verdict"] == UNREVIEWED for r in done if r["arm"] == arm):
+            print(f"arm {arm}: not reviewed (--review none), so its merge verdicts and blocking columns are empty by choice")
     base = baseline or arms[0]
     by_arm = {a: [r for r in done if r["arm"] == a] for a in arms}
     tasks = list(dict.fromkeys(r["task"] for r in done))
@@ -200,11 +272,13 @@ def report(title, rows, baseline):
     print(f"n = {n} runs per arm ({len(tasks)} tasks, up to {trials} trials each)"
           + (": n is small, so a gap within the trial spread is noise, and one beyond it is a reason to look, not proof"
              if n < SMALL_N else ""))
-    width = max(12, *(len(a) + 2 for a in arms))
+    width = max(12, *(len(text) + 2 for a in arms for text in (a, agent_of[a], model_of[a])))
     head = lambda label: print(f"  {label:<16}" + "".join(f"{a:>{width}}" for a in arms))
     line = lambda label, values: print(f"  {label:<16}" + "".join(f"{v:>{width}}" for v in values))
     print("quality")
     head("")
+    line("agent", [agent_of[a] for a in arms])
+    line("model", [model_of[a] for a in arms])
     for measure in ("tests passed", "done-when met", "merge verdicts"):
         line(measure, [fmt(arm_rate(by_arm[a], measure), "%") for a in arms])
     line("blocking/run", [fmt(mean(number(r["blocking"]) for r in by_arm[a])) for a in arms])
@@ -235,11 +309,13 @@ def report(title, rows, baseline):
             if not mine:
                 continue
             passed = sum(r["tests"] == "pass" for r in mine)
+            tested = sum(r["tests"] != "" for r in mine)
             met = sum(int(number(r["dw_met"]) or 0) for r in mine)
             total = sum(int(number(r["dw_total"]) or 0) for r in mine)
             merges = sum(r["verdict"] == "merge" for r in mine)
+            reviewed = sum(r["verdict"] not in ("", UNREVIEWED) for r in mine)
             blocking = mean(number(r["blocking"]) for r in mine)
-            print(f"    {arm}: tests {passed}/{len(mine)}  done-when {met}/{total}  merge {merges}/{len(mine)}  "
+            print(f"    {arm} ({agent_of[arm]} {model_of[arm]}): tests {passed}/{tested}  done-when {met}/{total}  merge {merges}/{reviewed}  "
                   f"blocking {fmt(blocking)}  cost $ {spread_text([number(r['cost']) for r in mine])}  "
                   f"turns {spread_text([number(r['turns']) for r in mine])}  "
                   f"peak context {spread_text([number(r['peak_context']) for r in mine])}  "
@@ -252,15 +328,22 @@ def report_all(args):
         baseline, args = args[1], args[2:]
     if not args:
         sys.exit("usage: bench.py report [--baseline ARM] <slug>=<runs.tsv>...")
-    pooled = []
+    pooled, pooled_arms = [], {}
     for arg in args:
         slug, path = arg.split("=", 1)
         rows = read_tsv(path, RUNS_COLS)
-        report(slug, rows, baseline)
+        bench_dir = os.path.dirname(path)
+        arm_info = read_arms(os.path.join(bench_dir, "arms.tsv"))
+        # The recorded first runs join the report only as the baseline asked for; bench.sh writes them just before.
+        if baseline == RECORDED:
+            rows = read_tsv(os.path.join(bench_dir, "recorded.tsv"), RUNS_COLS) + rows
+            arm_info.update(read_arms(os.path.join(bench_dir, "recorded-arms.tsv")))
+        report(slug, rows, baseline, arm_info)
         pooled += [dict(r, task=f"{slug}/{r['task']}") for r in rows]
+        pooled_arms.update(arm_info)
         print()
     if len(args) > 1:
-        report("total", pooled, baseline)
+        report("total", pooled, baseline, pooled_arms)
 
 
 def main(argv):
@@ -277,6 +360,8 @@ def main(argv):
         runs_start(*args)
     elif command == "runs-finish" and len(args) == 7:
         runs_finish(*args)
+    elif command == "recorded-add" and len(args) == 7:
+        recorded_add(*args)
     elif command == "report":
         report_all(args)
     else:

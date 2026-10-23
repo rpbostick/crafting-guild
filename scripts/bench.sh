@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Replay A/B of builder instructions: merged tasks run again from their base commit under two or more arms (where
-# builder.md and the builder lessons come from), several trials each, each run graded on its tests, its done-when
-# and a blind review, with its cost beside them.
+# Replay A/B of builder instructions: merged tasks run again from their base commit under one or more arms (where
+# builder.md and the builder lessons come from, and which agent and model build), several trials each, each run
+# graded on its tests, its done-when and a blind review (or none, --review none), with its cost beside them.
 # Usage: bench.sh [--project slug] add <name>...
-#        bench.sh run <slug> --arm <label>=<git-ref|dir> --arm ... [--trials N] [--parallel P] [--dry-run] [tasks...]
-#        bench.sh report [--baseline <label>] <slug>...
+#        bench.sh run <slug> --arm <label>=<git-ref|dir>[,agent=A][,model=M] --arm ... [--review none|claude]
+#                     [--trials N] [--parallel P] [--dry-run] [tasks...]
+#        bench.sh report [--baseline <label>|recorded] <slug>...
+# --baseline recorded compares with the corpus tasks' first runs as recorded at the time, without replaying them.
 # Corpus: plans/<slug>/bench/<name>.md (the task as first dispatched) and corpus.tsv. Runs: runs/<slug>/bench/
-# runs.tsv (opaque run name -> task, arm, trial, and the run's measures), arms.tsv, arms/, logs/, evidence/<run>/.
+# runs.tsv (opaque run name -> task, arm, trial, and the run's measures), arms.tsv, arms/, logs/, evidence/<run>/,
+# and recorded.tsv with recorded-arms.tsv (rewritten by each report --baseline recorded).
 # A git-ref arm is resolved to its commit at the first run and kept in arms.tsv, so a resumed bench replays the
 # same instructions after the workspace has moved on.
 set -uo pipefail
@@ -136,6 +139,13 @@ start_run() {
   wait_for_hours
   wait_for_merges
   set -f; eval "fl=( $(corpus_field "$task" flags) )"; set +f
+  # An arm that names its agent or model replaces the first run's --model: a Claude model ID means nothing to OpenCode.
+  if [ -n "${ARM_AGENT[$arm]}${ARM_MODEL[$arm]}" ]; then
+    local -a kept=(); local k; for ((k = 0; k < ${#fl[@]}; k++)); do if [ "${fl[$k]}" = --model ]; then k=$((k + 1)); else kept+=("${fl[$k]}"); fi; done
+    fl=("${kept[@]}")
+    [ -n "${ARM_AGENT[$arm]}" ] && fl+=(--agent "${ARM_AGENT[$arm]}")
+    [ -n "${ARM_MODEL[$arm]}" ] && fl+=(--model "${ARM_MODEL[$arm]}")
+  fi
   "$WS/scripts/dispatch.sh" --project "$SLUG" "${fl[@]}" --budget "$budget" --base "$base" --instructions "$dir" "$run" "$WS/plans/$SLUG/bench/$task.md" >> "$log" 2>&1 \
     || { echo "bench: dispatch of $run failed; see runs/$SLUG/bench/logs/$run.log"; return 1; }
 }
@@ -143,7 +153,7 @@ start_run() {
 # One replay: dispatch under the opaque name, wait, review (blind: the reviewer sees the run name only), test the
 # tip in the worktree, record, then remove the worktree and branch and keep the evidence.
 run_one() { # <task> <arm> <trial>
-  local task="$1" arm="$2" trial="$3" got run state wt log base budget mins dir tests rc ep wake limits=0; local -a fl
+  local task="$1" arm="$2" trial="$3" got run state wt log base budget mins dir tests rc ep wake review limits=0; local -a fl
   base=$(corpus_field "$task" base); budget=$(corpus_field "$task" budget); dir="$BENCH/arms/$arm"
   got=$(python3 "$PY" runs-get "$TSV" "$task" "$arm" "$trial"); run="${got%%$'\t'*}"; state="${got#*$'\t'}"
   [ "$state" = "done" ] && return 0
@@ -172,38 +182,54 @@ run_one() { # <task> <arm> <trial>
     start_run || return 1
   done
   [ "$rc" -eq 3 ] && { echo "bench: $run still running after $mins minutes; run the bench again to resume"; return 1; }
-  "$WS/scripts/review.sh" --project "$SLUG" "$run" >> "$log" 2>&1
+  review="$RUNS/$run.review.json"
+  if [ "$REVIEW" = none ]; then review="-"; else "$WS/scripts/review.sh" --project "$SLUG" "$run" >> "$log" 2>&1; fi
   if "$WS/scripts/merge.sh" --project "$SLUG" --test-only "$run" >> "$log" 2>&1; then tests=pass; else tests=fail; fi
-  python3 "$PY" runs-finish "$TSV" "$run" "$tests" "$RUNS/$run.result.txt" "$RUNS/$run.review.json" "$RUNS/$run.jsonl" "$WS/plans/$SLUG/bench/$task.md" || return 1
+  python3 "$PY" runs-finish "$TSV" "$run" "$tests" "$RUNS/$run.result.txt" "$review" "$RUNS/$run.jsonl" "$WS/plans/$SLUG/bench/$task.md" || return 1
   if [ -d "$wt/.ws-evidence" ]; then rm -rf "$BENCH/evidence/$run"; mkdir -p "$BENCH/evidence"; mv "$wt/.ws-evidence" "$BENCH/evidence/$run"; fi
   git -C "$PROJECT_PATH" worktree remove --force "$wt" 2>/dev/null
   git -C "$PROJECT_PATH" branch -q -D "$(branch_of "$run")" 2>/dev/null
-  echo "bench: $run done: tests $tests, review $(jq -r '.verdict // "none"' "$RUNS/$run.review.json" 2>/dev/null || echo none)"
+  if [ "$review" = - ]; then echo "bench: $run done: tests $tests, not reviewed (--review none)"
+  else echo "bench: $run done: tests $tests, review $(jq -r '.verdict // "none"' "$review" 2>/dev/null || echo none)"; fi
 }
 
 # An arm's instructions as a directory dispatch --instructions reads. A git ref is written out from the workspace at
-# the commit arms.tsv holds for it; a directory is used as it is.
-resolve_arm() { # <label=spec> <dry> -> sets ARM_DIR[label], prints a description
-  local label="${1%%=*}" spec="${1#*=}" dry="$2" kept sha f
-  [ "$label" != "$1" ] && [ -n "$label" ] && [ -n "$spec" ] || die "an arm is <label>=<git-ref|dir>, not '$1'"
-  case "$label" in *[!A-Za-z0-9._-]*) die "bad arm label '$label'" ;; esac
+# the commit arms.tsv holds for it; a directory is used as it is. Trailing ,agent=<claude|opencode> and ,model=<id>
+# choose the builder; without them the arm runs as dispatch decides (Claude unless WS_AGENT says otherwise).
+# arms.tsv: label, spec, resolved ref, agent, model; a row from before arms had an agent has three fields and is read
+# as agent claude with the default model.
+resolve_arm() { # <label=spec[,agent=A][,model=M]> <dry> -> sets ARM_DIR, ARM_AGENT, ARM_MODEL [label], prints a description
+  local label="${1%%=*}" spec="${1#*=}" dry="$2" kept sha f agent="" model="" key was
+  [ "$label" != "$1" ] && [ -n "$label" ] && [ -n "$spec" ] || die "an arm is <label>=<git-ref|dir>[,agent=A][,model=M], not '$1'"
+  case "$label" in *[!A-Za-z0-9._-]*) die "bad arm label '$label'" ;; recorded) die "the arm label 'recorded' is the recorded baseline (report --baseline recorded); use another" ;; esac
+  while [[ "$spec" =~ ^(.+),(agent|model)=([^,]*)$ ]]; do
+    spec="${BASH_REMATCH[1]}"; key="${BASH_REMATCH[2]}"
+    [ -n "${BASH_REMATCH[3]}" ] || die "arm $label: $key= is empty"
+    if [ "$key" = agent ]; then [ -z "$agent" ] || die "arm $label: agent= given twice"; agent="${BASH_REMATCH[3]}"
+    else [ -z "$model" ] || die "arm $label: model= given twice"; model="${BASH_REMATCH[3]}"; fi
+  done
+  case "${agent:-claude}" in claude|opencode) ;; *) die "arm $label: unknown agent '$agent' (claude or opencode)" ;; esac
+  ARM_AGENT[$label]="$agent"; ARM_MODEL[$label]="$model"
   kept=$(awk -F'\t' -v l="$label" '$1==l' "$BENCH/arms.tsv" 2>/dev/null)
-  [ -z "$kept" ] || [ "$(cut -f2 <<< "$kept")" = "$spec" ] || die "arm $label was $(cut -f2 <<< "$kept") in earlier runs, not $spec; use another label"
+  if [ -n "$kept" ]; then
+    was="$(cut -f2 <<< "$kept") agent=$(cut -f4 -s <<< "$kept") model=$(cut -f5 -s <<< "$kept")"
+    [ "$was" = "$spec agent=$agent model=$model" ] || die "arm $label was $was in earlier runs, not $spec agent=$agent model=$model; use another label"
+  fi
   if [ -d "$spec" ]; then
     [ -f "$spec/agents/builder.md" ] || [ -f "$spec/lessons/builder.md" ] || die "arm $label: $spec has neither agents/builder.md nor lessons/builder.md"
-    ARM_DIR[$label]="$(cd "$spec" && pwd)"; echo "arm $label: directory ${ARM_DIR[$label]}"
+    ARM_DIR[$label]="$(cd "$spec" && pwd)"; echo "arm $label: directory ${ARM_DIR[$label]}${agent:+, agent $agent}${model:+, model $model}"
     $dry && return 0
     # Dispatch reads a copy under arms/, taken at the first run: later edits to the directory do not reach a resumed bench.
     [ -n "$kept" ] && [ -d "$BENCH/arms/$label" ] && return 0
-    [ -n "$kept" ] || printf '%s\t%s\t%s\n' "$label" "$spec" "${ARM_DIR[$label]}" >> "$BENCH/arms.tsv"
+    [ -n "$kept" ] || printf '%s\t%s\t%s\t%s\t%s\n' "$label" "$spec" "${ARM_DIR[$label]}" "$agent" "$model" >> "$BENCH/arms.tsv"
     rm -rf "$BENCH/arms/$label"; mkdir -p "$BENCH/arms"; cp -r "${ARM_DIR[$label]}" "$BENCH/arms/$label"
     return 0
   fi
   if [ -n "$kept" ]; then sha=$(cut -f3 <<< "$kept"); else sha=$(git -C "$WS" rev-parse --verify -q "$spec^{commit}") || die "arm $label: $spec is neither a directory nor a workspace git ref"; fi
-  echo "arm $label: workspace $spec at $(git -C "$WS" rev-parse --short "$sha")"
+  echo "arm $label: workspace $spec at $(git -C "$WS" rev-parse --short "$sha")${agent:+, agent $agent}${model:+, model $model}"
   $dry && return 0
   [ -n "$kept" ] && [ -d "$BENCH/arms/$label" ] && return 0
-  [ -n "$kept" ] || printf '%s\t%s\t%s\n' "$label" "$spec" "$sha" >> "$BENCH/arms.tsv"
+  [ -n "$kept" ] || printf '%s\t%s\t%s\t%s\t%s\n' "$label" "$spec" "$sha" "$agent" "$model" >> "$BENCH/arms.tsv"
   rm -rf "$BENCH/arms/$label"; mkdir -p "$BENCH/arms/$label/agents" "$BENCH/arms/$label/lessons"
   git -C "$WS" show "$sha:agents/builder.md" > "$BENCH/arms/$label/agents/builder.md" || die "arm $label: no agents/builder.md at $sha"
   while IFS= read -r f; do
@@ -213,22 +239,26 @@ resolve_arm() { # <label=spec> <dry> -> sets ARM_DIR[label], prints a descriptio
 }
 
 bench_run() {
-  local slug="${1:-}"; [ -n "$slug" ] && [ "${slug#-}" = "$slug" ] || die "usage: ws bench run <slug> --arm <label>=<git-ref|dir> --arm ... [--trials N] [--parallel P] [--dry-run] [tasks...]"
+  local slug="${1:-}"; [ -n "$slug" ] && [ "${slug#-}" = "$slug" ] || die "usage: ws bench run <slug> --arm <label>=<git-ref|dir>[,agent=A][,model=M] --arm ... [--review none|claude] [--trials N] [--parallel P] [--dry-run] [tasks...]"
   shift
   local trials=1 par=1 dry=false a t tr row total=0 already=0 failed=0 label; local -a arms=() tasks=() rows=()
+  REVIEW=claude
   while [ $# -gt 0 ]; do
-    case "$1" in --trials) trials="$2"; shift 2 ;; --parallel) par="$2"; shift 2 ;; --arm) arms+=("$2"); shift 2 ;; --dry-run) dry=true; shift ;; -*) die "unknown flag $1" ;; *) tasks+=("$1"); shift ;; esac
+    case "$1" in --trials) trials="$2"; shift 2 ;; --parallel) par="$2"; shift 2 ;; --arm) arms+=("$2"); shift 2 ;; --review) REVIEW="${2:-}"; shift 2 ;; --dry-run) dry=true; shift ;; -*) die "unknown flag $1" ;; *) tasks+=("$1"); shift ;; esac
   done
   case "$trials$par" in *[!0-9]*|'') die "--trials and --parallel take whole numbers" ;; esac
   [ "$trials" -ge 1 ] && [ "$par" -ge 1 ] || die "--trials and --parallel are at least 1"
-  [ ${#arms[@]} -ge 2 ] || die "give at least two arms: --arm <label>=<git-ref|dir>"
+  # review.sh reviews through Claude only; another agent as reviewer is refused rather than quietly reviewed by Claude.
+  case "$REVIEW" in none|claude) ;; *) die "--review takes none or claude, not '$REVIEW' (review.sh has no other agent)" ;; esac
+  # One arm is enough to compare with the recorded first runs (report --baseline recorded).
+  [ ${#arms[@]} -ge 1 ] || die "give at least one arm: --arm <label>=<git-ref|dir>[,agent=A][,model=M]"
   load_project "$slug"
   CORPUS="$WS/plans/$SLUG/bench/corpus.tsv"; BENCH="$RUNS/bench"; TSV="$BENCH/runs.tsv"
   [ -f "$CORPUS" ] || die "no corpus for $SLUG (ws --project $SLUG bench add <name>)"
   [ ${#tasks[@]} -gt 0 ] || mapfile -t tasks < <(awk -F'\t' 'NR>1{print $1}' "$CORPUS")
   for t in "${tasks[@]}"; do [ -n "$(corpus_field "$t" base)" ] || die "$t is not in plans/$SLUG/bench/corpus.tsv"; done
   $dry || mkdir -p "$BENCH"
-  declare -gA ARM_DIR=()
+  declare -gA ARM_DIR=() ARM_AGENT=() ARM_MODEL=()
   local -a labels=()
   for a in "${arms[@]}"; do resolve_arm "$a" "$dry" || exit 1; labels+=("${a%%=*}"); done
   [ "$(printf '%s\n' "${labels[@]}" | sort -u | wc -l)" -eq ${#labels[@]} ] || die "two arms share a label"
@@ -242,7 +272,7 @@ bench_run() {
       IFS=$'\t' read -r t label tr <<< "$row"
       got=$(python3 "$PY" runs-get "$TSV" "$t" "$label" "$tr")
       [ "${got#*$'\t'}" = "done" ] && { echo "done already: ${got%%$'\t'*} $t arm $label trial $tr"; continue; }
-      echo "would dispatch ${got:+${got%%$'\t'*}}${got:-bench-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')} task $t arm $label trial $tr base $(corpus_field "$t" base) budget \$$(corpus_field "$t" budget) timeout $(timeout_for "$t")m"
+      echo "would dispatch ${got:+${got%%$'\t'*}}${got:-bench-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')} task $t arm $label trial $tr base $(corpus_field "$t" base) budget \$$(corpus_field "$t" budget) timeout $(timeout_for "$t")m agent ${ARM_AGENT[$label]:-default} model ${ARM_MODEL[$label]:-default} review $REVIEW"
     done
     return 0
   fi
@@ -261,14 +291,31 @@ bench_run() {
   echo "bench: all $total runs done; ws bench report $SLUG"
 }
 
+# The corpus tasks' first runs, from the records dispatch kept, as rows of the arm "recorded" in recorded.tsv beside
+# runs.tsv: the review is that run's only when no later dispatch of the task followed (review.sh keeps the latest).
+write_recorded() { # <slug>
+  local name rec stem review out="$WS/runs/$1/bench/recorded.tsv"
+  CORPUS="$WS/plans/$1/bench/corpus.tsv"; RUNS="$WS/runs/$1"
+  [ -f "$CORPUS" ] || die "no corpus for $1 (ws --project $1 bench add <name>)"
+  rm -f "$out" "$WS/runs/$1/bench/recorded-arms.tsv"
+  while IFS= read -r name; do
+    rec=$(first_record "$name"); stem="${rec%.task.txt}"
+    [ -f "$rec" ] || { note "no dispatch record for $name in runs/$1; left out of the recorded baseline"; continue; }
+    if [ "$rec" = "$RUNS/$name.task.txt" ]; then review="$RUNS/$name.review.json"; else review="-"; fi
+    python3 "$PY" recorded-add "$out" "$name" "$(corpus_field "$name" base)" "$stem.jsonl" "$stem.result.txt" "$review" "$WS/plans/$1/bench/$name.md" \
+      || die "could not record $name's first run"
+  done < <(awk -F'\t' 'NR>1{print $1}' "$CORPUS")
+}
+
 bench_report() {
   local -a args=() base=()
   [ "${1:-}" = --baseline ] && { base=(--baseline "${2:?--baseline needs an arm label}"); shift 2; }
-  [ $# -gt 0 ] || die "usage: ws bench report [--baseline <label>] <slug>..."
+  [ $# -gt 0 ] || die "usage: ws bench report [--baseline <label>|recorded] <slug>..."
   local s tsv
   for s in "$@"; do
     s=$(resolve_slug "$s") || exit 1; tsv="$WS/runs/$s/bench/runs.tsv"
     [ -f "$tsv" ] || die "no bench runs for $s ($tsv)"
+    [ "${base[1]:-}" = recorded ] && write_recorded "$s"
     args+=("$s=$tsv")
   done
   python3 "$PY" report "${base[@]}" "${args[@]}"
@@ -278,5 +325,5 @@ case "$sub" in
   add) bench_add "$@" ;;
   run) bench_run "$@" ;;
   report) bench_report "$@" ;;
-  *) die "usage: ws bench add <name>... | ws bench run <slug> --arm L=<ref|dir> --arm ... [--trials N] [--parallel P] [--dry-run] [tasks...] | ws bench report [--baseline L] <slug>..." ;;
+  *) die "usage: ws bench add <name>... | ws bench run <slug> --arm L=<ref|dir>[,agent=A][,model=M] --arm ... [--review none|claude] [--trials N] [--parallel P] [--dry-run] [tasks...] | ws bench report [--baseline L|recorded] <slug>..." ;;
 esac
