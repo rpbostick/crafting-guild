@@ -32,3 +32,9 @@ Never start a real OpenCode or Claude session.
 - `AGENTS.md` covers each CLAUDE.md section; each Claude-Code-only mechanism is replaced by a named OpenCode one or by plain instructions, listed in `docs/opencode-orchestrator.md`.
 - `opencode.json` is valid JSON and loads the private preferences and both lessons files.
 - The parity check fails when a `bin/ws` command is removed from AGENTS.md (say in the result that you saw it fail), and `bash scripts/selftest.sh` passes in full.
+
+## Carried from the cg-opencode-polish review (suggestions; do them where the code is yours to touch)
+- `scripts/fixtures/opencode-denied.jsonl:11`: Rule 18 hygiene: the denial error still lists /home/user/... paths and the names of every synced Claude skill installed on the machine (pptx, morning, google-workspace, ...). 'user' is a placeholder rather than the real account, so this does not block, but the test only needs one or two external_directory rules. Trimming the list would leak less about the local setup.
+- `scripts/selftest.sh:586`: The single-letter-name check only walks Assign/AugAssign/AnnAssign and function args. It does not look at for-loop targets (ast.For) or comprehension targets, so the `for t in tools` and `for d in deny` this branch renamed would not have been caught. The comment's claim that names are checked across opencode_run.py is broader than what it checks (rule 3). Add ast.For and ast.comprehension targets.
+- `scripts/selftest.sh:521`: The TERM-trap check repeats the oc() environment by hand instead of calling oc/ocb with a trailing &. If oc() gains a variable later, the two will drift apart. Reusing the helper would avoid that.
+- `scripts/dispatch.sh:227`: When WS_EFFORT is set in the project config, every OpenCode dispatch prints the ignore note, even if the user never passed --effort. The note is accurate, but it could name where the value came from.
