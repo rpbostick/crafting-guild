@@ -19,6 +19,11 @@ WS_MODEL="opus"                   # builder model alias ("sonnet", "opus", ...);
 WS_REVIEW_MODEL="fable"         # reviewer model alias; empty = default
 WS_REVIEW_MODEL_LIGHT="opus"    # reviewer for a branch whose task is marked `Track: light`; empty = WS_REVIEW_MODEL
 WS_EFFORT=""                    # builder effort (low|medium|high|xhigh|max); empty = default
+WS_AGENT="${WS_AGENT:-claude}"  # what runs a builder: "claude" (claude -p) or "opencode" (scripts/opencode-builder.sh); ws dispatch --agent overrides
+WS_OPENCODE_MODEL="opencode-go/deepseek-v4.1-flash"   # builder model for --agent opencode (provider/model); --model overrides
+# OpenCode model IDs and the names OpenCode's Go page gives them in its privacy table, which zdr-check reads: a model
+# not listed here is refused, since its retention cannot be checked.
+WS_OPENCODE_MODEL_NAMES=("opencode-go/deepseek-v4.1-flash=DeepSeek V4.1 Flash")
 WS_WEB_MAX_MB="${WS_WEB_MAX_MB:-20}"   # ws web refuses a file larger than this many MB (the environment may set it for one call)
 WS_LESSONS_CAP="40"            # cold-start warns when a lessons/ file (shared or .local.md) passes this many lines
 # Words that attribute work to people or to this process. ws merge refuses a branch that adds a line
