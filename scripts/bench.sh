@@ -187,6 +187,8 @@ run_one() { # <task> <arm> <trial>
   if "$WS/scripts/merge.sh" --project "$SLUG" --test-only "$run" >> "$log" 2>&1; then tests=pass; else tests=fail; fi
   python3 "$PY" runs-finish "$TSV" "$run" "$tests" "$RUNS/$run.result.txt" "$review" "$RUNS/$run.jsonl" "$WS/plans/$SLUG/bench/$task.md" || return 1
   if [ -d "$wt/.ws-evidence" ]; then rm -rf "$BENCH/evidence/$run"; mkdir -p "$BENCH/evidence"; mv "$wt/.ws-evidence" "$BENCH/evidence/$run"; fi
+  # The replay's committed change, kept so it can be graded later (e.g. against the original builder's test files).
+  mkdir -p "$BENCH/evidence/$run"; git -C "$wt" diff --binary "$base" HEAD > "$BENCH/evidence/$run/replay.patch" 2>/dev/null
   git -C "$PROJECT_PATH" worktree remove --force "$wt" 2>/dev/null
   git -C "$PROJECT_PATH" branch -q -D "$(branch_of "$run")" 2>/dev/null
   if [ "$review" = - ]; then echo "bench: $run done: tests $tests, not reviewed (--review none)"
