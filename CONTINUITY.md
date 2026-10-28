@@ -32,6 +32,10 @@ In about twenty seconds, without running any tests:
 5. **Lessons:** which file to read before dispatching, any file over its line cap, and whether the automation audit is due.
 6. **Setup:** the failures and warnings from `ws doctor` (tools, Claude Code version, the hook, the project's conf), or that every check passes.
 
+## The hourly brief
+
+Cold start knows one project. `ws brief` reads every registered project at once, without running a model or a test: what waits on you (a stopped chain, the exact merge command a gate names, a partial run with no process left), what is running (builders, chains, previews, `ws autostart` units), each plan's **In flight right now** block, unmerged worktrees and `agent/*` branches, merges in the last 48 hours, and uncommitted files under `plans/` and `projects/`; projects with nothing at all are named on one line at the end. `ws brief --write` saves it to reports/brief.md, keeps the last one as reports/brief.prev.md and ends with a line diff against it (`--since <file>` compares with another saved brief instead). The `ws-brief.timer` systemd user unit (`ws autostart on`) rewrites it hourly, including after a missed run, and cold start's `--brief` line names the file with its age and how many items wait on you. `reports/` is private and not in `RELEASE_PATHS`; the brief holds project paths, so it is not committed.
+
 ## The cycle
 
 ```

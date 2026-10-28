@@ -8,6 +8,19 @@ slug="${1:-}"
 [ -z "$slug" ] && slug="${WS_PROJECT:-}"
 [ -z "$slug" ] && [ -f "$WS/state/current" ] && slug="$(head -n1 "$WS/state/current")"
 echo "=== ws cold-start $(now_local) (v$(cat "$WS/VERSION" 2>/dev/null || echo ?)) ==="
+# The hourly brief: name the file, its age and what waits on you, so a session knows where to look.
+if $brief; then
+  bn=0
+  while IFS= read -r bslug; do
+    [ -n "$bslug" ] || continue
+    while IFS= read -r _; do bn=$((bn + 1)); done < <(waiting_lines "$bslug" "$WS/runs/$bslug" "$(conf_var "$WS/projects/$bslug.conf" PROJECT_PATH)")
+  done < <(project_slugs)
+  if [ -f "$WS/reports/brief.md" ]; then
+    echo "brief: reports/brief.md, $(age_str "$(stat -c %Y "$WS/reports/brief.md")") old, $bn waiting on you (ws brief prints it)"
+  else
+    echo "brief: no reports/brief.md yet, $bn waiting on you (ws brief prints one; --write saves it)"
+  fi
+fi
 if [ -z "$slug" ] || [ ! -f "$WS/projects/$slug.conf" ]; then
   echo "no project selected. Registered: $(find "$WS/projects" -maxdepth 1 -name '*.conf' -printf '%f\n' 2>/dev/null | sort | sed 's/\.conf$//' | paste -sd' ' | grep . || echo none)"
   echo "start one with: bin/ws <slug>   (register: bin/ws init <path>)"
@@ -71,6 +84,11 @@ for sf in "$RUNS"/serve-*.pid; do
   [ -f "$sf" ] || continue; sp=$(cut -d' ' -f1 "$sf"); port=$(cut -d' ' -f2 "$sf"); what=$(basename "$sf" .pid); what="${what#serve-}"
   if kill -0 "$sp" 2>/dev/null; then echo "  SERVING $what on :$port (pid $sp; stop: ws serve stop $what)"; else rm -f "$sf"; fi
 done
+# A merge's post-merge chore that failed: the line says who and the exit code, the log is beside it.
+if [ -f "$RUNS/post-merge.status" ] && [ "$(cut -d' ' -f1 "$RUNS/post-merge.status")" = failed ]; then
+  pm=$(cat "$RUNS/post-merge.status"); pm_name=$(cut -d' ' -f3 "$RUNS/post-merge.status")
+  echo "  POST-MERGE FAILED: $pm (log: runs/$SLUG/post-merge-$pm_name.log)"
+fi
 for r in $(ls -t "$RUNS"/*.result.txt 2>/dev/null | head -5); do
   n=$(basename "$r" .result.txt); echo "  last: $n: $(head -n1 "$r" | cut -c1-110)"
 done
@@ -80,8 +98,8 @@ echo "--- in flight (plans/$SLUG) ---"
 found=0
 for p in "$WS/plans/$SLUG"/*.md; do
   [ -f "$p" ] || continue
-  grep -q '^\*\*In flight right now\*\*' "$p" || continue
-  echo "  ${p#"$WS/"}:"; awk '/^\*\*In flight right now\*\*/ {on=1; next} on && (/^## / || /^\(Older blocks/) {exit} on && NF {print "    " substr($0, 1, 700) (length($0) > 700 ? " …" : "")}' "$p" | head -12; found=1
+  has_inflight "$p" || continue
+  echo "  ${p#"$WS/"}:"; inflight_block "$p" 12 "    "; found=1
 done
 [ "$found" -eq 0 ] && echo "  none. Plans: $(find "$WS/plans/$SLUG" -maxdepth 1 -name '*.md' -printf '%f\n' 2>/dev/null | sort | paste -sd' ' | grep . || echo none)"
 echo

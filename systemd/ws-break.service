@@ -1,0 +1,9 @@
+# One break check: scripts/break.sh reads break_minutes and the last break's timestamp, and decides whether a
+# reminder is due, so a config change needs no unit reload. No model runs here. Install: ws alerts on.
+[Unit]
+Description=Crafting Guild break reminder
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/crafting-guild/scripts/break.sh

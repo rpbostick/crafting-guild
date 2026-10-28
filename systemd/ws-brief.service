@@ -1,0 +1,9 @@
+# The status page across every registered project, rewritten by ws-brief.timer. It only reads files, git and
+# process state: no model and no tests run. Install: bin/ws autostart on.
+[Unit]
+Description=Crafting Guild brief (status page across projects)
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/crafting-guild/bin/ws brief --write

@@ -102,6 +102,8 @@ Builders never push and never touch the main checkout.
 
 Builders can also run on [OpenCode](https://github.com/anomalyco/opencode) (MIT) instead of Claude Code: `ws dispatch --agent opencode` (or `WS_AGENT="opencode"` in `config.sh`) runs `opencode run` with a `provider/model` ID, by default `WS_OPENCODE_MODEL`. Only zero-retention models run: before anything starts, `scripts/zdr-check.sh` reads OpenCode's Go page and refuses a model that is used for training, keeps data, or whose retention agreement has lapsed. The same grants become OpenCode permissions (nothing left at "ask"), the budget is enforced from each step's cost, and the run ends with the same checked result, so wait, chain, review and merge work as they do for Claude.
 
+Reviews can run on OpenCode too: `ws review --agent opencode` (or `WS_REVIEW_AGENT="opencode"` in `config.sh`) gives the reviewer a read-only permission config — reads, `git diff/log/show/status`, `cat` and `ls`, nothing that writes or reaches the network — checks its JSON against the same schema, and writes the same review files merge reads. `ws review-compare <name>...` runs that review beside the Claude review on record for each branch and prints the two verdicts, their blocking counts, and how many Claude findings OpenCode names within five lines; it never merges.
+
 The orchestrator itself runs under OpenCode too: start `opencode` in this folder with `WS_PROJECT=<slug>` set (or let it follow `state/current`). OpenCode reads `AGENTS.md`, and `opencode.json` loads the private preferences and the orchestrator lessons by reference, with session sharing disabled. Type `/cold-start` first: it prints the same session-start context Claude Code's hook injects. `bin/ws wait` and `bin/ws chain` run in the foreground with an explicit shell timeout rather than as background tasks; `docs/opencode-orchestrator.md` maps the rest and names the OpenCode page behind each choice.
 
 ## Commands
@@ -117,7 +119,8 @@ The orchestrator itself runs under OpenCode too: start `opencode` in this folder
 | `ws dispatch [--budget N] [--timeout T] [--model M] [--effort E] [--agent claude\|opencode] [--allow RULE]... <name> <task-file>` | run a builder (`--dry-run` or `--print-prompt` to see what it would get) |
 | `ws wait <name>`, `ws tail <name>`, `ws runs`, `ws stop <name>` | wait for, watch, list, stop runs |
 | `ws serve <name\|main> [port]`, `ws serve stop [name]` | preview server from a worktree or the main checkout |
-| `ws review <name>`, `ws precheck <name>` | review the branch (prints the verdict and the SHA to merge); the mechanical checks alone |
+| `ws review [--agent claude\|opencode] <name>`, `ws precheck <name>` | review the branch (prints the verdict and the SHA to merge); the mechanical checks alone |
+| `ws review-compare <name>...` | run an OpenCode review beside the recorded Claude one: verdicts, blocking counts, matched findings; never merges |
 | `ws merge <name> <sha>` | merge a reviewed branch, run the tests, push on green, clean up |
 | `ws chain <queue>`, `ws chain-wait` | run a queue of steps unattended; wait on a running chain |
 | `ws audit [days]` | what builders keep doing by hand, from the run logs |
@@ -130,7 +133,7 @@ The orchestrator itself runs under OpenCode too: start `opencode` in this folder
 
 - `config.sh`: budgets, timeouts (45m for a task marked `Track: light`, 120m otherwise), models, memory caps, timezone, preview ports, the browser command `ws serve` suggests, and `WS_ATTRIBUTION_RE` (names a merge refuses to add to a repository).
 - `config.local.sh` (optional): sourced after `config.sh`, for values you keep private, such as your own names in `WS_ATTRIBUTION_RE`.
-- `projects/<slug>.conf`: one per registered project (path, branch, `TEST_CMD`, `EXTRA_TOOLS`, `PREVIEW_CMD`, release and site settings).
+- `projects/<slug>.conf`: one per registered project (path, branch, `TEST_CMD`, `EXTRA_TOOLS`, `PREVIEW_CMD`, `POST_MERGE_CMD`, release and site settings).
 - `checklist.md`, `agents/*.md`, `lessons/*.md`: the review rules, the three roles and the lessons pasted into every prompt.
 
 ## What stays private by design

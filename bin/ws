@@ -7,16 +7,32 @@ usage() {
   cat <<USAGE
 ws [--project <slug>] <command> ...   every command below takes the selected project (state/current) unless
                                        --project names another registered one
-ws <slug>                       open an orchestrator session for a registered project
+ws <slug>                       open a Claude orchestrator session for a registered project
+ws oc <slug> [args]             open an OpenCode orchestrator session, pinned to the project (--print shows the
+                                command); the alias is ws opencode
 ws init <path> [--tests CMD] [--branch B] [--yes]   register a project (and retire v1 hooks if found)
 ws list                         registered projects
 ws status [slug]                cold-start: ground truth in twenty seconds
+ws brief [--write] [--since <file>]   one status page across every registered project: what waits on you, what is
+                                running, each plan's in-flight block, open branches, recent work; --write saves
+                                reports/brief.md and ends with what changed since the previous one
 ws dispatch [flags] <name> <task-file>   run a builder (see scripts/dispatch.sh for flags); --agent opencode runs it
                                 through OpenCode on a zero-retention model (--model provider/model, WS_OPENCODE_MODEL)
 ws wait <name> [minutes]        block until the run finishes; exit 0 if its result checks out
 ws tail <name>                  follow a run's log as readable lines
 ws runs [slug]                  runs and their results
-ws review [flags] <name>        review the branch; prints the verdict and the SHA to merge
+ws review [--agent claude|opencode] [flags] <name>   review the branch; prints the verdict and the SHA to merge
+                                --agent opencode runs the review on OpenCode (--model provider/model, WS_REVIEW_AGENT)
+ws review-compare [flags] <name>...   run an OpenCode review beside the Claude review on record and print verdicts,
+                                blocking counts and the findings OpenCode names within five lines
+ws review-compare --fix-first [--limit N] [name...]   use the commits Claude marked fix-first in the chain log and
+                                their automatic fix tasks; writes runs/<slug>/review-recall.tsv, keeps each review
+ws review-compare --bench <slug> [--arm L] [--limit N] [run...]   the same for fix-first bench runs, rebuilt from
+                                their base and replay.patch with their evidence restored
+ws review-shadow [--project slug|--all]   shadow reviews (WS_REVIEW_SHADOW=opencode): per project and in total, the
+                                verdict agreement, findings named (recall) and shadow-only blocking, from the TSVs
+ws teeth <name>                 check the branch tip without its non-test changes: ok (its tests fail), toothless
+                                (they pass), n/a or error; runs/<slug>/<name>.teeth.txt, chain runs it before review
 ws merge <name> <sha>           merge a reviewed branch, test, push, clean up
 ws chain <queue-file>           run a queue of steps: dispatch, wait, review (one automatic fix round), merge, next;
                                 stops on a failure, a gate or a judgment call (run it under run_in_background)
@@ -34,16 +50,33 @@ ws bench run <slug> --arm L=<git-ref|dir>[,agent=claude|opencode][,model=M] --ar
                                 replay corpus tasks from their base commit under each arm of builder instructions
                                 (and agent and model), blind-review (unless --review none) and test each run, record
                                 it (runs/<slug>/bench/runs.tsv); resumable
+ws bench review <slug> [--arm L] [--limit N] [--dry-run] [runs...]
+                                review runs an earlier pass left unjudged, from the replay.patch each kept, under its
+                                opaque name; writes the verdict and blocking count back (resumable); a patch that
+                                does not apply is recorded unreviewable with the reason
 ws bench report [--baseline L|recorded] <slug>...   quality first, then cost, per arm (agent, model) and task; flags
                                 a quality drop; recorded = the corpus tasks' first runs as recorded, not replayed
 ws stop <name>                  stop a running builder
 ws serve <name|main> [port]     start the project's preview server from a worktree (or the main checkout)
+ws autostart [on|off|status]    keep the live app (WS_LIVE_PROJECTS) and, with WS_BENCH_AUTOSTART=1, the bench running across crashes and reboots (systemd user units)
+ws alerts [on|off|status|test]  the break reminder and the attention indicator: install the Claude hooks, the OpenCode
+                                plugin and ws-break.timer (on), remove exactly those (off), show each piece (status),
+                                or raise one sample pop-up and log line (test); the config is
+                                ~/.config/crafting-guild/alerts.conf (sample: docs/alerts.conf.sample)
+ws tutor [claude args]          open the tutor tab: a Claude session in the course repo (WS_TUTOR_PROJECT), reading every project, writing only its own
 ws serve stop [name|main]       stop it;  ws serve list
 ws release [--dry-run] [--notes T] [--no-asset]   publish main as a release of the public repo (remote 'public'):
                                 audit, one commit with main's tree, tag vX.Y.Z, clean-clone build, GitHub release
 ws site [--dry-run]             copy the project's SITE_SYNC files into its SITE_PROJECT, check they match,
                                 run the site's tests, commit, push, wait until live
-ws doctor                       check this machine and the selected project; says what to fix
+ws doctor [--parity]            check this machine and the selected project; --parity runs one structured-output probe per agent
+ws claude [--budget USD] [--schema file] [--dir path] [--allow tool] [--raw] <prompt-file|->
+                                run one Claude Code job from this session (read-only by default; no worktree)
+ws email-audit [--project slug | --repo path]... [--all] [--range R]   find personal addresses in git identity,
+                                commit metadata, reflogs and tracked files; exits 1 on a finding
+ws opencode-perms [--dry-run] [--config <file>]   write the orchestrator's OpenCode config (orchestrator.json,
+                                loaded with OPENCODE_CONFIG; refuses the global opencode.json): registered project
+                                paths allowed outside this folder, destructive shell commands ask first
 ws rollback [--dry-run] [vX.Y.Z]   put the published files back to a public release, as a new commit
 ws version                      print the workspace version (see CHANGELOG.md)
 USAGE
@@ -81,11 +114,19 @@ case "$cmd" in
       echo "PROJECT_PATH=\"$path\""
       echo "PROJECT_BRANCH=\"$branch\"          # the branch builders branch from and merges land on"
       echo "TEST_CMD=\"$tests\"   # run from the repo root; empty = no test gate"
+      echo "# Optional: the command ws teeth runs with the branch's non-test changes reverted; empty = TEST_CMD."
+      echo "# TEETH_CMD=\"\""
+      echo "# Files teeth treats as tests (shell globs on the path). The default covers *.test.*, *.spec.*, test/,"
+      echo "# tests/, __tests__/, test_*.py, *_test.py and *_test.go; uncomment to add a project's own layout."
+      echo "# TEST_GLOBS=('*.test.*' '*.spec.*' 'test/*' 'tests/*' '*/test/*' '*/tests/*' '__tests__/*' '*/__tests__/*' 'test_*.py' '*_test.py' '*_test.go')"
       echo "# Extra Bash grants for builders (Claude Code permission rules). Builders already get git add/commit/rm/mv,"
       echo "# ls/cat/grep/head/tail/wc/diff/mkdir/chmod/expr/date, bash -n, git grep and the test command. Add what your tests and tools need."
       echo "EXTRA_TOOLS=(${extras[*]})"
       echo "# Command that serves the app for a preview; {port} is replaced. Used by: ws serve <worktree|main> <port>"
       echo "PREVIEW_CMD=\"$preview\""
+      echo "# Optional: a command that runs in the main checkout after every successful merge, detached. It gets"
+      echo "# WS_MERGED_SHA, WS_MERGED_NAME and WS_PROJECT; its log and ok/failed line go to runs/<slug>/."
+      echo "# POST_MERGE_CMD=\"make site\""
     })
     # An existing conf may hold keys init does not write (release, site, attribution settings) and hand
     # fixes to the guessed ones: it is replaced only with --force, after a backup, and its other keys are kept.
@@ -109,6 +150,7 @@ case "$cmd" in
     mkdir -p "$WS/plans/$slug" "$WS/runs/$slug"
     for e in .worktrees .ws-evidence; do grep -qx "$e" "$excl" 2>/dev/null || echo "$e" >> "$excl"; done
     echo "registered $slug: $path (branch $branch; tests: ${tests:-none})"
+    echo "OpenCode: run 'bin/ws opencode-perms' once to allow this project's path outside the session folder; then start it with: ws oc <slug>"
     # The earlier agentic-workspace (v1) wired per-commit review and post-merge hooks into .git/hooks; this tool
     # reviews per branch and tests on merge, so those hooks would review twice.
     hooks="$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/hooks"; found=()
@@ -124,19 +166,62 @@ case "$cmd" in
       fi
     fi ;;
   status) "$WS/scripts/cold-start.sh" "$@" ${proj:+"$proj"} ;;
+  brief) "$WS/scripts/brief.sh" "$@" ;;
   dispatch) "$WS/scripts/dispatch.sh" ${proj:+--project "$proj"} "$@" ;;
   review) "$WS/scripts/review.sh" ${proj:+--project "$proj"} "$@" ;;
+  review-compare) "$WS/scripts/review-compare.sh" ${proj:+--project "$proj"} "$@" ;;
+  review-shadow) "$WS/scripts/review-shadow.sh" ${proj:+--project "$proj"} "$@" ;;
   merge) "$WS/scripts/merge.sh" ${proj:+--project "$proj"} "$@" ;;
   release) "$WS/scripts/release.sh" ${proj:+--project "$proj"} "$@" ;;
   site) "$WS/scripts/site.sh" ${proj:+--project "$proj"} "$@" ;;
+  autostart)
+    # Services that come back by themselves after a crash or reboot (systemd user units, started at login):
+    # the live app of each project in WS_LIVE_PROJECTS, and the bench when WS_BENCH_AUTOSTART=1.
+    ud="$HOME/.config/systemd/user"
+    case "${1:-on}" in
+      on) mkdir -p "$ud"; ln -sf "$WS/systemd/ws-live@.service" "$WS/systemd/ws-bench.service" "$WS/systemd/ws-brief.service" "$WS/systemd/ws-brief.timer" "$ud/"; systemctl --user daemon-reload
+          for s in ${WS_LIVE_PROJECTS:-}; do systemctl --user enable --now "ws-live@$s.service" && echo "live app $s: on (restarts after a crash; log: journalctl --user -u ws-live@$s)"; done
+          if [ "${WS_BENCH_AUTOSTART:-0}" = 1 ]; then systemctl --user enable --now ws-bench.service && echo "bench: on"; else systemctl --user disable --now ws-bench.service 2>/dev/null; echo "bench: off (WS_BENCH_AUTOSTART=1 to resume it at login)"; fi
+          systemctl --user enable --now ws-brief.timer && echo "brief: hourly in the background (log: journalctl --user -u ws-brief)" ;;
+      off) for u in $(systemctl --user list-units --all --plain --no-legend 'ws-live@*' 'ws-bench.service' 'ws-brief.timer' | awk '{print $1}'); do systemctl --user disable --now "$u"; done
+          systemctl --user disable --now ws-brief.timer 2>/dev/null || true; echo "autostart off" ;;
+      status) systemctl --user list-units --all --no-pager 'ws-live@*' 'ws-bench.service' 'ws-brief.timer' ;;
+      *) die "usage: ws autostart [on|off|status]" ;;
+    esac ;;
+  alerts) "$WS/scripts/alerts.sh" "$@" ;;
   doctor) "$WS/scripts/doctor.sh" ${proj:+--project "$proj"} "$@" ;;
+  claude) "$WS/scripts/claude.sh" ${proj:+--project "$proj"} "$@" ;;
+  email-audit) "$WS/scripts/email-audit.sh" ${proj:+--project "$proj"} "$@" ;;
+  opencode-perms) "$WS/scripts/opencode-perms.sh" "$@" ;;
+  tutor)
+    # The tutor tab: a Claude session in the course repo (WS_TUTOR_PROJECT). Its own .claude/settings.json lets it
+    # read every project and write only its repo; it runs no cold start and does not move state/current.
+    slug="$(resolve_slug "${WS_TUTOR_PROJECT:-}")" || die "set WS_TUTOR_PROJECT to the course's project (config.local.sh)"
+    load_project "$slug"; cd "$PROJECT_PATH" || die "no checkout at $PROJECT_PATH"
+    WS_PROJECT="$slug" exec claude --name "ws tutor" "$@" ;;
+  oc|opencode)
+    # The short launcher: pin the project and load the orchestrator's config, without moving state/current
+    # (the other session may be on another project). --print shows the command instead of starting.
+    slug="$(resolve_slug "${1:-}")" || exit 1
+    [ $# -gt 0 ] && shift
+    load_project "$slug"
+    cfg="$HOME/.config/opencode/orchestrator.json"
+    [ -f "$cfg" ] || "$WS/scripts/opencode-perms.sh" >/dev/null
+    print=false; args=()
+    for a in "$@"; do if [ "$a" = --print ]; then print=true; else args+=("$a"); fi; done
+    if $print; then
+      printf 'cd %s\nWS_PROJECT=%s OPENCODE_CONFIG=%s opencode' "$WS" "$slug" "$cfg"
+      printf ' %s' "${args[@]+"${args[@]}"}"; echo; exit 0
+    fi
+    command -v opencode >/dev/null || die "opencode not found; install it, or start Claude with: ws <slug>"
+    cd "$WS" && WS_PROJECT="$slug" OPENCODE_CONFIG="$cfg" exec opencode "${args[@]+"${args[@]}"}" ;;
   # exec: rolling the workspace back rewrites bin/ws too, and bash reads a running script from disk.
   rollback) exec "$WS/scripts/rollback.sh" ${proj:+--project "$proj"} "$@" ;;
   check) "$WS/scripts/check-result.sh" ${proj:+--project "$proj"} "$@" ;;
   chain)
     # The chain runs detached in its own systemd scope (as builders do), so closing the session that started it
     # stops only this wait, not the chain. Run `ws chain-wait` from a new session to wait on it again.
-    load_project "$proj"; q="${1:?ws chain <queue-file>}"; [ -f "$q" ] || die "no queue file $q"
+    load_project "$proj"; q=$(ws_path "${1:?ws chain <queue-file>}"); [ -f "$q" ] || die "no queue file $q"
     if [ -f "$RUNS/chain.pid" ] && kill -0 "$(cat "$RUNS/chain.pid")" 2>/dev/null; then die "a chain is already running for $SLUG (pid $(cat "$RUNS/chain.pid")); wait on it with: ws chain-wait"; fi
     rm -f "$RUNS/chain.status"
     sc=(); systemd-run --user --scope --quiet true >/dev/null 2>&1 && sc=(systemd-run --user --scope --quiet --unit "ws-$SLUG-chain-$(date -u +%Y%m%dT%H%M%SZ)" --description "ws chain $SLUG")
@@ -153,6 +238,7 @@ case "$cmd" in
     case "$st" in done*) exit 0 ;; *gated*) exit 4 ;; *) exit 1 ;; esac ;;
   web) "$WS/scripts/web.sh" ${proj:+--project "$proj"} "$@" ;;
   precheck) "$WS/scripts/precheck.sh" ${proj:+--project "$proj"} "$@" ;;
+  teeth) "$WS/scripts/teeth.sh" ${proj:+--project "$proj"} "$@" ;;
   bench) "$WS/scripts/bench.sh" ${proj:+--project "$proj"} "$@" ;;
   audit) load_project "$proj"; python3 "$WS/scripts/audit.py" "$SLUG" "$PROJECT_PATH" "$TEST_CMD" "$RUNS" "$WS/plans/$SLUG" "${1:-30}" ;;
   wait)

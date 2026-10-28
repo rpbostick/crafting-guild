@@ -1,0 +1,11 @@
+# Rewrites reports/brief.md every hour, including after a reboot that missed a run. Install: bin/ws autostart on.
+[Unit]
+Description=Hourly Crafting Guild brief
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+Unit=ws-brief.service
+
+[Install]
+WantedBy=timers.target

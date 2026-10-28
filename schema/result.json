@@ -101,6 +101,28 @@
         ]
       }
     },
+    "edge_cases": {
+      "type": "object",
+      "description": "One answer per edge-case question the unit suite cannot see. `n/a` is a valid answer when it does not apply; check-result refuses an empty or missing answer on the full track.",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "description": "A browser, OS or runtime feature the change detects or depends on: the versions that have it, the versions the check is true in, and the source. `n/a: <reason>` when none."
+        },
+        "time": {
+          "type": "string",
+          "description": "A clock boundary the output depends on (the hour, the day, an expiry) and the fake-timer test that crosses it with the screen or process left running. `n/a: <reason>` when none."
+        },
+        "stored_data": {
+          "type": "string",
+          "description": "A stored or exported shape the change alters, and the test that loads the old shape. `n/a: <reason>` when none."
+        },
+        "state_resets": {
+          "type": "string",
+          "description": "User input the change must hold across navigation, backgrounding or reload, and the test showing it survives. `n/a: <reason>` when none."
+        }
+      }
+    },
     "unknowns": {
       "type": "array",
       "items": {

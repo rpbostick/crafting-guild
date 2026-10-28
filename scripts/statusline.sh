@@ -4,7 +4,8 @@
 # Wired in .claude/settings.json as statusLine; Claude Code pipes session JSON on stdin (ignored).
 cat > /dev/null
 WS="$(cd "$(dirname "$0")/.." && pwd)"
-slug=$(cat "$WS/state/current" 2>/dev/null) || { echo "ws: no project"; exit 0; }
+# A session opened with `ws <slug>` is pinned (WS_PROJECT); the tutor tab sets WS_STATUS_ALL=1 to see every project.
+slug="${WS_PROJECT:-$(cat "$WS/state/current" 2>/dev/null)}"; [ -n "$slug" ] || { echo "ws: no project"; exit 0; }
 RUNS="$WS/runs/$slug"; now=$(date +%s); out=()
 for pidf in "$RUNS"/*.pid; do
   [ -f "$pidf" ] || continue
@@ -28,5 +29,15 @@ for sf in "$RUNS"/serve-*.pid; do
   kill -0 "$(cut -d' ' -f1 "$sf")" 2>/dev/null || continue
   w=$(basename "$sf" .pid); out+=("◉ ${w#serve-} :$(cut -d' ' -f2 "$sf")")
 done
-if [ ${#out[@]} -eq 0 ]; then echo "ws $slug · idle $(date +%H:%M)"; else
-  printf 'ws %s · %s' "$slug" "${out[0]}"; for o in "${out[@]:1}"; do printf '  |  %s' "$o"; done; echo; fi
+# The clock, then the last chain event with its time, so a reader can place what happened when.
+logs=("$RUNS/chain.log"); [ -n "${WS_STATUS_ALL:-}" ] && logs=("$WS"/runs/*/chain.log)
+last=""; lt=0
+for lf in "${logs[@]}"; do
+  [ -f "$lf" ] || continue; m=$(stat -c %Y "$lf"); [ "$m" -gt "$lt" ] || continue
+  l=$(grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} ' "$lf" | tail -1); [ -n "$l" ] || continue
+  lt=$m; p=""; [ -n "${WS_STATUS_ALL:-}" ] && p="$(basename "$(dirname "$lf")") "
+  last="$p$(cut -c12-16 <<< "$l") $(cut -d' ' -f4- <<< "$l" | sed 's/^ *//' | cut -c1-60)"
+done
+head="$(date +%H:%M) · ws $slug${last:+ · last: $last}"
+if [ ${#out[@]} -eq 0 ]; then echo "$head · idle"; else
+  printf '%s · %s' "$head" "${out[0]}"; for o in "${out[@]:1}"; do printf '  |  %s' "$o"; done; echo; fi

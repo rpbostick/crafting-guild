@@ -1,14 +1,24 @@
 #!/usr/bin/env bash
 # The checklist rules a script can check, run on a branch before the AI review. review.sh puts the output in
 # the reviewer's prompt, so the reviewer spends its budget on judgment, not on re-deriving these.
-# Usage: precheck.sh [--project slug] <name>     prints FLAG/ok lines; exits 1 when anything is flagged.
+# Usage: precheck.sh [--project slug] [--worktree dir] [--base sha] <name>
+# prints FLAG/ok lines; exits 1 when anything is flagged. --worktree and --base let a caller check another
+# checkout of the same name (review-compare used a scratch worktree at the reviewed SHA).
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
-slug=""; [ "${1:-}" = "--project" ] && { slug="$2"; shift 2; }
-name="${1:?usage: precheck.sh [--project slug] <name>}"
-load_project "$slug"; wt="$(worktree_dir "$name")"; br="$(branch_of "$name")"
-[ -d "$wt" ] || die "no worktree for $name"
-tip=$(git -C "$wt" rev-parse HEAD); base=$(git -C "$PROJECT_PATH" merge-base "$PROJECT_BRANCH" "$br")
+slug="" wt_override="" base_override=""
+while [ $# -gt 0 ]; do case "$1" in
+  --project) slug="$2"; shift 2 ;; --worktree) wt_override="$2"; shift 2 ;; --base) base_override="$2"; shift 2 ;;
+  *) break ;; esac; done
+name="${1:?usage: precheck.sh [--project slug] [--worktree dir] [--base sha] <name>}"
+load_project "$slug"; wt="${wt_override:-$(worktree_dir "$name")}"; br="$(branch_of "$name")"
+# A misspelled name, or a --worktree that is not a checkout, has no tip to check; without this the diffs below are
+# empty and every rule reports ok for a branch that does not exist.
+[ -d "$wt" ] || die "no worktree for $wt"
+tip=$(git -C "$wt" rev-parse --verify HEAD 2>/dev/null) || tip=""
+[ -n "$tip" ] || die "no tip commit for $name in $wt"
+base="${base_override:-$(git -C "$PROJECT_PATH" merge-base "$PROJECT_BRANCH" "$br" 2>/dev/null)}"
+[ -n "$base" ] || die "no merge base for $br against $PROJECT_BRANCH"
 flags=0; flag() { echo "FLAG  rule $1: $2"; flags=$((flags+1)); }; ok() { echo "ok    rule $1: $2"; }
 # Added lines as "file<TAB>line", without the files that are intended credits.
 mapfile -t exempt < <(attribution_exempt)
@@ -17,7 +27,10 @@ changed=$(git -C "$PROJECT_PATH" diff --name-status "$base" "$tip")
 
 # Rule 4: paths named in added prose (markdown, comments) exist at the tip.
 # A path may be relative to the repo root or to the file that names it (a REPORT.md linking renders/x.png).
-missing=$(printf '%s\n' "$added" | while IFS=$'\t' read -r file line; do
+# Prose only: a committed data file (a JSON export, a mesh) has thousands of lines and no paths to check; feeding
+# them through this per-line loop made one 24 MB export take minutes.
+prose=$(printf '%s\n' "$added" | awk -F'\t' '$1 ~ /\.(md|markdown|rst|txt|py|sh|bash|ts|tsx|js|jsx|ya?ml|toml|cfg|ini)$/')
+missing=$(printf '%s\n' "$prose" | while IFS=$'\t' read -r file line; do
   printf '%s\n' "$line" | grep -oE '`[A-Za-z0-9_./-]+/[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,5}`' | tr -d '`' | sed "s|^|$(dirname "$file")\t|"; done | sort -u | while IFS=$'\t' read -r dir p; do
   case "$p" in /*|*://*|*'*'*) continue ;; esac
   for c in "$p" "$dir/$p"; do git -C "$wt" cat-file -e "$tip:$c" 2>/dev/null || [ -e "$wt/$c" ] && continue 2; done; echo "$p"; done | head -10 | paste -sd' ')

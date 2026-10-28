@@ -1,0 +1,17 @@
+# The live app of one project (ws-live@<slug>) on WS_PREVIEW_PORT_MAIN, started at login and restarted
+# after a crash. Install: bin/ws autostart. Stop for a session's own `ws serve main`: systemctl --user stop ws-live@<slug>
+[Unit]
+Description=Crafting Guild live app for %i
+After=default.target
+
+[Service]
+ExecStart=%h/crafting-guild/scripts/live-app.sh %i
+Restart=on-failure
+RestartSec=20
+# Same cap as a ws serve preview (WS_SERVE_MEM): past it only the app is killed, not the desktop.
+MemoryMax=3G
+MemorySwapMax=0
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

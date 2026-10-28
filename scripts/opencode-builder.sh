@@ -21,9 +21,16 @@ done
 pf="${1:?usage: opencode-builder.sh [flags] <prompt-file>}"
 for v in model budget config log title; do [ -n "${!v}" ] || die "--$v is required"; done
 [ -f "$config" ] || die "no OpenCode config $config"
+# The version goes into the result line beside the model: a capability change is then traceable to an upgrade.
+WS_RUN_MODEL="$model"
+WS_RUN_OPENCODE_VERSION=$(opencode --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+export WS_RUN_MODEL WS_RUN_OPENCODE_VERSION="${WS_RUN_OPENCODE_VERSION:-unknown}"
 helper="$WS/scripts/opencode_run.py" schema="$WS/schema/result.json"
 t0=$(date +%s%3N)
 finish() { python3 -I "$helper" result "$log" "$schema" "$budget" "$(( $(date +%s%3N) - t0 ))" "$@"; }
+WS_RUN_EVENTS="${log%.jsonl}.events.jsonl"; [ "$WS_RUN_EVENTS" = "$log" ] && WS_RUN_EVENTS="$log.events.jsonl"
+export WS_RUN_EVENTS
+: > "$WS_RUN_EVENTS" || die "cannot write the run events file $WS_RUN_EVENTS"
 
 # Privacy guard: the model's display name as OpenCode's Go page writes it, then the page's verdict on it.
 display=""
@@ -37,7 +44,15 @@ if ! zdr=$("$WS/scripts/zdr-check.sh" ${WS_ZDR_PAGE:+--page "$WS_ZDR_PAGE"} "$di
 fi
 echo "opencode-builder: $zdr"
 
-OPENCODE_CONFIG_CONTENT="$(cat "$config")"; export OPENCODE_CONFIG_CONTENT
+# A builder must not inherit the orchestrator's custom config: OpenCode merges it under the inline permissions
+# below, where its ask rules would wait on a prompt nobody answers and leave the run without a shell.
+# The builder loads its own run-events plugin from this inline config. --pure would skip it (it skips every
+# external plugin), so the workspace cold-start plugin instead returns early when WS_RUN_EVENTS is set.
+unset OPENCODE_CONFIG
+plugin_url="file://$WS/scripts/opencode-plugins/run-events.js"
+OPENCODE_CONFIG_CONTENT="$(jq --arg plugin "$plugin_url" '.plugin = ((.plugin // []) + [$plugin])' "$config")" \
+  || die "could not add the run-events plugin to $config"
+export OPENCODE_CONFIG_CONTENT
 pid=""
 # A timeout or kill of this script stops OpenCode's whole process group, so a wrapper's child goes too. setsid makes
 # the background opencode a session leader, so its PID is its group's ID; killing the group is safe and by PID.
@@ -52,7 +67,8 @@ run() {
 }
 over() { python3 -I "$helper" over "$log" "$budget"; }
 
-run "$(cat "$pf")"
+opencode_prompt_args "$pf"
+run "${OPENCODE_PROMPT_ARGS[@]}"
 # A reply that is not a valid result gets one continue of the same session, unless the budget is spent.
 if ! over && ! errs=$(python3 -I "$helper" check "$log" "$schema"); then
   if sid=$(python3 -I "$helper" session "$log"); then

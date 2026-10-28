@@ -30,6 +30,21 @@ show_timeout_log() {
     echo "ws: the log's last lines show the tests finished and the runner did not exit; run it with --detectOpenHandles (Jest) or the runner's equivalent to find what stays open." >&2
   fi
 }
+# Starts the project's POST_MERGE_CMD detached after a completed merge, under the preview memory cap. It runs
+# in the main checkout and outlives this script; post-merge.sh writes runs/<slug>/post-merge.status for cold
+# start. A missing or failing command never changes the merge's exit code.
+start_post_merge() {
+  [ -n "$POST_MERGE_CMD" ] || return 0
+  local log="$RUNS/post-merge-$name.log" cap=()
+  if [ -n "${WS_SERVE_MEM:-}" ] && systemd-run --user --scope --quiet true >/dev/null 2>&1; then
+    cap=(systemd-run --user --scope --quiet -p "MemoryMax=$WS_SERVE_MEM" -p MemorySwapMax=0 \
+      --unit "ws-$SLUG-post-merge-$name-$(date -u +%Y%m%dT%H%M%SZ)" --description "ws post-merge $SLUG/$name")
+  fi
+  # 9>&-: the detached chore must not keep the merge lock after this merge exits.
+  ( cd "$PROJECT_PATH" && exec "${cap[@]}" setsid env WS_MERGED_SHA="$merged_full" WS_MERGED_NAME="$name" WS_PROJECT="$SLUG" "$WS/scripts/post-merge.sh" ) \
+    < /dev/null > "$log" 2>&1 9>&- &
+  echo "post-merge started for $name (log: ${log#"$WS/"})"
+}
 if $test_only; then
   [ -d "$wt" ] || die "no worktree for $name"
   tcmd="${BENCH_TEST_CMD:-$TEST_CMD}"; [ -n "$tcmd" ] || die "no TEST_CMD for $SLUG; nothing to test"
@@ -61,7 +76,42 @@ if $need_review; then
 fi
 [ -d "$wt" ] && [ "$(git -C "$wt" status --short -uno | wc -l)" -gt 0 ] && die "worktree $wt has modified tracked files"
 [ "$(git -C "$PROJECT_PATH" rev-parse --abbrev-ref HEAD)" = "$PROJECT_BRANCH" ] || die "$PROJECT_PATH is not on $PROJECT_BRANCH"
-[ "$(git -C "$PROJECT_PATH" status --short -uno | wc -l)" -eq 0 ] || die "$PROJECT_PATH has modified tracked files; commit or discard first"
+# Modified tracked files in the main checkout normally block the merge, because the merge and the test run
+# happen there. Plans and reports are notes two orchestrator sessions keep, not code that is built or tested,
+# so a modified one may stay when the branch does not touch it: git merge leaves an untouched dirty file alone,
+# and the test-output restore below skips it. Any other modified tracked file still refuses.
+local_modified=() allowed_modified=()
+mapfile -t local_modified < <(git -C "$PROJECT_PATH" diff --name-only HEAD)
+if [ ${#local_modified[@]} -gt 0 ]; then
+  base=$(git -C "$PROJECT_PATH" merge-base "$PROJECT_BRANCH" "$tip") || die "no merge base between $PROJECT_BRANCH and $br"
+  mapfile -t branch_changed < <(git -C "$PROJECT_PATH" diff --name-only --no-renames "$base" "$tip")
+  for f in "${local_modified[@]}"; do
+    case "$f" in
+      plans/*|reports/*)
+        printf '%s\n' "${branch_changed[@]}" | grep -qxF -- "$f" && die "$PROJECT_PATH has modified tracked files; commit or discard first"
+        allowed_modified+=("$f") ;;
+      *) die "$PROJECT_PATH has modified tracked files; commit or discard first" ;;
+    esac
+  done
+fi
+# Kept so a failed test's reset --hard can put the allowed files back as they were.
+preserve=""
+if [ ${#allowed_modified[@]} -gt 0 ]; then
+  preserve=$(mktemp)
+  git -C "$PROJECT_PATH" diff HEAD -- "${allowed_modified[@]}" > "$preserve"
+  echo "ws merge: leaving ${#allowed_modified[@]} modified file(s) under plans/ or reports/ untouched: ${allowed_modified[*]}"
+fi
+# A reset --hard undoes the allowed local changes. The reverse check tells an already-present patch from one
+# that no longer applies, so a real failure is named instead of dropped.
+restore_allowed() {
+  [ -n "$preserve" ] || return 0
+  [ -s "$preserve" ] || return 0
+  if git -C "$PROJECT_PATH" apply --check "$preserve" >/dev/null 2>&1; then
+    git -C "$PROJECT_PATH" apply "$preserve" || echo "ws: could not restore the modified plans/reports files from $preserve" >&2
+  elif ! git -C "$PROJECT_PATH" apply --check --reverse "$preserve" >/dev/null 2>&1; then
+    echo "ws: the modified plans/reports files no longer apply from $preserve; the patch is kept there" >&2
+  fi
+}
 # Home paths and the username in lines the branch adds (reviews no longer block on them in evidence
 # logs, so the gate does); the project's private files (ATTRIBUTION_EXEMPT) are skipped.
 leaks=$(home_path_leaks "$PROJECT_PATH" "$PROJECT_BRANCH" "$tip")
@@ -81,8 +131,9 @@ if git -C "$PROJECT_PATH" remote get-url origin >/dev/null 2>&1; then
   [ "$(git -C "$PROJECT_PATH" rev-list --count "$PROJECT_BRANCH..origin/$PROJECT_BRANCH")" -eq 0 ] || die "origin/$PROJECT_BRANCH is ahead; pull first"
 fi
 title=$(sed -n '1s/^#* *//p' "$(sed -n 's/^task=//p' "$RUNS/$name.task.txt" 2>/dev/null)" 2>/dev/null | head -c 70)
-git -C "$PROJECT_PATH" merge --no-ff "$br" -m "Merge $br${title:+: $title} (reviewed at $(short "$tip"))" || { git -C "$PROJECT_PATH" merge --abort; die "merge conflict; resolve by hand or ask a builder to merge $PROJECT_BRANCH into $br"; }
-merged=$(git -C "$PROJECT_PATH" rev-parse --short HEAD)
+how="reviewed at $(short "$tip")"; $need_review || how="merged at $(short "$tip") with --no-review"
+git -C "$PROJECT_PATH" merge --no-ff "$br" -m "Merge $br${title:+: $title} ($how)" || { git -C "$PROJECT_PATH" merge --abort; restore_allowed; die "merge conflict; resolve by hand or ask a builder to merge $PROJECT_BRANCH into $br"; }
+merged=$(git -C "$PROJECT_PATH" rev-parse --short HEAD); merged_full=$(git -C "$PROJECT_PATH" rev-parse HEAD)
 # A branch that changed a package-lock.json needs those dependencies in the main checkout before the
 # tests run (builders install them in their worktree only). Install scripts are skipped unless the
 # project's conf sets MERGE_NPM_FLAGS (e.g. empty, for git dependencies that build in `prepare`).
@@ -100,19 +151,28 @@ if [ -n "$TEST_CMD" ]; then
   if [ "$rc" -eq 0 ]; then
     echo "--- ws merge: suite ${secs}s ---" >> "$log"
     echo "tests passed in ${secs}s (log: ${log#"$WS/"})"
-    # The checkout had no modified tracked files before the merge, so any now are the test run's own
-    # output (a build that rewrites a committed size report with new chunk hashes), which would block `ws release`.
+    # Apart from the allowed plans/reports files above (whose local changes stay), any tracked file modified
+    # after the merge is the test run's own output (a build that rewrites a committed size report with new
+    # chunk hashes), which would block `ws release`.
     mapfile -t touched < <(git -C "$PROJECT_PATH" diff --name-only)
-    if [ ${#touched[@]} -gt 0 ]; then
-      git -C "$PROJECT_PATH" checkout -q -- "${touched[@]}"
-      echo "ws: the test run changed tracked files; restored to the merged commit: ${touched[*]}. A build that rewrites a committed file is not reproducible; worth a light task in the project." >&2
+    restore=()
+    for f in "${touched[@]}"; do
+      keep=false
+      for a in "${allowed_modified[@]}"; do [ "$f" = "$a" ] && keep=true; done
+      $keep || restore+=("$f")
+    done
+    if [ ${#restore[@]} -gt 0 ]; then
+      git -C "$PROJECT_PATH" checkout -q -- "${restore[@]}"
+      echo "ws: the test run changed tracked files; restored to the merged commit: ${restore[*]}. A build that rewrites a committed file is not reproducible; worth a light task in the project." >&2
     fi
     [ "$secs" -gt "${WS_SUITE_WARN_S:-300}" ] && echo "ws: the suite took ${secs}s, over WS_SUITE_WARN_S=${WS_SUITE_WARN_S:-300}. Every merge pays this; a builder task to speed up the slowest test files pays for itself in a few merges (one such task took a suite from 28 min to 2 min for \$3.75)."
   elif timed_out "$rc" "$secs"; then
     git -C "$PROJECT_PATH" reset --hard ORIG_HEAD -q
+    restore_allowed
     show_timeout_log "$log"; die "the suite timed out after ${WS_MERGE_TEST_TIMEOUT} s (WS_MERGE_TEST_TIMEOUT) on the merged tree; merge undone. Log: ${log#"$WS/"}"
   else
     git -C "$PROJECT_PATH" reset --hard ORIG_HEAD -q
+    restore_allowed
     tail -n 30 "$log"; die "tests failed on the merged tree; merge undone. Log: ${log#"$WS/"}"
   fi
 else echo "no TEST_CMD for $SLUG; merging without a test gate"; fi
@@ -121,6 +181,7 @@ if $has_remote; then
   if git -C "$PROJECT_PATH" push -q origin "$PROJECT_BRANCH"; then echo "pushed $merged to origin/$PROJECT_BRANCH"
   else push_failed=true; fi
 fi
+$push_failed || start_post_merge
 if [ -d "$wt/.ws-evidence" ] && [ -n "$(ls -A "$wt/.ws-evidence" 2>/dev/null)" ]; then
   rm -rf "$RUNS/evidence/$name"; mkdir -p "$RUNS/evidence"; mv "$wt/.ws-evidence" "$RUNS/evidence/$name" && echo "evidence kept at runs/$SLUG/evidence/$name/"
 fi
@@ -128,4 +189,5 @@ fi
 [ -d "$wt" ] && git -C "$PROJECT_PATH" worktree remove --force "$wt" 2>/dev/null && echo "worktree removed (other untracked files discarded)"
 git -C "$PROJECT_PATH" branch -d "$br" -q 2>/dev/null && echo "branch $br deleted"
 echo "merged $br as $merged"
+[ -n "$preserve" ] && rm -f "$preserve"
 if $push_failed; then echo "PUSH FAILED: $merged is merged locally but not on origin/$PROJECT_BRANCH; fix the cause above, then: git -C $PROJECT_PATH push origin $PROJECT_BRANCH" >&2; exit 3; fi

@@ -5,7 +5,9 @@
   bench.py corpus-add <corpus.tsv> <name> <base> <budget> <track> <flags> <first-run.jsonl or "">
   bench.py runs-get <runs.tsv> <task> <arm> <trial>          prints "<run>\t<state>" when the row exists
   bench.py runs-start <runs.tsv> <run> <task> <arm> <trial> <base>
-  bench.py runs-finish <runs.tsv> <run> <tests> <result.txt> <review.json or "-"> <run.jsonl> <task.md>
+  bench.py runs-finish <runs.tsv> <run> <tests> <result.txt> <review.json or "-"> <run.jsonl> <task.md> [<teeth>]
+  bench.py review-todo <runs.tsv> [--arm L] [--limit N] [runs...]   the done rows with no verdict, one per line
+  bench.py review-set <runs.tsv> <run> <verdict> [<blocking>] [<teeth>]
   bench.py recorded-add <recorded.tsv> <task> <base> <first-run.jsonl> <first-run result.txt> <review.json or "-"> <task.md>
   bench.py report [--baseline ARM] <slug>=<runs.tsv>...
 
@@ -19,13 +21,20 @@ from transcript import events, run_metrics
 
 CORPUS_COLS = ["name", "base", "budget", "track", "cost", "turns", "peak_context", "flags"]
 RUNS_COLS = ["run", "task", "arm", "trial", "base", "state", "tests", "dw_met", "dw_total", "verdict", "blocking",
-             "turns", "peak_context", "mean_context", "output_tokens", "cache_reads", "cost", "minutes", "denied"]
+             "turns", "peak_context", "mean_context", "output_tokens", "cache_reads", "cost", "minutes", "denied", "teeth"]
+# Rows written before teeth existed lack the last column; they read as empty, not as an error.
+LEGACY_RUNS_COLS = RUNS_COLS[:-1]
 METRIC_KEYS = ["turns", "peak_context", "mean_context", "output_tokens", "cache_reads", "cost", "minutes", "denied"]
 # arms.tsv rows: label, spec, resolved ref, then agent and model. Rows written before arms had an agent hold only
 # the first three, and those arms ran Claude on dispatch's default model.
 ARMS_COLS = ["label", "spec", "resolved", "agent", "model"]
 RECORDED = "recorded"
 UNREVIEWED = "unreviewed"
+# A replay whose saved patch no longer applies could not be judged: recorded so the gap is visible, but not a
+# review verdict, so it is left out of the merge-verdict rate rather than scored as a failure.
+UNREVIEWABLE = "unreviewable"
+# A row in one of these states has no verdict to keep, so it can be reviewed from its patch.
+NOT_YET_REVIEWED = ("", "-", UNREVIEWED, "none")
 SMALL_N = 30
 
 
@@ -45,7 +54,10 @@ def read_tsv(path, cols):
         return []
     header = lines[0].split("\t")
     if header != cols:
-        sys.exit(f"bench: {path} has columns {header}, expected {cols}")
+        if cols == RUNS_COLS and header == LEGACY_RUNS_COLS:
+            header = list(cols)  # old rows have no teeth yet; zip fills it empty
+        else:
+            sys.exit(f"bench: {path} has columns {header}, expected {cols}")
     return [dict(zip(cols, line.split("\t") + [""] * (len(cols) - len(line.split("\t"))))) for line in lines[1:] if line]
 
 
@@ -77,6 +89,66 @@ def runs_get(path, task, arm, trial):
         if (r["task"], r["arm"], r["trial"]) == (task, arm, trial):
             print(f"{r['run']}\t{r['state']}")
             return
+
+
+def review_todo(path, argv):
+    """The done rows with no verdict yet, filtered by arm or run name, at most --limit of them.
+
+    Unknown names and arms fail loud: a typo in either would otherwise review nothing and look like a clean pass."""
+    arm = limit = None
+    names = []
+    while argv:
+        arg = argv.pop(0)
+        if arg == "--arm":
+            if not argv:
+                sys.exit("bench: --arm needs a label")
+            arm = argv.pop(0)
+        elif arg == "--limit":
+            if not argv:
+                sys.exit("bench: --limit needs a whole number")
+            try:
+                limit = int(argv.pop(0))
+            except ValueError:
+                sys.exit("bench: --limit takes a whole number")
+            if limit < 1:
+                sys.exit("bench: --limit is at least 1")
+        elif arg.startswith("-"):
+            sys.exit(f"bench: unknown flag {arg}")
+        else:
+            names.append(arg)
+    rows = read_tsv(path, RUNS_COLS)
+    known_runs = {r["run"] for r in rows}
+    known_arms = {r["arm"] for r in rows}
+    if arm is not None and arm not in known_arms:
+        sys.exit(f"bench: no arm '{arm}' in {path}")
+    missing = [n for n in names if n not in known_runs]
+    if missing:
+        sys.exit(f"bench: no run {', '.join(missing)} in {path}")
+    todo = [r for r in rows
+            if r["state"] == "done" and r["verdict"] in NOT_YET_REVIEWED
+            and (arm is None or r["arm"] == arm)
+            and (not names or r["run"] in names)]
+    if limit is not None:
+        todo = todo[:limit]
+    for row in todo:
+        print("\t".join(row[c] for c in ("run", "base", "arm", "task")))
+
+
+def review_set(path, run, verdict, blocking="", teeth=""):
+    if not verdict:
+        sys.exit("bench: review-set needs a verdict")
+    if blocking and not blocking.isdigit():
+        sys.exit(f"bench: blocking count '{blocking}' is not a whole number")
+    with locked(path):
+        rows = read_tsv(path, RUNS_COLS)
+        mine = [r for r in rows if r["run"] == run]
+        if not mine:
+            sys.exit(f"bench: no row for run {run} in {path}")
+        for row in mine:
+            row["verdict"] = verdict
+            row["blocking"] = blocking
+            row["teeth"] = teeth
+        write_tsv(path, RUNS_COLS, rows)
 
 
 def runs_start(path, run, task, arm, trial, base):
@@ -158,7 +230,7 @@ def recorded_add(path, task, base, jsonl, result_txt, review_json, task_md):
                                           "agent": "claude", "model": ",".join(sorted(models))}])
 
 
-def runs_finish(path, run, tests, result_txt, review_json, jsonl, task_md):
+def runs_finish(path, run, tests, result_txt, review_json, jsonl, task_md, teeth=""):
     # A run stopped by the usage limit did nothing; recording it would score an empty branch as a passing run.
     if os.path.exists(result_txt) and open(result_txt).read().startswith("LIMIT"):
         sys.exit(f"bench: {run} stopped at the usage limit; not recorded (run the bench again after the reset)")
@@ -171,7 +243,7 @@ def runs_finish(path, run, tests, result_txt, review_json, jsonl, task_md):
         if not mine:
             sys.exit(f"bench: no row for run {run} in {path}")
         mine[0].update({"state": "done", "tests": tests, "dw_met": met, "dw_total": max(reported, done_when_items(task_md)),
-                        "verdict": verdict, "blocking": blocking, **measures})
+                        "verdict": verdict, "blocking": blocking, "teeth": teeth, **measures})
         write_tsv(path, RUNS_COLS, rows)
 
 
@@ -194,7 +266,7 @@ def per_run_quality(row):
     met, total = number(row["dw_met"]), number(row["dw_total"])
     return {"tests passed": None if row["tests"] == "" else 1.0 if row["tests"] == "pass" else 0.0,
             "done-when met": met / total if total else None,
-            "merge verdicts": None if row["verdict"] in ("", UNREVIEWED) else 1.0 if row["verdict"] == "merge" else 0.0}
+            "merge verdicts": None if row["verdict"] in ("", UNREVIEWED, UNREVIEWABLE) else 1.0 if row["verdict"] == "merge" else 0.0}
 
 
 def arm_rate(rows, measure):
@@ -213,6 +285,18 @@ def trial_spread(rows, measure):
             by_task.setdefault(r["task"], []).append(value)
     ranges = [max(v) - min(v) for v in by_task.values() if len(v) > 1]
     return sum(ranges) / len(ranges) if ranges else 0.0
+
+
+def teeth_counts(rows):
+    """ok/toothless/n-a over the rows that have a teeth verdict; "-" when none does (old rows, not reviewed)."""
+    values = [r.get("teeth", "") for r in rows if r.get("teeth", "")]
+    if not values:
+        return "-"
+    return f"{values.count('ok')}/{values.count('toothless')}/{sum(v.startswith('n/a') for v in values)}"
+
+
+def teeth_errors(rows):
+    return sum(r.get("teeth", "").startswith("error") for r in rows)
 
 
 def fmt(value, kind=""):
@@ -263,6 +347,10 @@ def report(title, rows, baseline, arm_info):
     for arm in arms:
         if all(r["verdict"] == UNREVIEWED for r in done if r["arm"] == arm):
             print(f"arm {arm}: not reviewed (--review none), so its merge verdicts and blocking columns are empty by choice")
+        unreviewable = sum(r["verdict"] == UNREVIEWABLE for r in done if r["arm"] == arm)
+        if unreviewable:
+            print(f"arm {arm}: {unreviewable} run(s) unreviewable (they could not be reviewed from their saved "
+                  "patch), left out of the merge verdict rate")
     base = baseline or arms[0]
     by_arm = {a: [r for r in done if r["arm"] == a] for a in arms}
     tasks = list(dict.fromkeys(r["task"] for r in done))
@@ -282,6 +370,10 @@ def report(title, rows, baseline, arm_info):
     for measure in ("tests passed", "done-when met", "merge verdicts"):
         line(measure, [fmt(arm_rate(by_arm[a], measure), "%") for a in arms])
     line("blocking/run", [fmt(mean(number(r["blocking"]) for r in by_arm[a])) for a in arms])
+    line("teeth ok/toothless/n-a", [teeth_counts(by_arm[a]) for a in arms])
+    errors = {a: teeth_errors(by_arm[a]) for a in arms}
+    if any(errors.values()):
+        line("teeth error", [str(errors[a]) if errors[a] else "-" for a in arms])
     print("cost (mean per run)")
     for key, label, kind in (("turns", "turns", ""), ("peak_context", "peak context", ""), ("mean_context", "mean context", ""),
                              ("output_tokens", "output tokens", ""), ("cache_reads", "cache reads", ""),
@@ -313,7 +405,7 @@ def report(title, rows, baseline, arm_info):
             met = sum(int(number(r["dw_met"]) or 0) for r in mine)
             total = sum(int(number(r["dw_total"]) or 0) for r in mine)
             merges = sum(r["verdict"] == "merge" for r in mine)
-            reviewed = sum(r["verdict"] not in ("", UNREVIEWED) for r in mine)
+            reviewed = sum(r["verdict"] not in ("", UNREVIEWED, UNREVIEWABLE) for r in mine)
             blocking = mean(number(r["blocking"]) for r in mine)
             print(f"    {arm} ({agent_of[arm]} {model_of[arm]}): tests {passed}/{tested}  done-when {met}/{total}  merge {merges}/{reviewed}  "
                   f"blocking {fmt(blocking)}  cost $ {spread_text([number(r['cost']) for r in mine])}  "
@@ -358,8 +450,12 @@ def main(argv):
         runs_get(*args)
     elif command == "runs-start" and len(args) == 6:
         runs_start(*args)
-    elif command == "runs-finish" and len(args) == 7:
+    elif command == "runs-finish" and len(args) in (7, 8):
         runs_finish(*args)
+    elif command == "review-todo" and args:
+        review_todo(args[0], args[1:])
+    elif command == "review-set" and len(args) in (3, 4, 5):
+        review_set(*args)
     elif command == "recorded-add" and len(args) == 7:
         recorded_add(*args)
     elif command == "report":

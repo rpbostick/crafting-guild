@@ -102,12 +102,19 @@ $hits"; fi
 since="nothing (first release)"; [ -n "$prev" ] && since="the last public release (${prev:0:7})"
 echo "audit: $lines added lines since $since; no home paths, user name, e-mail, keys or attribution"
 
+# The public branch's commits must not carry a personal address: the author is checked here because the
+# release audit reads file contents, not commit metadata (see plans/crafting-guild/email-history-rewrite.md).
+if git_ rev-parse -q --verify public-release >/dev/null; then
+  bad=$(git_ log public-release --format='%ae%n%ce' | grep -vE '@users\.noreply\.github\.com$|^noreply@github\.com$' | sort -u | head -3)
+  if [ -n "$bad" ]; then die "the public branch carries a personal address ($(printf '%s' "$bad" | paste -sd' ')); rewrite the public history first"; fi
+fi
 if $dry; then echo "dry run: would publish $SLUG $tag to $public_repo"; exit 0; fi
 
 # 4. commit, tag, push. The public commit's author is GitHub's no-reply address for the public repository's
 # owner (or RELEASE_EMAIL from the conf), never the private repository's own e-mail.
 pub_name="${RELEASE_NAME:-$(git_ config user.name)}"
 pub_email="${RELEASE_EMAIL:-${public_repo%%/*}@users.noreply.github.com}"
+case "$pub_email" in *@users.noreply.github.com|noreply@github.com) ;; *) die "release e-mail $pub_email is not a GitHub noreply address";; esac
 export GIT_AUTHOR_NAME="$pub_name" GIT_COMMITTER_NAME="$pub_name" GIT_AUTHOR_EMAIL="$pub_email" GIT_COMMITTER_EMAIL="$pub_email"
 git_ push -q origin "$PROJECT_BRANCH"
 msg="${public_repo##*/} $version"   # the public repository's name, not the private folder's
@@ -134,7 +141,8 @@ fi
 case "$public_url" in *github.com*) ;; *) exit 0 ;; esac   # a release page needs a GitHub repository
 command -v gh >/dev/null || { echo "ws: gh not found; $tag is tagged but has no GitHub release page" >&2; exit 0; }
 zips=()
-if $asset && [ -f "$PROJECT_PATH/scripts/release.sh" ]; then
+# The workspace releasing itself has a scripts/release.sh too: this script, not an asset build, so it builds nothing.
+if $asset && [ -f "$PROJECT_PATH/scripts/release.sh" ] && [ "$(realpath "$PROJECT_PATH")" != "$(realpath "$WS")" ]; then
   tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
   git clone -q --branch "$tag" "https://github.com/$public_repo.git" "$tmp/repo"
   ( cd "$tmp/repo" && npm ci --silent --no-audit --no-fund >/dev/null && bash scripts/release.sh ) > "$RUNS/release-$tag.log" 2>&1 \

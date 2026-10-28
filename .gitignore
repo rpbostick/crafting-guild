@@ -2,3 +2,7 @@ runs/
 state/
 *.log
 __pycache__/
+# The brief names project paths and is private to the machine.
+reports/brief.md
+reports/brief.prev.md
+reports/.brief.lock

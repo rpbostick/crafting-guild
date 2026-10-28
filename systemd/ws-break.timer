@@ -1,0 +1,12 @@
+# Runs the break check every minute; the script itself decides from ~/.local/state/crafting-guild/break.last whether
+# a break is due. Deliberate: no Persistent=, so a machine that was off does not raise a break at login.
+# Install: ws alerts on.
+[Unit]
+Description=Every-minute Crafting Guild break check
+
+[Timer]
+OnCalendar=minutely
+Unit=ws-break.service
+
+[Install]
+WantedBy=timers.target

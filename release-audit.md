@@ -14,6 +14,8 @@ Scan the tree **and** the built output for:
 
 Tools: `git grep` with patterns for each, and a secret scanner if one is installed (e.g. `npx --yes secretlint` or gitleaks).
 
+**Commit metadata is part of the audit.** File contents can be clean while every commit publishes a personal address in its author and committer fields. Run `ws email-audit --repo <path> --range public-release` (or `--all`) before publishing; `ws release` refuses a public branch or a release e-mail that is not a GitHub noreply address. See `plans/crafting-guild/email-history-rewrite.md`.
+
 ## 2. Journey and personal text
 Remove or rewrite:
 - the operator's name outside intended credits

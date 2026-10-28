@@ -59,7 +59,10 @@ bench_add() {
     # The newest merge of agent/<name> ("Merge agent/<name>: <title> ..."); awk reads to the end, so git gets no SIGPIPE.
     merge=$(git -C "$PROJECT_PATH" log "$PROJECT_BRANCH" --merges --format='%H %s' | awk -v b="agent/$name" '!f && $2=="Merge" && ($3==b || $3==b":") {print $1; f=1}')
     [ -n "$merge" ] || die "no merge of agent/$name on $PROJECT_BRANCH in $PROJECT_PATH"
-    base=$(git -C "$PROJECT_PATH" rev-parse "$merge^1")
+    # The branch's base is where it started: main at merge time can hold commits gained after the branch started,
+    # and a replay from there would rebuild the branch on top of changes it never saw.
+    base=$(git -C "$PROJECT_PATH" merge-base "$(git -C "$PROJECT_PATH" rev-parse "$merge^1")" "$(git -C "$PROJECT_PATH" rev-parse "$merge^2")") \
+      || die "no merge base for $merge in $PROJECT_PATH"
     rec=$(first_record "$name"); [ -f "$rec" ] || die "no dispatch record for $name (runs/$SLUG/$name.task.txt)"
     task=$(sed -n 's/^task=//p' "$rec"); started=$(sed -n 's/^started=//p' "$rec"); budget=$(sed -n 's/^budget=//p' "$rec")
     [ -n "$task" ] && [ -n "$started" ] && [ -n "$budget" ] || die "$rec lacks task=, started= or budget="
@@ -97,6 +100,18 @@ wait_for_merges() {
 }
 
 corpus_field() { awk -F'\t' -v n="$1" -v c="$2" 'NR==1{for(i=1;i<=NF;i++) col[$i]=i; next} $1==n{print $col[c]}' "$CORPUS"; }
+# The verdict ws teeth recorded for a run, or empty when it recorded none (not run, or an old run).
+teeth_of() { # <run>
+  local line
+  [ -f "$RUNS/$1.teeth.txt" ] || return 0
+  line=$(head -1 "$RUNS/$1.teeth.txt")
+  case "$line" in
+    "teeth: ok") echo ok ;;
+    "teeth: toothless"*) echo toothless ;;
+    "teeth: n/a"*) echo "n/a" ;;
+    "teeth: error"*) echo error ;;
+  esac
+}
 timeout_for() { # <task> -> minutes: the corpus flags' --timeout, else the track's default (as dispatch decides)
   local tmo; local -a fl
   set -f; eval "fl=( $(corpus_field "$1" flags) )"; set +f
@@ -153,7 +168,7 @@ start_run() {
 # One replay: dispatch under the opaque name, wait, review (blind: the reviewer sees the run name only), test the
 # tip in the worktree, record, then remove the worktree and branch and keep the evidence.
 run_one() { # <task> <arm> <trial>
-  local task="$1" arm="$2" trial="$3" got run state wt log base budget mins dir tests rc ep wake review limits=0; local -a fl
+  local task="$1" arm="$2" trial="$3" got run state wt log base budget mins dir tests rc ep wake review teeth="" limits=0; local -a fl
   base=$(corpus_field "$task" base); budget=$(corpus_field "$task" budget); dir="$BENCH/arms/$arm"
   got=$(python3 "$PY" runs-get "$TSV" "$task" "$arm" "$trial"); run="${got%%$'\t'*}"; state="${got#*$'\t'}"
   [ "$state" = "done" ] && return 0
@@ -183,9 +198,15 @@ run_one() { # <task> <arm> <trial>
   done
   [ "$rc" -eq 3 ] && { echo "bench: $run still running after $mins minutes; run the bench again to resume"; return 1; }
   review="$RUNS/$run.review.json"
-  if [ "$REVIEW" = none ]; then review="-"; else "$WS/scripts/review.sh" --project "$SLUG" "$run" >> "$log" 2>&1; fi
+  if [ "$REVIEW" = none ]; then review="-"
+  else
+    # Teeth first: its verdict goes into the run's review record, and the review reads it when it is for this SHA.
+    "$WS/bin/ws" --project "$SLUG" teeth "$run" >> "$log" 2>&1 || true
+    teeth=$(teeth_of "$run")
+    "$WS/scripts/review.sh" --project "$SLUG" "$run" >> "$log" 2>&1
+  fi
   if "$WS/scripts/merge.sh" --project "$SLUG" --test-only "$run" >> "$log" 2>&1; then tests=pass; else tests=fail; fi
-  python3 "$PY" runs-finish "$TSV" "$run" "$tests" "$RUNS/$run.result.txt" "$review" "$RUNS/$run.jsonl" "$WS/plans/$SLUG/bench/$task.md" || return 1
+  python3 "$PY" runs-finish "$TSV" "$run" "$tests" "$RUNS/$run.result.txt" "$review" "$RUNS/$run.jsonl" "$WS/plans/$SLUG/bench/$task.md" "$teeth" || return 1
   if [ -d "$wt/.ws-evidence" ]; then rm -rf "$BENCH/evidence/$run"; mkdir -p "$BENCH/evidence"; mv "$wt/.ws-evidence" "$BENCH/evidence/$run"; fi
   # The replay's committed change, kept so it can be graded later (e.g. against the original builder's test files).
   mkdir -p "$BENCH/evidence/$run"; git -C "$wt" diff --binary "$base" HEAD > "$BENCH/evidence/$run/replay.patch" 2>/dev/null
@@ -309,6 +330,92 @@ write_recorded() { # <slug>
   done < <(awk -F'\t' 'NR>1{print $1}' "$CORPUS")
 }
 
+# Review one earlier replay from the patch it kept: check its base out in a throwaway worktree and branch, apply and
+# commit the patch, then review it under the same opaque name a live replay uses. The verdict and blocking count go
+# into runs.tsv; a patch that does not apply is recorded unreviewable with its reason rather than skipped.
+# Returns 0 when reviewed, 2 when recorded unreviewable, 1 when the review produced no verdict (retry later).
+bench_review_one() { # <run> <base> <arm> <task>
+  local run="$1" base="$2" arm="$3" task="$4"
+  local patch="$BENCH/evidence/$run/replay.patch" wt review verdict blocking teeth=""
+  local log="$BENCH/logs/$run.review.log"
+  wt="$(worktree_dir "$run")"; review="$RUNS/$run.review.json"
+  mkdir -p "$BENCH/logs"; : > "$log"
+  echo "bench: reviewing $run (arm $arm, task $task, base $(short "$base"))" | tee -a "$log"
+  # The builder's evidence was kept beside the patch (it is never committed): put it back where the reviewer and
+  # check-result look, or every "met (observed)" item reads as evidence the builder never produced.
+  if ! replay_worktree "$PROJECT_PATH" "$base" "$wt" "$(branch_of "$run")" "$patch" "$BENCH/evidence/$run" "$log" "$run"; then
+    local reason="$REPLAY_REASON"
+    mkdir -p "$BENCH/evidence/$run"; printf '%s\n' "$reason" > "$BENCH/evidence/$run/unreviewable.txt"
+    echo "bench: $run unreviewable: $reason (git output in ${log#"$WS"/})" | tee -a "$log"
+    python3 "$PY" review-set "$TSV" "$run" unreviewable "" "" || return 1
+    return 2
+  fi
+  echo "bench: restored $REPLAY_EVIDENCE_COUNT evidence file(s) into .ws-evidence/" | tee -a "$log"
+  # Teeth first, so the review sees the verdict and runs.tsv records it beside the review.
+  "$WS/bin/ws" --project "$SLUG" teeth "$run" >> "$log" 2>&1 || true
+  teeth=$(teeth_of "$run")
+  # A review from an interrupted pass is not read when this attempt fails to produce one.
+  rm -f "$review"
+  "$WS/scripts/review.sh" --project "$SLUG" "$run" >> "$log" 2>&1 || true
+  verdict=$(jq -r '.verdict // empty' "$review" 2>/dev/null || true)
+  if [ -z "$verdict" ]; then
+    git -C "$PROJECT_PATH" worktree remove --force "$wt" 2>/dev/null
+    git -C "$PROJECT_PATH" branch -q -D "$(branch_of "$run")" 2>/dev/null
+    echo "bench: $run got no review verdict (see ${log#"$WS"/}); run again to retry it" >&2
+    return 1
+  fi
+  blocking=$(jq -r '(.blocking // []) | length' "$review")
+  git -C "$PROJECT_PATH" worktree remove --force "$wt" 2>/dev/null
+  git -C "$PROJECT_PATH" branch -q -D "$(branch_of "$run")" 2>/dev/null
+  python3 "$PY" review-set "$TSV" "$run" "$verdict" "$blocking" "$teeth" || return 1
+  echo "bench: $run reviewed: $verdict, $blocking blocking${teeth:+, teeth $teeth}" | tee -a "$log"
+  return 0
+}
+
+bench_review() {
+  local slug="${1:-}"; [ -n "$slug" ] && [ "${slug#-}" = "$slug" ] || die "usage: ws bench review <slug> [--arm <label>] [--limit N] [--dry-run] [runs...]"
+  shift
+  local arm="" limit="" dry=false row run base row_arm task rc reviewed=0 unrev=0 failed=0 total todo_text
+  local -a names=() pargs=() todo=()
+  while [ $# -gt 0 ]; do case "$1" in
+    --arm) [ $# -ge 2 ] || die "--arm needs a label"; arm="$2"; shift 2 ;;
+    --limit) [ $# -ge 2 ] || die "--limit takes a whole number"; limit="$2"; shift 2 ;;
+    --dry-run) dry=true; shift ;;
+    -*) die "unknown flag $1" ;;
+    *) names+=("$1"); shift ;;
+  esac; done
+  if [ -n "$limit" ]; then case "$limit" in *[!0-9]*) die "--limit takes a whole number" ;; esac; [ "$limit" -ge 1 ] || die "--limit is at least 1"; fi
+  load_project "$slug"
+  BENCH="$RUNS/bench"; TSV="$BENCH/runs.tsv"
+  [ -f "$TSV" ] || die "no bench runs for $SLUG (${TSV#"$WS"/})"
+  [ -n "$arm" ] && pargs+=(--arm "$arm")
+  [ -n "$limit" ] && pargs+=(--limit "$limit")
+  todo_text=$(python3 "$PY" review-todo "$TSV" "${pargs[@]}" "${names[@]}") || exit 1
+  [ -z "$todo_text" ] || mapfile -t todo <<< "$todo_text"
+  total=${#todo[@]}
+  if [ "$total" -eq 0 ]; then echo "bench: no unreviewed runs for $SLUG${arm:+ in arm $arm}"; return 0; fi
+  if $dry; then
+    for row in "${todo[@]}"; do
+      IFS=$'\t' read -r run base row_arm task <<< "$row"
+      if [ -f "$BENCH/evidence/$run/replay.patch" ]; then
+        echo "would review $run (arm $row_arm, task $task, base $(short "$base")) from evidence/$run/replay.patch"
+      else
+        echo "would review $run (arm $row_arm, task $task, base $(short "$base")) as unreviewable: no evidence/$run/replay.patch"
+      fi
+    done
+    echo "bench: $total run(s) would be reviewed; nothing created, reviewed or written"
+    return 0
+  fi
+  for row in "${todo[@]}"; do
+    IFS=$'\t' read -r run base row_arm task <<< "$row"
+    bench_review_one "$run" "$base" "$row_arm" "$task"; rc=$?
+    case "$rc" in 0) reviewed=$((reviewed + 1)) ;; 2) unrev=$((unrev + 1)) ;; *) failed=$((failed + 1)) ;; esac
+  done
+  echo "bench: $reviewed reviewed, $unrev recorded unreviewable, $failed with no verdict (of $total in this pass)"
+  [ "$failed" -eq 0 ] || return 1
+  return 0
+}
+
 bench_report() {
   local -a args=() base=()
   [ "${1:-}" = --baseline ] && { base=(--baseline "${2:?--baseline needs an arm label}"); shift 2; }
@@ -326,6 +433,7 @@ bench_report() {
 case "$sub" in
   add) bench_add "$@" ;;
   run) bench_run "$@" ;;
+  review) bench_review "$@" ;;
   report) bench_report "$@" ;;
-  *) die "usage: ws bench add <name>... | ws bench run <slug> --arm L=<ref|dir>[,agent=A][,model=M] --arm ... [--review none|claude] [--trials N] [--parallel P] [--dry-run] [tasks...] | ws bench report [--baseline L|recorded] <slug>..." ;;
+  *) die "usage: ws bench add <name>... | ws bench run <slug> --arm L=<ref|dir>[,agent=A][,model=M] --arm ... [--review none|claude] [--trials N] [--parallel P] [--dry-run] [tasks...] | ws bench review <slug> [--arm L] [--limit N] [--dry-run] [runs...] | ws bench report [--baseline L|recorded] <slug>..." ;;
 esac

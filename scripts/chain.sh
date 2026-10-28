@@ -10,7 +10,7 @@
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 slug=""; [ "${1:-}" = "--project" ] && { slug="$2"; shift 2; }
-queue="${1:?usage: chain.sh [--project slug] <queue-file>}"; [ -f "$queue" ] || die "no queue file $queue"
+queue=$(ws_path "${1:?usage: chain.sh [--project slug] <queue-file>}"); [ -f "$queue" ] || die "no queue file $queue"
 load_project "$slug"
 ws() { "$WS/bin/ws" --project "$SLUG" "$@"; }
 pidf="$RUNS/chain.pid"; statf="$RUNS/chain.status"; logf="$RUNS/chain.log"
@@ -51,6 +51,7 @@ for i in "${!steps[@]}"; do
   # Quoted flags (--allow "Bash(npm run x*)") stay one word; globbing is off so a pattern is not expanded.
   set -f; eval "f=( ${steps[$i]} )"; set +f; name="${f[0]}"; task="${f[1]:-}"; gate=false; flags=()
   for x in "${f[@]:2}"; do [ "$x" = gate ] && gate=true || flags+=("$x"); done
+  [ -n "$task" ] && task=$(ws_path "$task")
   [ -f "$task" ] || stop "$name" "no task file $task"
   if merged "$name" "$task"; then log "$name: already merged, skipping"; continue; fi
   status running "$name"
@@ -85,6 +86,15 @@ for i in "${!steps[@]}"; do
     [ "${nweb:-0}" -gt 0 ] && stop "$name" "web requests: the builder asked for $nweb source(s); list them with ws web $name, approve or deny each, then ws web $name resume and run the chain again"
     grep -q '^done:' "$RUNS/$name.result.txt" || stop "$name" "the builder did not finish (status $(head -1 "$RUNS/$name.result.txt" | cut -d: -f1)); see its open questions"
     tip=$(git -C "$wt" rev-parse HEAD)
+    # Do the new tests bite? A toothless result is handed to the review, never a stop. A result for another SHA
+    # (a fix round's earlier attempt) is stale, so it runs again.
+    if [ "$(sed -n 's/^sha: //p' "$RUNS/$name.teeth.txt" 2>/dev/null | head -1)" != "$tip" ]; then
+      ws teeth "$name" >> "$logf" 2>&1 || true
+    fi
+    # Print the verdict only when it is the one for the tip just checked: a teeth run reads the branch, and a
+    # worktree on another commit (or a run that died before writing) leaves a result with a different sha.
+    tsha=$(sed -n 's/^sha: //p' "$RUNS/$name.teeth.txt" 2>/dev/null | head -1)
+    [ "$tsha" = "$tip" ] && head -1 "$RUNS/$name.teeth.txt" 2>/dev/null | sed "s/^/$name teeth: /" | tee -a "$tee_to"
     rv="$RUNS/$name.review.json"
     if [ -f "$rv" ] && [ "$(jq -r .reviewed_sha "$rv")" = "$tip" ]; then log "$name: review on record for $(short "$tip")"
     else

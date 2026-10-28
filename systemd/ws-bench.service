@@ -1,0 +1,14 @@
+# The replay bench, resumed at login after a crash or reboot. Its command lives in the file named by
+# WS_BENCH_AUTOSTART_CMD (private: which projects and arms); the bench resumes where it stopped,
+# waits outside WS_BENCH_HOURS, and exits when every run is done.
+[Unit]
+Description=Crafting Guild replay bench (resumes after a reboot)
+After=default.target
+
+[Service]
+ExecStart=%h/crafting-guild/scripts/bench-autostart.sh
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=default.target
