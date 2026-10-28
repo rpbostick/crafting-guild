@@ -106,8 +106,11 @@ out="$RUNS/$name.review.json"; errf="$RUNS/$name.review.err"; mdf="$RUNS/$name.r
 if [ -n "$out_base" ]; then out="$out_base.json"; errf="$out_base.err"; mdf="$out_base.md"; fi
 if [ "$agent" = opencode ]; then
   oc_config="$RUNS/$name.opencode-review.json"
-  python3 -I "$WS/scripts/opencode_run.py" config --read-only > "$oc_config" || die "could not build the OpenCode review config"
   oc_prompt="$RUNS/$name.review-prompt.txt"
+  # Beside a record (a shadow, review-compare) key both by the out base: another review of the same name can run
+  # at the same time.
+  if [ -n "$out_base" ]; then oc_config="$out_base.opencode-review.json"; oc_prompt="$out_base.review-prompt.txt"; fi
+  python3 -I "$WS/scripts/opencode_run.py" config --read-only > "$oc_config" || die "could not build the OpenCode review config"
   printf '%s\n\n# The diff\n%s\n' "$prompt" "$diff" > "$oc_prompt"
   cmd=("$WS/scripts/opencode-review.sh" --model "$model" --budget "$budget" --config "$oc_config"
     --log "$out.raw" --name "ws:$SLUG:review:$name" "$oc_prompt")
@@ -168,9 +171,13 @@ if [ -n "${WS_REVIEW_SHADOW:-}" ] && [ "$agent" != "$WS_REVIEW_SHADOW" ] && [ -z
     [ -n "$claude_blocking_n" ] && snap+=(--claude-blocking "$claude_blocking_n")
     [ -n "$claude_findings" ] && snap+=(--claude-json "$claude_findings")
     cap=()
-    if [ -n "${WS_REVIEW_MEM:-}" ] && systemd-run --user --scope --quiet true >/dev/null 2>&1; then
-      cap=(systemd-run --user --scope --quiet -p "MemoryMax=$WS_REVIEW_MEM" -p MemorySwapMax=0 \
-        --unit "ws-$SLUG-shadow-$name-$(date -u +%Y%m%dT%H%M%SZ)" --description "ws shadow review $SLUG/$name")
+    if [ -n "${WS_REVIEW_MEM:-}" ]; then
+      if systemd-run --user --scope --quiet true >/dev/null 2>&1; then
+        cap=(systemd-run --user --scope --quiet -p "MemoryMax=$WS_REVIEW_MEM" -p MemorySwapMax=0 \
+          --unit "ws-$SLUG-shadow-$name-$(date -u +%Y%m%dT%H%M%SZ)" --description "ws shadow review $SLUG/$name")
+      else
+        note "shadow review runs with no memory cap: systemd-run --user --scope is unavailable"
+      fi
     fi
     ( cd "$WS" && exec ${cap[@]+"${cap[@]}"} setsid "$WS/scripts/review-shadow.sh" --project "$SLUG" --run \
         --name "$name" --sha "$tip" --base "$base" --claude-review "$out" "${snap[@]}" \

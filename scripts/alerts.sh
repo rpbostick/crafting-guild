@@ -176,7 +176,7 @@ alerts_off() {
 }
 
 alerts_status() {
-  local cfg count enabled active lines
+  local cfg count enabled active lines invalid=no
   alerts_load_config
   cfg=$(alerts_config_path)
   if [ -f "$cfg" ]; then
@@ -184,13 +184,19 @@ alerts_status() {
   else
     echo "config: $cfg (absent; defaults in effect)"
   fi
-  echo "  attention=$attention visual=$visual sound=$sound volume=$volume break_minutes=$break_minutes alert_after_seconds=$alert_after_seconds repeat_minutes=$repeat_minutes quiet_hours=${quiet_hours:-none}"
+  echo "  attention=$attention finished=$finished visual=$visual sound=$sound volume=$volume break_minutes=$break_minutes alert_after_seconds=$alert_after_seconds repeat_minutes=$repeat_minutes repeat_max=$repeat_max quiet_hours=${quiet_hours:-none}"
   echo "  break_message: $break_message"
   count=0
   if [ -f "$settings" ]; then
-    count=$(jq '[.hooks[]? | .[]? | .hooks[]? | select((.command // "") | test("scripts/attention\\.sh"))] | length' "$settings" 2>/dev/null || echo 0)
+    if jq -e . "$settings" >/dev/null 2>&1; then
+      count=$(jq '[.hooks[]? | .[]? | .hooks[]? | select((.command // "") | test("scripts/attention\\.sh"))] | length' "$settings")
+    else
+      invalid=yes
+    fi
   fi
-  if [ "$count" -gt 0 ]; then
+  if [ "$invalid" = yes ]; then
+    echo "claude hooks: $settings is not valid JSON; fix it by hand"
+  elif [ "$count" -gt 0 ]; then
     echo "claude hooks: $count command(s) in $settings"
   else
     echo "claude hooks: not installed ($settings)"

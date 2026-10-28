@@ -47,6 +47,15 @@ run_shadow() {
   [ -n "$name" ] && [ -n "$sha" ] && [ -n "$base" ] && [ -n "$claude" ] \
     || die "review-shadow.sh --run needs --name, --sha, --base and --claude-review"
   load_project "$slug"
+  # A shadow killed by the memory cap or SIGKILL never runs its EXIT trap, so its scratch worktree stays behind.
+  git -C "$PROJECT_PATH" worktree prune
+  git -C "$PROJECT_PATH" worktree list --porcelain | while IFS= read -r line; do
+    case "$line" in "worktree "*) entry="${line#worktree }" ;; *) continue ;; esac
+    case "$entry" in *-shadow-*) ;; *) continue ;; esac
+    pid="${entry##*-shadow-}"
+    case "$pid" in ''|*[!0-9]*) continue ;; esac
+    kill -0 "$pid" 2>/dev/null || git -C "$PROJECT_PATH" worktree remove --force "$entry" 2>/dev/null
+  done
   claude_verdict="$claude_verdict_arg"
   if [ -z "$claude_verdict" ]; then
     claude_verdict=$(jq -r '.verdict // "?"' "$claude" 2>/dev/null || true); [ -n "$claude_verdict" ] || claude_verdict="?"
@@ -83,7 +92,7 @@ run_shadow() {
     exit 0
   fi
   "$WS/scripts/review.sh" --project "$SLUG" --agent opencode --model "$model" --budget "$budget" \
-    --out "$out_base" --worktree "$scratch" --base "$base" "$name" > "$out_base.log" 2>&1 || true
+    --out "$out_base" --worktree "$scratch" --base "$base" "$name" || true
   if [ ! -f "$out_base.json" ] || ! jq -e '.verdict' "$out_base.json" >/dev/null 2>&1; then
     record_row error 0 0 0 "$(shadow_cost "$out_base")"
     echo "review-shadow: $name $(short "$sha"): no verdict (see ${out_base#"$WS"/}.log)"

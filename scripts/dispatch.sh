@@ -11,7 +11,8 @@
 # --base branches a fresh worktree from that commit instead of the main branch (a replay, ws bench); the builder
 # then gets no grant to merge the main branch in, which would bring in the work the replay is measured on.
 # --instructions takes the builder sheet from <dir>/agents/builder.md and the lessons from <dir>/lessons/ (builder.md,
-# and builder.local.md when present), each where the directory has it, the workspace's otherwise.
+# and builder.local.md when present), each where the directory has it, the workspace's otherwise. Every other file
+# under <dir> is copied to the worktree's .ws-evidence/given/arm/ and the prompt names it.
 # The builder gets: the builder sheet, lessons/builder.md (and builder.local.md), the task file, a grant to edit inside its
 # worktree and commit on its branch plus the project's test command and EXTRA_TOOLS, a budget, a timeout,
 # and a JSON result schema. Logs to runs/<slug>/<name>.jsonl; the result check lands in <name>.result.txt.
@@ -110,6 +111,29 @@ else
 fi
 mkdir -p "$wt/.ws-evidence"   # untracked; logs and renders go here, never into the branch (ws merge keeps it under runs/)
 for i in ${inputs[@]+"${inputs[@]}"}; do cp "$i" "$wt/.ws-evidence/" && note "input $(basename "$i") copied into .ws-evidence/"; done
+
+# An instructions directory (a bench arm) may carry maps and stage contracts beside the sheet and lessons; the
+# builder runs in this worktree and cannot read the arm folder, so copy them to a folder it can. Rebuilt on every
+# start and resume, so a changed arm never leaves an earlier file behind. Untracked evidence, never committed.
+arm_note=""
+if [ -n "$instr" ]; then
+  arm_files=()
+  while IFS= read -r rel; do
+    case "$rel" in agents/*|lessons/*) continue ;; esac
+    arm_files+=("$rel")
+  done < <(cd "$instr" && find . -type f -printf '%P\n' | LC_ALL=C sort)
+  arm_dir="$wt/.ws-evidence/given/arm"
+  rm -rf "$arm_dir"
+  if [ ${#arm_files[@]} -gt 0 ]; then
+    for rel in "${arm_files[@]}"; do
+      mkdir -p "$arm_dir/$(dirname "$rel")"
+      cp "$instr/$rel" "$arm_dir/$rel"
+    done
+    arm_list=$(printf '%s, ' "${arm_files[@]}"); arm_list="${arm_list%, }"
+    arm_note="
+Arm files for this run are in \`.ws-evidence/given/arm/\` ($arm_list); read them as the sheet says."
+  fi
+fi
 
 # WORKTREE_ENV (KEY=value lines) goes into WORKTREE_ENV_FILE in the worktree, for tests that read their
 # environment from a file (Vite's loadEnv reads .env.local): builders cannot run `env VAR=... <cmd>`.
@@ -211,7 +235,7 @@ $(lessons_for builder)
 Main branch: $PROJECT_BRANCH. Project test command: ${TEST_CMD:-none configured}. The merge gate runs it on the merged tree; you do not. Run only the test files that cover what you changed, with the same runners, from the worktree root, in the foreground.
 Evidence: run every check you will cite (test files, typecheck, render scripts) through the evidence runner, one command per call: \`$WS/bin/ws-run <label> <command> [args...]\` (for example \`$WS/bin/ws-run before-frames npx jest --runInBand test/a.test.ts\`). It runs the command in the foreground, saves .ws-evidence/<label>.log ending in the real exit code, and adds a row to .ws-evidence/runs.tsv; use a label that says before or after the change. Do not write your own run-and-log scripts. Save every other log and render under .ws-evidence/ in the worktree root (it is untracked and the reviewer reads it there). Commit code, tests and docs; commit a render only when the task asks for one.
 Dependencies: \`node_modules\` (and \`.venv\`) may be a link to the main checkout, outside the worktree, so Bash \`cat\`, \`ls\`, \`grep\` and \`stat\` on paths inside it are denied; read them with the Read, Grep and Glob tools, which are allowed there.
-Paths: work inside \`$wt\` and read files from it. The main checkout at \`$PROJECT_PATH\` is outside the worktree, so every read there (the read tool and Bash \`cat\`/\`find\`/\`sed\`) is denied; your worktree is the full checkout of the same branch, so read the same path under it.$links_note
+Paths: work inside \`$wt\` and read files from it. The main checkout at \`$PROJECT_PATH\` is outside the worktree, so every read there (the read tool and Bash \`cat\`/\`find\`/\`sed\`) is denied; your worktree is the full checkout of the same branch, so read the same path under it.$links_note$arm_note
 Files: delete a tracked file with \`git rm <path>\` and an untracked one (a scratch test, a probe) with \`git clean -f -- <path>\`; bring a file back from a commit with \`git restore --source=<ref> -- <path>\`. Plain \`rm\`, \`mv\`, \`git checkout <ref> -- <path>\`, \`git stash\` and \`git reset\` are not granted.
 
 # Task

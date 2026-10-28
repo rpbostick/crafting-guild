@@ -13,7 +13,8 @@ if $brief; then
   bn=0
   while IFS= read -r bslug; do
     [ -n "$bslug" ] || continue
-    while IFS= read -r _; do bn=$((bn + 1)); done < <(waiting_lines "$bslug" "$WS/runs/$bslug" "$(conf_var "$WS/projects/$bslug.conf" PROJECT_PATH)")
+    while IFS= read -r _; do bn=$((bn + 1)); done < <(waiting_lines "$bslug" "$WS/runs/$bslug" \
+      "$(conf_var "$WS/projects/$bslug.conf" PROJECT_PATH)" "$(conf_var "$WS/projects/$bslug.conf" PROJECT_BRANCH)")
   done < <(project_slugs)
   if [ -f "$WS/reports/brief.md" ]; then
     echo "brief: reports/brief.md, $(age_str "$(stat -c %Y "$WS/reports/brief.md")") old, $bn waiting on you (ws brief prints it)"

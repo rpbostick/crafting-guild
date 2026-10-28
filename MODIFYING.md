@@ -26,7 +26,9 @@ scripts/lib.sh          shared helpers; loads projects/<slug>.conf into variable
 scripts/cold-start.sh   ground truth in ~20 s. Git state, worktrees, running builders, servers, in-flight block.
 scripts/dispatch.sh     creates the worktree, builds the builder prompt and grant, runs claude -p in the background,
                         then runs check-result.sh when it ends. `--agent opencode` (or WS_AGENT) runs opencode-builder.sh
-                        in its place, with the grants written to runs/<slug>/<name>.opencode.json.
+                        in its place, with the grants written to runs/<slug>/<name>.opencode.json. `--instructions <dir>`
+                        takes the builder sheet and lessons from the arm and copies its other files to the worktree's
+                        .ws-evidence/given/arm/, named in the prompt, since the builder cannot read the arm folder.
 scripts/opencode-builder.sh  the OpenCode launcher: zdr-check.sh on the model's display name (WS_OPENCODE_MODEL_NAMES)
                         before anything runs, then `opencode run --format json` with the permission config in
                         OPENCODE_CONFIG_CONTENT and stdin closed; drops OPENCODE_CONFIG, so the orchestrator's
@@ -126,12 +128,15 @@ scripts/bench.py        the bench's tables (corpus.tsv, runs.tsv, recorded.tsv, 
 scripts/statusline.sh   the Claude Code status line: each running builder (elapsed time, tool calls, seconds since
                         its last output, budget), then preview servers. No git calls.
 scripts/attention.sh    the attention handler both agents call (`waiting`, `resumed`, `test`). It returns at once and
-                        starts a detached watcher: after alert_after_seconds that raises a notify-send pop-up, writes
-                        `WAITING · <project>` to the session's terminal title (OSC 0 on the pty found up the parent
-                        chain; VS Code's integrated terminal is xterm.js, which treats OSC 0 as OSC 2, so a tab
-                        showing the sequence title follows it) and appends a line to
-                        ~/.local/state/crafting-guild/attention.log; it repeats every repeat_minutes until resumed,
-                        which kills it and puts the title back.
+                        starts a detached watcher: after alert_after_seconds a question or permission raises a
+                        notify-send pop-up, writes `WAITING · <project>` to the session's terminal title (OSC 0 on the
+                        pty found up the parent chain; VS Code's integrated terminal is xterm.js, which treats OSC 0 as
+                        OSC 2, so a tab showing the sequence title follows it) and appends a line to
+                        ~/.local/state/crafting-guild/attention.log; it repeats every repeat_minutes until resumed
+                        (at most repeat_max alerts in all, then one `gave-up` line), which kills it and sets the
+                        title to the project name. An idle event is a finished notice
+                        instead: one "Finished" pop-up, `DONE · <project>` and one `finished` log line, never a
+                        repeat, unless a question or permission wait for the session is still open.
 scripts/break.sh        the break reminder: ws-break.timer runs it every minute, and it decides from
                         ~/.local/state/crafting-guild/break.last whether break_minutes have passed, so a config change
                         needs no unit reload.

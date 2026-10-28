@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2154  # the alert keys are assigned by alerts_load_config in alerts-lib.sh
 # The single attention handler both agents call. On `waiting` it records the wait and starts a detached watcher; after
-# alert_after_seconds the watcher raises a pop-up, puts WAITING on the terminal's title and logs, and repeats every
-# repeat_minutes until `resumed` clears it. It returns at once: an agent never waits on its own notification.
+# alert_after_seconds a question or permission watcher raises a pop-up, puts WAITING on the terminal's title and logs,
+# and repeats every repeat_minutes until `resumed` clears it, at most repeat_max alerts in all (the first included;
+# 0 = no cap) with one `gave-up` line when the cap is reached. An idle event is a finished notice instead: one pop-up,
+# `DONE · <project>` and one `finished` log line, no repeat, unless a real wait for that session is open. It returns at
+# once: an agent never waits on its own notification.
 # No model runs here.
 # Usage: attention.sh [--stdin] --agent claude|opencode --session <id> [--project <slug>]
 #                     --reason question|permission|idle --event waiting|resumed
@@ -11,6 +14,11 @@
 # --stdin reads the JSON a Claude Code hook receives on stdin: session_id, cwd, hook_event_name,
 # notification_type and message fill in whatever the flags did not name.
 set -uo pipefail
+
+# Deliberate: a headless builder has nobody watching it, and WS_RUN_EVENTS marks that run; a global Claude hook
+# otherwise starts this handler for every builder tool call. No log, pop-up or title.
+if [ -n "${WS_RUN_EVENTS:-}" ]; then exit 0; fi
+
 . "$(dirname "$0")/alerts-lib.sh"
 
 agent="" session="" project="" reason="" event="" state="" read_stdin=false
@@ -83,6 +91,7 @@ alerts_state_file_for() { # <agent> <session>
 }
 alerts_state_file() { alerts_state_file_for "$agent" "$session"; }
 alerts_read_pid() { [ -f "$1" ] && sed -n 's/^pid=//p' "$1" | head -n 1; return 0; }
+alerts_read_reason() { [ -f "$1" ] && sed -n 's/^reason=//p' "$1" | head -n 1; return 0; }
 alerts_state_active() { [ -f "$1" ] && [ "$(alerts_read_pid "$1")" = "$2" ]; }
 
 # The watcher's own view of the wait: pid, tty and the fields the log line needs.
@@ -111,21 +120,36 @@ alerts_write_state() { # <state-file> <pid> <tty>
 }
 
 # The alert itself, re-reading the config: quiet hours can start, or the pop-up can be switched off, while a wait is
-# still open. The log is always written; quiet hours and visual=off suppress only the pop-up and the title.
+# still open. The log is always written; quiet hours and visual=off suppress only the pop-up and the title. An idle
+# reason is a finished notice: it logs `finished`, says nothing about waiting, and finished=off keeps the log line only.
 alerts_raise() { # <alert|repeat>
   # agent, session, project, reason and tty are the caller's locals (alerts_wait_loop); declaring them here would
   # shadow the wait's own values with empty ones.
+  local event title
   alerts_load_config
   [ "$attention" = on ] || return 0
-  alerts_log "$agent" "$session" "$project" "$reason" "$1"
+  event="$1"
+  [ "$reason" = idle ] && event=finished
+  alerts_log "$agent" "$session" "$project" "$reason" "$event"
   alerts_quiet_now && return 0
+  # finished=off switches the whole notice off, the sound included, and leaves only the log line.
+  [ "$reason" = idle ] && [ "$finished" = off ] && return 0
   if [ "$visual" = on ]; then
     case "$reason" in
-      permission) alerts_popup "Needs your permission" "$project: a permission prompt is waiting" ;;
-      question) alerts_popup "Needs your answer" "$project: a question is waiting" ;;
-      *) alerts_popup "Waiting for you" "$project: the session is idle" ;;
+      permission)
+        alerts_popup "Needs your permission" "$project: a permission prompt is waiting"
+        title="WAITING · ${project:-session}" ;;
+      question)
+        alerts_popup "Needs your answer" "$project: a question is waiting"
+        title="WAITING · ${project:-session}" ;;
+      idle)
+        alerts_popup "Finished" "$project: the session finished and is ready for you"
+        title="DONE · ${project:-session}" ;;
+      *)
+        alerts_popup "Waiting for you" "$project: the session is idle"
+        title="WAITING · ${project:-session}" ;;
     esac
-    if [ -n "$tty" ] && alerts_set_title "$tty" "WAITING · ${project:-session}"; then
+    if [ -n "$tty" ] && alerts_set_title "$tty" "$title"; then
       [ -n "${state:-}" ] && : >"$state.titled"
     fi
   fi
@@ -134,24 +158,33 @@ alerts_raise() { # <alert|repeat>
 }
 
 alerts_wait_loop() { # <state-file>
-  local state="$1" me=$$ pid tty agent session project reason seconds
+  local state="$1" me=$$ pid tty agent session project reason seconds raised=0
   alerts_read_state "$state"
   sleep "$alert_after_seconds"
   alerts_state_active "$state" "$me" || return 0
   alerts_raise alert
+  [ "$reason" = idle ] && return 0
+  raised=1
   seconds=$(alerts_minutes_to_seconds "$repeat_minutes")
   [ "$seconds" -gt 0 ] || return 0
+  # repeat_max caps the alerts one wait raises, the first included; 0 means no cap. Reaching it leaves the WAITING
+  # title in place and logs one gave-up line, so a long wait stops stacking pop-ups without claiming it ended.
   while alerts_state_active "$state" "$me"; do
+    if [ "$repeat_max" -gt 0 ] && [ "$raised" -ge "$repeat_max" ]; then
+      alerts_log "$agent" "$session" "$project" "$reason" gave-up
+      return 0
+    fi
     sleep "$seconds"
     alerts_state_active "$state" "$me" || return 0
     alerts_load_config
     [ "$attention" = on ] || return 0
     alerts_raise repeat
+    raised=$((raised + 1))
   done
 }
 
 alerts_waiting() {
-  local dir state old tty watcher
+  local dir state old old_reason tty watcher
   # attention=off is the whole handler switched off: nothing is logged and no watcher is started. The break timer
   # has its own switch (break_minutes=0).
   [ "$attention" = on ] || return 0
@@ -159,11 +192,19 @@ alerts_waiting() {
   mkdir -p "$dir/attention" || alerts_die "cannot create $dir/attention"
   state=$(alerts_state_file)
   old=$(alerts_read_pid "$state")
+  old_reason=$(alerts_read_reason "$state")
+  # A finished session is not a reason to replace a question or permission the person still has to answer: keep that
+  # wait, its watcher, its repeats and its WAITING title.
+  if [ "$reason" = idle ]; then
+    case "$old_reason" in question|permission) return 0 ;; esac
+  fi
   [ -n "$old" ] && kill "$old" 2>/dev/null
   tty=$(alerts_find_tty) || tty=""
-  alerts_log "$agent" "$session" "$project" "$reason" waiting
+  # An idle event is one finished notice, not a wait, so it has no separate waiting line; its watcher logs `finished`.
+  [ "$reason" = idle ] || alerts_log "$agent" "$session" "$project" "$reason" waiting
   alerts_write_state "$state" "" "$tty"
-  rm -f "$state.titled"
+  # The .titled marker stays: the title it marks is still on the terminal until a resume clears it. Removing it here
+  # left a tab stuck on WAITING when a new wait replaced one that had already alerted.
   if command -v setsid >/dev/null 2>&1; then
     setsid "$ALERTS_WS/scripts/attention.sh" --wait-loop "$state" </dev/null >>"$dir/attention.err" 2>&1 &
   else
@@ -184,8 +225,8 @@ alerts_resumed() {
   [ -n "${reason:-}" ] || reason=idle
   alerts_log "${agent:-unknown}" "${session:-unknown}" "${project:-unknown}" "$reason" resumed
   [ -n "${pid:-}" ] && kill "$pid" 2>/dev/null
-  # The title is put back only if an alert ever set it: a wait shorter than alert_after_seconds never touched the
-  # terminal, and a resume must not rewrite a title it did not change.
+  # The title is set to the project name only if an alert ever changed it: a wait shorter than alert_after_seconds
+  # never touched the terminal, and a resume must not rewrite a title it did not change.
   if [ -f "$state.titled" ]; then
     [ -n "${tty:-}" ] && alerts_set_title "$tty" "${project:-session}"
     rm -f "$state.titled"

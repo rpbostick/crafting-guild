@@ -58,18 +58,57 @@ inflight_block() { # <plan-file> [max-lines] [indent]
     }
   ' "$1"
 }
+# Whether agent/<step> exists in <repo> and is still open. Ancestry alone cannot tell: a branch with no commits
+# of its own sits at its fork point on <branch>, so a builder killed or timed out before its first commit would
+# read as merged. Such a branch is open while its worktree exists. A merged step has neither, because `ws merge`
+# deletes the branch and removes the worktree. With no repo to ask, a step counts as open: a caller that knows no
+# project path keeps the unfiltered listing. A branch or count that cannot be read also counts as open:
+# Deliberate: hiding waiting work on a misconfigured PROJECT_BRANCH is the failure this filter must never have.
+agent_branch_open() { # <repo> <branch> <step>
+  local ahead
+  [ -n "$1" ] || return 0
+  git -C "$1" rev-parse --verify --quiet "$2" >/dev/null 2>&1 || return 0
+  git -C "$1" rev-parse --verify --quiet "refs/heads/$(branch_of "$3")" >/dev/null 2>&1 || return 1
+  ahead=$(git -C "$1" rev-list --count "$2..$(branch_of "$3")") || return 0
+  [ "${ahead:-0}" -gt 0 ] && return 0
+  [ -d "$(worktree_of "$1" "$3")" ]
+}
+# A stopped chain's reason begins with the step name and a colon ("tutor-synthesis: reviewed ..."). The
+# chain's own phases setup (a doctor failure) and start (refused task files) are not steps: without a branch
+# or a dispatch file of that name they have nothing to merge, so their stops stay listed.
+chain_stop_step() { # <runs-dir> <repo> <reason>
+  local runs="$1" repo="$2" reason="$3" step has_step=""
+  case "$reason" in *:*) step="${reason%%:*}" ;; *) return 0 ;; esac
+  case "$step" in *[!A-Za-z0-9._-]*|'') return 0 ;; esac
+  case "$step" in
+    setup|start)
+      if [ -n "$repo" ] && git -C "$repo" rev-parse --verify --quiet "refs/heads/$(branch_of "$step")" >/dev/null 2>&1; then has_step=1
+      elif [ -f "$runs/$step.task.txt" ] || [ -f "$runs/$step.result.txt" ]; then has_step=1
+      fi
+      [ -n "$has_step" ] || return 0 ;;
+  esac
+  printf '%s\n' "$step"
+}
 # Items waiting on you in one project: a missing checkout, a stopped chain (a gate's reason names the
-# merge command) and a finished run whose saved result is partial or missing and whose pid is gone.
-waiting_lines() { # <slug> <runs-dir> [project-path]
-  local slug="$1" runs="$2" path="${3:-}" f n pid st reason first
-  if [ -n "$path" ] && [ ! -d "$path/.git" ] && [ ! -f "$path/.git" ]; then
+# merge command) and a finished run whose saved result is partial or missing and whose pid is gone. A run or a
+# stopped step is listed only while its agent branch is still open: the result files outlive their branch.
+waiting_lines() { # <slug> <runs-dir> [project-path] [project-branch]
+  local slug="$1" runs="$2" path="${3:-}" branch="${4:-main}" f n pid st reason first step repo=""
+  if [ -n "$path" ] && { [ -d "$path/.git" ] || [ -f "$path/.git" ]; }; then repo="$path"; fi
+  if [ -n "$path" ] && [ -z "$repo" ]; then
     printf '%s: project path is not a git repo: %s\n' "$slug" "${path:-<empty>}"
+  fi
+  if [ -n "$repo" ] && ! git -C "$repo" rev-parse --verify --quiet "$branch" >/dev/null 2>&1; then
+    printf '%s: PROJECT_BRANCH %s not found; waiting items not filtered\n' "$slug" "$branch"
   fi
   if [ -f "$runs/chain.status" ]; then
     st=$(head -n1 "$runs/chain.status")
     if [ "${st%% *}" = stopped ]; then
       reason=$(printf '%s' "$st" | sed -E 's/^[^ ]+ [^ ]+ [^ ]+ [^ ]+ //')
-      printf '%s: chain stopped: %s\n' "$slug" "$reason"
+      step=$(chain_stop_step "$runs" "$repo" "$reason")
+      if [ -z "$step" ] || agent_branch_open "$repo" "$branch" "$step"; then
+        printf '%s: chain stopped: %s\n' "$slug" "$reason"
+      fi
     fi
   fi
   for f in "$runs"/*.result.txt; do
@@ -79,6 +118,9 @@ waiting_lines() { # <slug> <runs-dir> [project-path]
     n=$(basename "$f" .result.txt); pid=""
     [ -f "$runs/$n.pid" ] && pid=$(cat "$runs/$n.pid")
     [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && continue
+    # A retried run's name carries a .YYYYMMDDTHHMMSSZ suffix; the step is the name the branch uses.
+    step=$(printf '%s' "$n" | sed -E 's/\.[0-9]{8}T[0-9]{6}Z$//')
+    agent_branch_open "$repo" "$branch" "$step" || continue
     printf '%s: run %s: %s\n' "$slug" "$n" "${first:0:200}"
   done
 }
@@ -145,7 +187,7 @@ lessons_for() {
   cat "$WS_LESSONS_DIR/$1.md"
   if [ -f "$WS_LESSONS_DIR/$1.local.md" ]; then echo; cat "$WS_LESSONS_DIR/$1.local.md"; fi
 }
-worktree_dir() { echo "$WT_ROOT/$1"; }
+worktree_dir() { worktree_of "$PROJECT_PATH" "$1"; }
 # A replay's tree: check <base> out at <wt> on branch <br>, apply <patch>, commit it, then put the run's kept
 # evidence back into .ws-evidence/ so a review or a later check finds it where the builder left it. Sets
 # REPLAY_REASON (empty on success) and REPLAY_EVIDENCE_COUNT. <label> names the run in the commit message.
@@ -194,6 +236,7 @@ task_file() { sed -n 's/^task=//p' "$RUNS/$1.task.txt" 2>/dev/null; }
 task_is_light() { local f; f=$(task_file "$1"); [ -n "$f" ] && grep -qi 'track: *light' "$f" 2>/dev/null; }
 # A task header `UI: yes` (the planner writes it beside `Track:`) marks a change the builder must render.
 task_is_ui() { local f; f=$(task_file "$1"); [ -n "$f" ] && grep -qiE '^[[:space:]]*[*_`]*UI:[[:space:]]*yes' "$f" 2>/dev/null; }
+worktree_of() { echo "$1/.worktrees/$2"; }
 branch_of() { echo "agent/$1"; }
 short() { git -C "$PROJECT_PATH" rev-parse --short "$1" 2>/dev/null || echo "$1"; }
 # The final `result` event of a stream-json log, or nothing if the run has not ended.

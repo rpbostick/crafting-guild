@@ -31,7 +31,7 @@ while IFS= read -r slug; do
   runs="$WS/runs/$slug"
   plans="$WS/plans/$slug"
   before=$(line_count "$tmp/waiting")
-  waiting_lines "$slug" "$runs" "$path" >> "$tmp/waiting"
+  waiting_lines "$slug" "$runs" "$path" "$branch" >> "$tmp/waiting"
   [ "$(line_count "$tmp/waiting")" -gt "$before" ] && mark
 
   if [ -d "$runs" ]; then

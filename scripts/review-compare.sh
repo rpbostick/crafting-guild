@@ -240,7 +240,7 @@ recall_bench() {
     if [ -f "$review_json" ] && jq -e '(.blocking | type) == "array"' "$review_json" >/dev/null 2>&1; then
       csha=$(jq -r '.reviewed_sha // empty' "$review_json")
       cblock=$(jq '(.blocking // []) | length' "$review_json")
-      claude_json=$(jq -c '[.blocking[] | {file, line}]' "$review_json")
+      claude_json=$(jq -c '[.blocking[]? | {file, line}]' "$review_json")
     fi
     if [ -z "$cblock" ]; then
       # The full review markdown is in the bench review log (or the live run's log) and holds the same bullets.
@@ -303,7 +303,9 @@ if [ "$mode" = merged ]; then
       if [ -z "$sha" ]; then note "$name: no reviewed SHA and no branch to check out; skipped"; status=1; continue; fi
       # The recorded review compared the branch against where it started, so use the merged branch's base: the
       # merge commit's first parent alone is main at merge time and includes main's later commits.
-      if [ -n "$merge" ]; then base=$(merged_branch_base "$merge" "$sha" 2>/dev/null || true)
+      if [ -n "$merge" ]; then
+        base=$(merged_branch_base "$merge" "$sha" 2>/dev/null || true)
+        if [ -z "$base" ]; then note "$name: no merge base for $(short "$sha"); skipped"; status=1; continue; fi
       else base=$(git -C "$PROJECT_PATH" merge-base "$PROJECT_BRANCH" "$sha" 2>/dev/null || true); fi
       scratch="$(worktree_dir "$name")-compare-$$"
       if ! git -C "$PROJECT_PATH" worktree add -q --detach "$scratch" "$sha"; then

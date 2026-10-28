@@ -204,6 +204,31 @@ echo grid > "$T/input.u8"
 grep -qx '.worktrees' "$T/.git/info/exclude" && grep -qx '.ws-evidence' "$T/.git/info/exclude" && echo "exclude ok"
 [ -d "$T/.worktrees/demo/.ws-evidence" ] && echo "evidence dir ok"
 grep -q 'timeout: 120m' <<< "$out" && echo "full-track timeout ok"
+# dispatch --instructions: an arm's files other than the sheet and lessons land in the worktree for the builder
+# to read; an arm with only agents/ and lessons/ leaves the prompt byte for byte unchanged and copies nothing.
+A0="$T/arm-plain"; mkdir -p "$A0/agents" "$A0/lessons"
+cp "$WS/agents/builder.md" "$A0/agents/builder.md"; cp "$WS/lessons/builder.md" "$A0/lessons/builder.md"
+[ ! -f "$WS/lessons/builder.local.md" ] || cp "$WS/lessons/builder.local.md" "$A0/lessons/builder.local.md"
+base_prompt=$("$WS/scripts/dispatch.sh" --project "$slug" --print-prompt demo "$T/task.md" 2>&1)
+# A file an earlier arm left must not survive the next instructions dispatch: the folder is rebuilt every time.
+mkdir -p "$T/.worktrees/demo/.ws-evidence/given/arm"; printf '# stale\n' > "$T/.worktrees/demo/.ws-evidence/given/arm/stale.md"
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --print-prompt --instructions "$A0" demo "$T/task.md" 2>&1)
+ai=0
+[ "$(grep '^prompt bytes: ' <<< "$out")" = "$(grep '^prompt bytes: ' <<< "$base_prompt")" ] && ! grep -q 'given/arm' <<< "$out" \
+  && [ ! -e "$T/.worktrees/demo/.ws-evidence/given/arm" ] \
+  && echo "dispatch --instructions plain arm leaves the prompt alone and clears an earlier arm ok" \
+  || { echo "dispatch --instructions plain arm FAILED"; echo "$out"; ai=1; }
+A1="$T/arm-files"; mkdir -p "$A1/agents" "$A1/lessons" "$A1/stages/build"
+printf '# map marker\n' > "$A1/map.md"; printf '# build marker\n' > "$A1/stages/build/context.md"
+printf '# sheet marker\n' > "$A1/agents/builder.md"; printf -- '- arm lesson\n' > "$A1/lessons/builder.md"
+out=$("$WS/scripts/dispatch.sh" --project "$slug" --print-prompt --instructions "$A1" demo "$T/task.md" 2>&1)
+D="$T/.worktrees/demo/.ws-evidence/given/arm"
+[ "$(cat "$D/map.md" 2>/dev/null)" = "# map marker" ] && [ "$(cat "$D/stages/build/context.md" 2>/dev/null)" = "# build marker" ] \
+  && [ ! -e "$D/agents" ] && [ ! -e "$D/lessons" ] \
+  && grep -qF 'Arm files for this run are in `.ws-evidence/given/arm/` (map.md, stages/build/context.md); read them as the sheet says.' <<< "$out" \
+  && echo "dispatch --instructions copies the arm files and names them ok" \
+  || { echo "dispatch --instructions files FAILED"; echo "$out"; find "$D" -type f 2>&1; ai=1; }
+[ "$ai" = 0 ] || exit 1
 printf '# light task\n**Track: light.**\nFix a typo.\n' > "$T/light.md"
 out=$("$WS/scripts/dispatch.sh" --project "$slug" --dry-run demo "$T/light.md" 2>&1); grep -q 'timeout: 45m' <<< "$out" && echo "light-track timeout ok"
 # chain's automatic fix task keeps the original's "## Commands" grants (a fix round once could not re-run its tests).
@@ -1485,6 +1510,85 @@ out=$("$WS/bin/ws" --project "$slug" review-shadow 2>&1)
 grep -q "== $slug: 4 shadow review(s); verdict agreement 3/4; findings named 2/4 (recall 50%); shadow-only blocking 2; 1 error(s)" <<< "$out" \
   && grep -q '^== total: 4 shadow review(s); verdict agreement 3/4; findings named 2/4' <<< "$out" \
   && echo "ws review-shadow prints agreement, recall and shadow-only findings ok" || ofail "review-shadow report" "$out"
+# A review --out keys its OpenCode config and prompt by the out base: a shadow and a review-compare can review
+# the same name at the same time without overwriting each other's files.
+rm -f "$ocr/prompt-a.review-prompt.txt" "$ocr/prompt-b.review-prompt.txt"
+out=$(oc reviewfind "$WS/scripts/review.sh" --project "$slug" --agent opencode --model opencode-go/deepseek-v4.1-flash --out "$ocr/prompt-a" --worktree "$RVT" ocrv 2>&1) || true
+out=$(oc reviewfind "$WS/scripts/review.sh" --project "$slug" --agent opencode --model opencode-go/deepseek-v4.1-flash --out "$ocr/prompt-b" --worktree "$RVT" ocrv 2>&1) || true
+[ -f "$ocr/prompt-a.review-prompt.txt" ] && [ -f "$ocr/prompt-b.review-prompt.txt" ] \
+  && [ -f "$ocr/prompt-a.opencode-review.json" ] && [ -f "$ocr/prompt-b.opencode-review.json" ] \
+  && echo "a review --out keys its OpenCode config and prompt by the out base ok" || ofail "review out prompt files" "$out
+ files: $(ls "$ocr"/prompt-*.review-prompt.txt "$ocr"/prompt-*.opencode-review.json 2>/dev/null)"
+# The shadow log keeps the review's own first line after the summary is appended: the inner review must not
+# reopen (and truncate) the log the detached shadow already writes to.
+ssh_ocrvlog=$(snew ocrvlog)
+x=0; sreview ocrvlog reviewfind merge >/dev/null 2>&1 || x=$?
+swt ocrvlog || ofail "shadow log row" "$(cat "$ocr/shadow/ocrvlog-$ssh_ocrvlog.log" 2>/dev/null)"
+slogf="$ocr/shadow/ocrvlog-$ssh_ocrvlog.log"
+for _ in $(seq 100); do grep -q '^review-shadow: ' "$slogf" 2>/dev/null && break; sleep 0.1; done
+[ "$x" = 0 ] && grep -q '^# Review of agent/ocrvlog at ' "$slogf" && grep -q '^review-shadow: ocrvlog ' "$slogf" \
+  && echo "the shadow log keeps the review's first line after the summary ok" || ofail "shadow log first line" "exit $x
+$(head -3 "$slogf" 2>/dev/null)"
+# Without systemd-run the shadow says it runs with no memory cap instead of dropping the cap silently.
+snew ocrvcap >/dev/null
+mkdir -p "$T/nocap"
+printf '#!/bin/sh\nexit 1\n' > "$T/nocap/systemd-run"; chmod +x "$T/nocap/systemd-run"
+x=0; capout=$(PATH="$T/nocap:$T/psbin:$T/ocbin:$PATH" OC_CALLS="$T/oc-calls" OC_SAMPLE="$WS/scripts/fixtures/opencode-sample.jsonl" \
+  WS_ZDR_PAGE="$Z" WS_TODAY=2026-10-31 OC_STUB=reviewfind PS_VERDICT=merge WS_REVIEW_MEM=1G WS_REVIEW_SHADOW=opencode \
+  "$WS/bin/ws" --project "$slug" review ocrvcap 2>&1) || x=$?
+swt ocrvcap || ofail "shadow cap row" "$capout"
+[ "$x" = 0 ] && grep -q 'no memory cap' <<< "$capout" \
+  && echo "a shadow without systemd-run says it has no memory cap ok" || ofail "shadow no memory cap" "exit $x
+$capout"
+# A shadow killed before its trap leaves <name>-shadow-<pid>; the next shadow with that name prefix removes the
+# leftover whose pid is gone.
+ssh_ocrvstale=$(snew ocrvstale)
+git -C "$T" worktree add -q --detach "$T/.worktrees/ocrvstale-shadow-2147483646" "$ssh_ocrvstale"
+jq -n --arg sha "$ssh_ocrvstale" '{reviewed_sha:$sha, when:"2026-10-31 10:00 UTC", verdict:"fix-first", summary:"stale", blocking:[{file:"a.txt",line:1,rule:2,why:"x"}], suggestions:[]}' > "$T/ocrvstale-claude.json"
+stale_base=$(git -C "$T" merge-base main "$ssh_ocrvstale")
+x=0; staleout=$(oc reviewfind "$WS/scripts/review-shadow.sh" --project "$slug" --run --name ocrvstale --sha "$ssh_ocrvstale" \
+  --base "$stale_base" --claude-review "$T/ocrvstale-claude.json" --model opencode-go/deepseek-v4.1-flash --budget 1 2>&1) || x=$?
+[ "$x" = 0 ] && [ ! -d "$T/.worktrees/ocrvstale-shadow-2147483646" ] \
+  && echo "a shadow removes a leftover worktree whose pid is gone ok" || ofail "shadow stale worktree" "exit $x
+$staleout
+leftover: $(ls -d "$T"/.worktrees/ocrvstale-shadow-* 2>/dev/null)"
+# review-compare --fix-first diffs a merged branch from where it started when main gained commits before the merge.
+git -C "$T" checkout -q -b agent/ocrvf main
+printf 'fix-first branch\n' > "$T/ocrvf-only.txt"; git -C "$T" add ocrvf-only.txt
+git -C "$T" -c user.name=t -c user.email=t@t commit -qm "ocrvf branch file"
+fftip=$(git -C "$T" rev-parse HEAD)
+git -C "$T" checkout -q main
+printf 'later main\n' > "$T/ocrvf-main-later.txt"; git -C "$T" add ocrvf-main-later.txt
+git -C "$T" -c user.name=t -c user.email=t@t commit -qm "main gained a file"
+git -C "$T" -c user.name=t -c user.email=t@t merge -q --no-ff agent/ocrvf -m "Merge agent/ocrvf: fix-first base (reviewed at $(git -C "$T" rev-parse --short "$fftip"))"
+printf '# Fix round 1\n\n## Blocking findings\n- `ocrvf-only.txt:1` (rule 2): one\n' > "$T/ocrvf-fix-auto-1.md"
+printf '2026-10-31 10:00 UTC  ocrvf: review at %s: fix-first\n2026-10-31 10:00 UTC  ocrvf: fix-first; automatic fix round 1 (%s)\n' \
+  "$(git -C "$T" rev-parse --short "$fftip")" "$T/ocrvf-fix-auto-1.md" > "$ocr/chain.log"
+rm -f "$T/ocrvf.prompt"
+out=$(OC_MSG_OUT="$T/ocrvf.prompt" oc reviewdiff "$WS/scripts/review-compare.sh" --project "$slug" --model opencode-go/deepseek-v4.1-flash --fix-first ocrvf 2>&1) || true
+row=$(awk -F'\t' '$1 ~ /^ocrvf@/' "$ocr/review-recall.tsv" 2>/dev/null || true)
+[ -f "$T/ocrvf.prompt" ] && grep -q 'ocrvf-only.txt' "$T/ocrvf.prompt" && ! grep -q 'ocrvf-main-later.txt' "$T/ocrvf.prompt" \
+  && [ -n "$row" ] \
+  && echo "review-compare --fix-first diffs from the branch's start when main gained commits ok" || ofail "review-compare fix-first main advanced" "$out
+ prompt: $(grep -E '^diff --git' "$T/ocrvf.prompt" 2>/dev/null | head -5)
+ row: $row"
+# A merged branch whose merge base with the reviewed SHA cannot be found is skipped with a note instead of being
+# reviewed from review.sh's default base.
+git -C "$T" checkout -q --orphan agent/ocrvu
+git -C "$T" rm -rq --cached .
+printf 'unrelated\n' > "$T/unrelated.txt"; git -C "$T" add unrelated.txt
+git -C "$T" -c user.name=t -c user.email=t@t commit -qm "unrelated root"
+utip=$(git -C "$T" rev-parse HEAD)
+git -C "$T" checkout -q -f main
+git -C "$T" -c user.name=t -c user.email=t@t merge -q --allow-unrelated-histories --no-ff agent/ocrvu -m "Merge agent/ocrvu: unrelated (reviewed at $(git -C "$T" rev-parse --short "$utip"))"
+git -C "$T" branch -q -D agent/ocrvu
+jq -n --arg sha "$utip" '{reviewed_sha:$sha, when:"2026-10-31 10:00 UTC", verdict:"merge", summary:"recorded", blocking:[], suggestions:[]}' > "$ocr/ocrvu.review.json"
+x=0; out=$(oc reviewdiff "$WS/scripts/review-compare.sh" --project "$slug" --model opencode-go/deepseek-v4.1-flash ocrvu 2>&1) || x=$?
+row=$(awk -F'\t' '$1=="ocrvu"' "$ocr/review-compare.tsv" 2>/dev/null || true)
+[ "$x" = 1 ] && grep -q 'no merge base' <<< "$out" && [ -z "$row" ] \
+  && echo "review-compare skips a merged case with no merge base ok" || ofail "review-compare no merge base" "exit $x
+$out
+row: $row"
 [ "$of" = 0 ] || exit 1
 # bench with another agent: an arm built by the stand-in opencode, not reviewed, beside the recorded first run of bx
 # (its record was moved aside by a later round, so its tests and verdict are unknown; its done-when is read here).
@@ -1618,6 +1722,14 @@ git -C "$BA" -c user.name=t -c user.email=t@t commit -qm done-step; git -C "$BA"
 git -C "$BA" -c user.name=t -c user.email=t@t merge -q --no-ff agent/done -m "Merge agent/done: an earlier step"
 git -C "$BA" checkout -q -b agent/foo; echo f > "$BA/foo.txt"; git -C "$BA" add foo.txt
 git -C "$BA" -c user.name=t -c user.email=t@t commit -qm foo; git -C "$BA" checkout -q main
+# Open branches behind the run and chain-stop fixtures, so the brief still lists the live ones.
+for s in gate-step partial dead; do
+  git -C "$BA" checkout -q -b "agent/$s" main; echo "$s" > "$BA/$s.txt"; git -C "$BA" add "$s.txt"
+  git -C "$BA" -c user.name=t -c user.email=t@t commit -qm "$s"; git -C "$BA" checkout -q main
+done
+# A builder killed before its first commit: agent/nocommit is main's tip, and only its worktree marks it open.
+git -C "$BA" branch agent/nocommit main
+mkdir -p "$BA/.worktrees/nocommit"
 git -C "$BB" init -q -b main; echo b > "$BB/b.txt"; git -C "$BB" add -A; git -C "$BB" -c user.name=t -c user.email=t@t commit -qm init
 printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$BA" > "$BW/projects/brief-a.conf"
 printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$BB" > "$BW/projects/brief-b.conf"
@@ -1625,6 +1737,11 @@ mkdir -p "$BW/runs/brief-a" "$BW/plans/brief-a"
 printf 'stopped 2026-10-27 12:00 MDT gate-step: reviewed abc1234, verdict merge; gated: run ws merge gate-step abc1234 and restart the chain\n' > "$BW/runs/brief-a/chain.status"
 printf 'partial: half the task\n' > "$BW/runs/brief-a/partial.result.txt"; : > "$BW/runs/brief-a/partial.jsonl"
 printf 'NO RESULT: no result event in the log (killed or crashed)\n' > "$BW/runs/brief-a/dead.result.txt"; : > "$BW/runs/brief-a/dead.jsonl"
+# A retried run carries a timestamp suffix but belongs to the open agent/foo branch; stale has no branch at all.
+printf 'partial: a retried run\n' > "$BW/runs/brief-a/foo.20261028T053501Z.result.txt"; : > "$BW/runs/brief-a/foo.20261028T053501Z.jsonl"
+printf 'NO RESULT: an abandoned run with no branch\n' > "$BW/runs/brief-a/stale.result.txt"; : > "$BW/runs/brief-a/stale.jsonl"
+# A killed builder before its first commit: no branch commits beyond main, but its worktree is still there.
+printf 'NO RESULT: a builder killed before its first commit\n' > "$BW/runs/brief-a/nocommit.result.txt"; : > "$BW/runs/brief-a/nocommit.jsonl"
 printf '%s 8800\n' "$$" > "$BW/runs/brief-a/serve-main.pid"
 printf '%s\n' "$$" > "$BW/runs/brief-a/livebuilder.pid"; : > "$BW/runs/brief-a/livebuilder.jsonl"
 printf '# one\n\n**In flight right now (2026-10-27 12:58 MDT):** **Build:** dated marker\n\n**Next:** after that\n\n## Requirements\nnot this\n' > "$BW/plans/brief-a/one.md"
@@ -1640,6 +1757,10 @@ grep -q 'gate-step: reviewed abc1234' <<< "$out" || bok=false
 grep -q 'ws merge gate-step abc1234' <<< "$out" || bok=false
 grep -q 'partial: partial: half the task' <<< "$out" || bok=false
 grep -q 'dead: NO RESULT: no result event' <<< "$out" || bok=false
+grep -q 'run foo.20261028T053501Z: partial: a retried run' <<< "$out" || bok=false
+grep -q 'run stale:' <<< "$out" && bok=false
+# A branch with no commits of its own is open while its worktree exists: the run stays listed.
+grep -q 'run nocommit: NO RESULT: a builder killed before its first commit' <<< "$out" || bok=false
 grep -q '^## Running' <<< "$out" || bok=false
 grep -q 'livebuilder' <<< "$out" || bok=false
 grep -q 'preview main on :8800' <<< "$out" || bok=false
@@ -1654,6 +1775,26 @@ grep -q 'brief-a: .*Merge agent/done: an earlier step' <<< "$out" || bok=false
 grep -q '^## Workspace' <<< "$out" || bok=false
 grep -q 'untracked-later.md' <<< "$out" || bok=false
 grep -Eq '^Idle projects: brief-b$' <<< "$out" || bok=false
+# A stop naming a merged step is stale; the same stop naming the open step stays.
+printf 'stopped 2026-10-27 13:00 MDT done: reviewed abc1234, verdict merge; gated: run ws merge done abc1234 and restart the chain\n' > "$BW/runs/brief-a/chain.status"
+outm=$("$BW/bin/ws" brief 2>&1) || bok=false
+grep -q 'chain stopped: done:' <<< "$outm" && bok=false
+# A chain phase's stop (a doctor failure) names no step and stays listed.
+printf 'stopped 2026-10-27 13:02 MDT setup: ws doctor found a required check failing\n' > "$BW/runs/brief-a/chain.status"
+outs=$("$BW/bin/ws" brief 2>&1) || bok=false
+grep -q 'chain stopped: setup: ws doctor' <<< "$outs" || bok=false
+printf 'stopped 2026-10-27 12:00 MDT gate-step: reviewed abc1234, verdict merge; gated: run ws merge gate-step abc1234 and restart the chain\n' > "$BW/runs/brief-a/chain.status"
+outg=$("$BW/bin/ws" brief 2>&1) || bok=false
+grep -q 'chain stopped: gate-step: reviewed abc1234' <<< "$outg" || bok=false
+# A stop naming a step whose branch has no commits of its own stays listed while its worktree exists.
+printf 'stopped 2026-10-27 12:01 MDT nocommit: reviewed abc1234, verdict merge; gated: run ws merge nocommit abc1234 and restart the chain\n' > "$BW/runs/brief-a/chain.status"
+outn=$("$BW/bin/ws" brief 2>&1) || bok=false
+grep -q 'chain stopped: nocommit: reviewed abc1234' <<< "$outn" || bok=false
+printf 'stopped 2026-10-27 12:00 MDT gate-step: reviewed abc1234, verdict merge; gated: run ws merge gate-step abc1234 and restart the chain\n' > "$BW/runs/brief-a/chain.status"
+# Without a project path the old unfiltered listing is kept, chain stop included.
+allw=$(. "$BW/scripts/lib.sh" >/dev/null; waiting_lines brief-a "$BW/runs/brief-a")
+grep -q 'run stale:' <<< "$allw" || bok=false
+grep -q 'chain stopped: gate-step: reviewed abc1234' <<< "$allw" || bok=false
 "$BW/bin/ws" brief --write >/dev/null 2>&1 || bok=false
 [ -f "$BW/reports/brief.md" ] || bok=false
 cp "$BW/reports/brief.md" "$T/first-brief.md"
@@ -1669,7 +1810,20 @@ cs=$("$BW/scripts/cold-start.sh" --brief brief-a 2>&1) || true
 grep -q 'dated marker v2' <<< "$cs" || bok=false
 grep -q 'exact marker' <<< "$cs" || bok=false
 grep -q 'reports/brief.md' <<< "$cs" || bok=false
-grep -q 'waiting on you' <<< "$cs" || bok=false
+grep -q '5 waiting on you' <<< "$cs" || bok=false
+# A PROJECT_BRANCH that does not resolve must not hide waiting work: every candidate stays listed and the brief
+# names the misconfiguration instead of dropping the runs whose branch is gone.
+BC="$T/brief-c"; mkdir -p "$BC" "$BW/runs/brief-c"
+git -C "$BC" init -q -b main; echo c > "$BC/c.txt"; git -C "$BC" add -A
+git -C "$BC" -c user.name=t -c user.email=t@t commit -qm init
+printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="nosuch"\nTEST_CMD="true"\n' "$BC" > "$BW/projects/brief-c.conf"
+printf 'partial: a run with no branch and no worktree\n' > "$BW/runs/brief-c/gone.result.txt"
+printf 'stopped 2026-10-27 12:03 MDT closed: reviewed abc1234, verdict merge; gated: run ws merge closed abc1234 and restart the chain\n' > "$BW/runs/brief-c/chain.status"
+bno=$("$BW/bin/ws" brief 2>&1) || bok=false
+grep -q 'brief-c: PROJECT_BRANCH nosuch not found; waiting items not filtered' <<< "$bno" || bok=false
+grep -q 'brief-c: run gone: partial: a run with no branch and no worktree' <<< "$bno" || bok=false
+grep -q 'brief-c: chain stopped: closed: reviewed abc1234' <<< "$bno" || bok=false
+grep -q 'brief-a: PROJECT_BRANCH' <<< "$bno" && bok=false
 grep -qx 'OnCalendar=hourly' "$WS/systemd/ws-brief.timer" && grep -qx 'Persistent=true' "$WS/systemd/ws-brief.timer" || bok=false
 grep -qE '^ExecStart=.*/bin/ws brief --write$' "$WS/systemd/ws-brief.service" || bok=false
 if command -v systemd-analyze >/dev/null; then
@@ -1836,8 +1990,9 @@ out=$(timeout 120 "$WS/bin/ws" --project "$slug" chain "$T/chainsha.queue" 2>&1 
   && echo "chain hides a teeth result for another sha ok" \
   || { echo "chain stale teeth line FAILED:"; printf '%s\n' "$out" | tail -10; grep -n 'chainsha' "$WS/runs/$slug/chain.log" | tail -5; cat "$WS/runs/$slug/chainsha.teeth.txt" 2>/dev/null; exit 1; }
 # alerts: a wait shorter than alert_after_seconds raises nothing; a longer one alerts and repeats until resumed;
-# quiet hours keep the log line and suppress the pop-up; break.sh fires only when due and skips while quiet; and
-# ws alerts on then off leaves a scratch settings.json byte for byte as it was, with its plugin link and unit gone.
+# an idle event gives one finished notice instead of a wait; quiet hours keep the log line and suppress the pop-up;
+# break.sh fires only when due and skips while quiet; and ws alerts on then off leaves a scratch settings.json byte
+# for byte as it was, with its plugin link and unit gone.
 # HOME is a scratch directory and notify-send, paplay, canberra-gtk-play and systemctl are stand-ins, so nothing is
 # installed on this machine and no pop-up can appear.
 ALH="$T/alerts-home"; ALW="$T/alerts-ws"; ALB="$T/alerts-bin"; ALD="$ALH/.local/state/crafting-guild"
@@ -1898,6 +2053,9 @@ AL_CONF
 }
 alcount() { awk -F'\t' -v session="$1" -v event="$2" '$3 == session && $6 == event' "$ALD/attention.log" | wc -l; }
 alok=true
+# The handler exits early under a builder's WS_RUN_EVENTS marker (a hook would otherwise run for every builder tool
+# call); the selftest drives the real handler, so clear it here and set it only in the case that checks the marker.
+unset WS_RUN_EVENTS
 alcfg 30 "" off
 : > "$T/alerts-calls"; : > "$T/alerts-title"
 alrun "$ALW/scripts/attention.sh" --agent claude --session short --project demo --reason question --event waiting
@@ -1918,6 +2076,108 @@ sleep 1.4
 ! grep -q '^paplay\|^canberra' "$T/alerts-calls" || alok=false
 grep -q 'WAITING' "$T/alerts-title" || alok=false
 [ "$(tail -c 9 "$T/alerts-title")" = "$(printf '\033]0;demo\007')" ] || alok=false
+# An idle event is a finished notice, not a wait: one Finished pop-up and one finished log line, no WAITING and no
+# repeat, and the next resume sets the title to the project name.
+alcfg 30 "" off
+: > "$T/alerts-calls"; : > "$T/alerts-title"
+alrun "$ALW/scripts/attention.sh" --agent claude --session finsess --project demo --reason idle --event waiting
+sleep 2.6
+[ "$(alcount finsess finished)" = 1 ] || alok=false
+[ "$(awk -F'\t' '$3 == "finsess"' "$ALD/attention.log" | wc -l)" = 1 ] || alok=false
+[ "$(alcount finsess repeat)" = 0 ] || alok=false
+[ "$(grep -c '^notify-send' "$T/alerts-calls")" = 1 ] || alok=false
+grep -q '^notify-send.*Finished' "$T/alerts-calls" || alok=false
+grep -q 'the session finished and is ready for you' "$T/alerts-calls" || alok=false
+! grep -q 'WAITING' "$T/alerts-title" || alok=false
+grep -q 'DONE' "$T/alerts-title" || alok=false
+alrun "$ALW/scripts/attention.sh" --agent claude --session finsess --project demo --event resumed
+[ "$(tail -c 9 "$T/alerts-title")" = "$(printf '\033]0;demo\007')" ] || alok=false
+[ "$(awk -F'\t' -v s=finsess '$3 == s && $6 == "resumed" { r=$5 } END { print r }' "$ALD/attention.log")" = idle ] || alok=false
+# A finished notice during an open permission wait leaves that wait, its repeats and its WAITING title alone.
+alcfg 30 "" off
+: > "$T/alerts-calls"; : > "$T/alerts-title"
+alrun "$ALW/scripts/attention.sh" --agent claude --session held --project demo --reason permission --event waiting
+sleep 1.6
+grep -q 'WAITING' "$T/alerts-title" || alok=false
+alrun "$ALW/scripts/attention.sh" --agent claude --session held --project demo --reason idle --event waiting
+sleep 1.6
+[ "$(alcount held finished)" = 0 ] || alok=false
+[ "$(alcount held repeat)" -ge 1 ] || alok=false
+grep -q 'WAITING' "$T/alerts-title" || alok=false
+! grep -q 'DONE' "$T/alerts-title" || alok=false
+alrun "$ALW/scripts/attention.sh" --agent claude --session held --project demo --event resumed
+[ "$(tail -c 9 "$T/alerts-title")" = "$(printf '\033]0;demo\007')" ] || alok=false
+# A second permission after an alert keeps the .titled marker, so a resume before the new alert still clears WAITING.
+alcfg 30 "" off
+: > "$T/alerts-calls"; : > "$T/alerts-title"
+alrun "$ALW/scripts/attention.sh" --agent claude --session retitle --project demo --reason permission --event waiting
+sleep 1.6
+grep -q 'WAITING' "$T/alerts-title" || alok=false
+alrun "$ALW/scripts/attention.sh" --agent claude --session retitle --project demo --reason permission --event waiting
+alrun "$ALW/scripts/attention.sh" --agent claude --session retitle --project demo --event resumed
+[ "$(tail -c 9 "$T/alerts-title")" = "$(printf '\033]0;demo\007')" ] || alok=false
+# finished=off keeps the finished log line and shows no pop-up or title.
+alcfg 30 "" off
+printf 'finished=off\n' >>"$ALCFG"
+: > "$T/alerts-calls"; : > "$T/alerts-title"
+alrun "$ALW/scripts/attention.sh" --agent claude --session finoff --project demo --reason idle --event waiting
+sleep 1.6
+[ "$(alcount finoff finished)" = 1 ] || alok=false
+[ ! -s "$T/alerts-calls" ] || alok=false
+[ ! -s "$T/alerts-title" ] || alok=false
+alrun "$ALW/scripts/attention.sh" --agent claude --session finoff --project demo --event resumed
+# A repeat_minutes with more than one dot is rejected at validation.
+alcfg 30 "" off
+printf 'repeat_minutes=1.2.3\n' >>"$ALCFG"
+x=0
+alrun "$ALW/scripts/attention.sh" --agent claude --session badrepeat --reason question --event waiting >/dev/null 2>"$T/alerts-badrepeat.err" || x=$?
+[ "$x" = 1 ] && grep -q 'repeat_minutes' "$T/alerts-badrepeat.err" || alok=false
+# repeat_max caps the alerts one wait raises, the first included; 0 means no cap. The default gives one alert and one
+# repeat, then one gave-up line and no more, with WAITING left on the title until the resume clears it.
+alcfg 30 "" off
+: > "$T/alerts-calls"; : > "$T/alerts-title"
+alrun "$ALW/scripts/attention.sh" --agent claude --session capdefault --project demo --reason question --event waiting
+sleep 3.6
+[ "$(alcount capdefault alert)" = 1 ] || alok=false
+[ "$(alcount capdefault repeat)" = 1 ] || alok=false
+[ "$(alcount capdefault gave-up)" = 1 ] || alok=false
+grep -q 'WAITING' "$T/alerts-title" || alok=false
+alrun "$ALW/scripts/attention.sh" --agent claude --session capdefault --project demo --event resumed
+[ "$(tail -c 9 "$T/alerts-title")" = "$(printf '\033]0;demo\007')" ] || alok=false
+# repeat_max=0 keeps repeating: two or more repeats and never a gave-up line.
+alcfg 30 "" off
+printf 'repeat_max=0\n' >>"$ALCFG"
+: > "$T/alerts-calls"; : > "$T/alerts-title"
+alrun "$ALW/scripts/attention.sh" --agent claude --session capnone --project demo --reason question --event waiting
+sleep 3.6
+alrun "$ALW/scripts/attention.sh" --agent claude --session capnone --project demo --event resumed
+[ "$(alcount capnone alert)" = 1 ] || alok=false
+[ "$(alcount capnone repeat)" -ge 2 ] || alok=false
+[ "$(alcount capnone gave-up)" = 0 ] || alok=false
+# repeat_max=1 alerts once and gives up without a repeat.
+alcfg 30 "" off
+printf 'repeat_max=1\n' >>"$ALCFG"
+: > "$T/alerts-calls"; : > "$T/alerts-title"
+alrun "$ALW/scripts/attention.sh" --agent claude --session capone --project demo --reason question --event waiting
+sleep 2.6
+[ "$(alcount capone alert)" = 1 ] || alok=false
+[ "$(alcount capone repeat)" = 0 ] || alok=false
+[ "$(alcount capone gave-up)" = 1 ] || alok=false
+alrun "$ALW/scripts/attention.sh" --agent claude --session capone --project demo --event resumed
+# A repeat_max that is not a non-negative whole number is refused at validation.
+alcfg 30 "" off
+printf 'repeat_max=-1\n' >>"$ALCFG"
+x=0
+alrun "$ALW/scripts/attention.sh" --agent claude --session badcap --reason question --event waiting >/dev/null 2>"$T/alerts-badcap.err" || x=$?
+[ "$x" = 1 ] && grep -q 'repeat_max' "$T/alerts-badcap.err" || alok=false
+alcfg 30 "" off
+# A headless builder run (WS_RUN_EVENTS) gets nothing from the handler: no log line, state or pop-up.
+before_lines=$(wc -l <"$ALD/attention.log")
+: > "$T/alerts-calls"
+alrun env WS_RUN_EVENTS="$T/builder.events" "$ALW/scripts/attention.sh" --agent claude --session builder --project demo --reason idle --event waiting
+[ "$(wc -l <"$ALD/attention.log")" = "$before_lines" ] || alok=false
+[ ! -f "$ALD/attention/claude-builder.state" ] || alok=false
+[ ! -s "$T/alerts-calls" ] || alok=false
 hour=$(date +%H); nexthour=$(( (10#$hour + 1) % 24 ))
 alcfg 30 "$hour-$nexthour" on
 : > "$T/alerts-calls"; : > "$T/alerts-title"
@@ -1926,7 +2186,7 @@ sleep 2
 alrun "$ALW/scripts/attention.sh" --agent claude --session quiet --project demo --event resumed
 [ ! -s "$T/alerts-calls" ] || alok=false
 [ ! -s "$T/alerts-title" ] || alok=false
-[ "$(alcount quiet alert)" = 1 ] || alok=false
+[ "$(alcount quiet finished)" = 1 ] || alok=false
 # The quiet-hours boundary is held still with WS_ALERTS_HOUR: 22-07 is quiet at 23 and 06, awake at 07 and 12.
 # shellcheck disable=SC2034  # quiet_hours and WS_ALERTS_HOUR are read by alerts-lib.sh's functions in the same shell
 quiet_cases=$(cd "$ALW/scripts" && . ./alerts-lib.sh && quiet_hours=22-07 && for h in 23 6 7 12; do
@@ -2010,10 +2270,18 @@ grep -q 'disable --now ws-break.timer' "$T/alerts-systemctl" || alok=false
 alcfg 30 "" off
 alstatus=$(alrun "$ALW/bin/ws" alerts status 2>&1) || alok=false
 grep -q 'attention=on' <<<"$alstatus" && grep -q 'sound=off' <<<"$alstatus" || alok=false
+grep -q 'finished=on' <<<"$alstatus" || alok=false
+grep -q 'repeat_max=2' <<<"$alstatus" || alok=false
+# An invalid settings.json is named as such, not reported as "not installed".
+printf '{ not json\n' >"$ALSH"
+alstatus=$(alrun "$ALW/bin/ws" alerts status 2>&1) || alok=false
+grep -q 'not valid JSON' <<<"$alstatus" || alok=false
 : > "$T/alerts-calls"
 alrun "$ALW/bin/ws" alerts test >/dev/null || alok=false
 grep -q '^notify-send' "$T/alerts-calls" || alok=false
 grep -q '^alert_after_seconds=20' "$WS/docs/alerts.conf.sample" || alok=false
+grep -q '^finished=on' "$WS/docs/alerts.conf.sample" || alok=false
+grep -q '^repeat_max=2' "$WS/docs/alerts.conf.sample" || alok=false
 jq -e 'has("Notification") and has("UserPromptSubmit") and has("PreToolUse") and has("PostToolUse")' "$WS/docs/alerts-claude-hooks.json" >/dev/null || alok=false
 jq -e '.Notification[0].matcher | test("permission_prompt.*idle_prompt")' "$WS/docs/alerts-claude-hooks.json" >/dev/null || alok=false
 grep -qx 'OnCalendar=minutely' "$WS/systemd/ws-break.timer" || alok=false
@@ -2067,7 +2335,7 @@ delete process.env.WS_RUN_EVENTS;
 console.log("attention plugin ok");
 AL_PLUGIN
 node "$T/attention-plugin.test.mjs" "$WS/scripts/opencode-plugins/attention.js" >"$T/attention-plugin.log" 2>&1 || alok=false
-$alok && echo "alerts: wait, repeat, quiet hours, break timing, hook stdin, plugin and ws alerts on/off ok" \
+$alok && echo "alerts: wait, repeat, finished, quiet hours, break timing, hook stdin, plugin and ws alerts on/off ok" \
   || { echo "alerts FAILED"; echo "attention.log:"; cat "$ALD/attention.log" 2>/dev/null; echo "calls:"; cat "$T/alerts-calls" 2>/dev/null; \
        echo "title bytes:"; od -An -tx1 "$T/alerts-title" 2>/dev/null; cat "$T/attention-plugin.log" 2>/dev/null; exit 1; }
 echo "selftest passed"

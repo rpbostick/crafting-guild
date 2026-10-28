@@ -24,7 +24,9 @@ alerts_defaults() {
   quiet_hours=
   alert_after_seconds=20
   repeat_minutes=5
+  repeat_max=2
   attention=on
+  finished=on
 }
 
 alerts_is_int() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
@@ -33,19 +35,20 @@ alerts_is_int() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac;
 # off or into something else.
 alerts_validate_config() {
   local key value range
-  for key in visual sound attention; do
+  for key in visual sound attention finished; do
     eval "value=\$$key"
     case "$value" in on|off) ;; *) alerts_die "$(alerts_config_path): $key must be on or off, not '$value'" ;; esac
   done
-  for key in volume alert_after_seconds break_minutes; do
+  for key in volume alert_after_seconds break_minutes repeat_max; do
     eval "value=\$$key"
     alerts_is_int "$value" || alerts_die "$(alerts_config_path): $key must be a whole number, not '$value'"
   done
   [ "$volume" -le 100 ] || alerts_die "$(alerts_config_path): volume must be 0-100, not $volume"
   [ "$alert_after_seconds" -ge 1 ] || alerts_die "$(alerts_config_path): alert_after_seconds must be at least 1, not $alert_after_seconds"
   [ "$break_minutes" -ge 0 ] || alerts_die "$(alerts_config_path): break_minutes must be 0 (off) or more, not $break_minutes"
+  [ "$repeat_max" -ge 0 ] || alerts_die "$(alerts_config_path): repeat_max must be 0 (no cap) or more, not $repeat_max"
   case "$repeat_minutes" in
-    ''|.*|*.|*[!0-9.]*) alerts_die "$(alerts_config_path): repeat_minutes must be a number of minutes (5, 0.5, 0 for once), not '$repeat_minutes'" ;;
+    ''|.*|*.|*[!0-9.]*|*.*.*) alerts_die "$(alerts_config_path): repeat_minutes must be a number of minutes (5, 0.5, 0 for once), not '$repeat_minutes'" ;;
   esac
   case "$quiet_hours" in
     '') ;;
