@@ -43,6 +43,17 @@ shadow_cost() { # <review-out-base>
   fi
   printf '%s' "${cost:-?}"
 }
+# A detached checkout has no .ws-evidence/, and a review without it reads every logged claim as unbacked. The
+# builder's worktree goes first; a merge or a bench pass may already have moved its evidence to the kept copy.
+restore_branch_evidence() {
+  local source
+  for source in "$(worktree_dir "$name")/.ws-evidence" "$RUNS/evidence/$name" "$RUNS/bench/evidence/$name"; do
+    [ -d "$source" ] || continue
+    restore_evidence "$source" "$scratch"
+    [ "$EVIDENCE_COUNT" -eq 0 ] || return 0
+  done
+  echo "review-shadow: no evidence found for $name"
+}
 run_shadow() {
   [ -n "$name" ] && [ -n "$sha" ] && [ -n "$base" ] && [ -n "$claude" ] \
     || die "review-shadow.sh --run needs --name, --sha, --base and --claude-review"
@@ -70,7 +81,7 @@ run_shadow() {
   local out_base="$RUNS/shadow/$name-$sha" sha_full verdict blocking claude_json named soonly cost
   claude_json="$claude_findings_arg"
   if [ -z "$claude_json" ]; then
-    claude_json=$(jq -c '[.blocking[]? | {file, line}]' "$claude" 2>/dev/null) || claude_json=""
+    claude_json=$(jq -c '[.blocking[]? | {file, line, why}]' "$claude" 2>/dev/null) || claude_json=""
   fi
   if [ -z "$claude_json" ]; then
     record_row error 0 0 0 "?"
@@ -91,6 +102,11 @@ run_shadow() {
     echo "review-shadow: could not check out $sha in $scratch"
     exit 0
   fi
+  restore_branch_evidence
+  # The record leaves the current path before the review, so a re-review that fails reads as an error, not as the
+  # last one's verdict; it stays in rounds/.
+  if [ -f "$out_base.json" ]; then keep_review_round "$out_base.json" "$out_base.md"; fi
+  rm -f "$out_base.json" "$out_base.md"
   "$WS/scripts/review.sh" --project "$SLUG" --agent opencode --model "$model" --budget "$budget" \
     --out "$out_base" --worktree "$scratch" --base "$base" "$name" || true
   if [ ! -f "$out_base.json" ] || ! jq -e '.verdict' "$out_base.json" >/dev/null 2>&1; then
@@ -111,6 +127,14 @@ pct() { # <part> <whole>
   if [ "$whole" -le 0 ]; then echo "n/a"; else echo "$(( (part * 100 + whole / 2) / whole ))%"; fi
 }
 total_n=0 total_agree=0 total_named=0 total_claude=0 total_soonly=0 total_errors=0
+total_near=0 total_redone=0 total_w5=0 total_w10=0 total_w20=0 total_w40=0 total_changed=0 total_damaged=0
+recall_line() { # <label> <old named> <claude> <new named> <recomputed> <rows> <w5> <w10> <w20> <w40> <changed> <damaged>
+  local notes=""
+  [ "${11}" -eq 0 ] || notes="$notes ${11} row(s) changed since written, keeping the written count;"
+  [ "${12}" -eq 0 ] || notes="$notes ${12} damaged record(s);"
+  printf '== %s: recall by rule, same reviews: old %s/%s (%s) -> nearby text %s/%s (%s); the counting rule changed, not the reviewer; %s/%s rows recomputed, the rest keep their written count;%s named by window: 5 lines %s, 10 lines %s, 20 lines %s, 40 lines %s\n' \
+    "$1" "$2" "$3" "$(pct "$2" "$3")" "$4" "$3" "$(pct "$4" "$3")" "$5" "$6" "$notes" "$7" "$8" "$9" "${10}"
+}
 report_tsv() { # <slug>
   local s="$1" tsv="$WS/runs/$1/review-shadow.tsv" when rname rsha cverd cblock overd oblock named soonly cost
   local n=0 agree=0 named_sum=0 claude_sum=0 soonly_sum=0 errors=0
@@ -134,6 +158,14 @@ report_tsv() { # <slug>
     "$s" "$n" "$agree" "$n" "$named_sum" "$claude_sum" "$(pct "$named_sum" "$claude_sum")" "$soonly_sum"
   [ "$errors" -eq 0 ] || printf '; %s error(s)' "$errors"
   printf '\n'
+  local recount near redone rows w5 w10 w20 w40 changed damaged
+  recount=$(python3 "$WS/scripts/review_match.py" report "$WS/runs/$s" "$WS") || die "cannot recompute recall for $s"
+  read -r near redone rows w5 w10 w20 w40 changed damaged <<< "$recount"
+  recall_line "$s" "$named_sum" "$claude_sum" "$near" "$redone" "$rows" "$w5" "$w10" "$w20" "$w40" "$changed" "$damaged"
+  sed -n '2,$s/^/   /p' <<< "$recount"
+  total_near=$((total_near + near)); total_redone=$((total_redone + redone))
+  total_w5=$((total_w5 + w5)); total_w10=$((total_w10 + w10)); total_w20=$((total_w20 + w20)); total_w40=$((total_w40 + w40))
+  total_changed=$((total_changed + changed)); total_damaged=$((total_damaged + damaged))
 }
 if $run; then run_shadow; exit 0; fi
 if $all; then
@@ -148,6 +180,7 @@ if [ "$total_n" -gt 0 ]; then
     "$total_n" "$total_agree" "$total_n" "$total_named" "$total_claude" "$(pct "$total_named" "$total_claude")" "$total_soonly"
   [ "$total_errors" -eq 0 ] || printf '; %s error(s)' "$total_errors"
   printf '\n'
+  recall_line total "$total_named" "$total_claude" "$total_near" "$total_redone" "$total_n" "$total_w5" "$total_w10" "$total_w20" "$total_w40" "$total_changed" "$total_damaged"
 else
   echo "== total: no shadow reviews yet"
 fi

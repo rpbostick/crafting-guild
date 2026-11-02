@@ -51,6 +51,8 @@ READONLY_BASH = ("git diff", "git diff *", "git log", "git log *", "git show", "
 READONLY_BASH_DENY = ("*--output*", "*>*", "git difftool*")
 KNOWN = {"type", "enum", "properties", "required", "items", "description", "additionalProperties"}
 DENIAL = re.compile(r"permission|prevents you from using|rejected", re.I)
+# The wrapper beside this file; the generated config names it as OpenCode's shell when WS_SANDBOX is bwrap.
+SANDBOX_SHELL = os.path.join(os.path.dirname(os.path.realpath(__file__)), "ws-sandbox-shell.sh")
 
 
 def bash_pattern(grant):
@@ -81,6 +83,10 @@ def build_config(tools, deny):
     bad += [f"bash {key}" for key, value in bash.items() if value not in ("allow", "deny")]
     if bad:
         sys.exit(f"opencode_run: permissions not allow or deny: {bad}")
+    # Only a builder's shell is wrapped: a review's read-only grants run on the host and dispatch does not set
+    # the evidence runner's grant file there. With WS_SANDBOX empty the config keeps exactly the keys above.
+    if os.environ.get("WS_SANDBOX") == "bwrap":
+        cfg["shell"] = SANDBOX_SHELL
     return cfg
 
 

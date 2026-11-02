@@ -24,6 +24,14 @@ RUNS_COLS = ["run", "task", "arm", "trial", "base", "state", "tests", "dw_met", 
              "turns", "peak_context", "mean_context", "output_tokens", "cache_reads", "cost", "minutes", "denied", "teeth"]
 # Rows written before teeth existed lack the last column; they read as empty, not as an error.
 LEGACY_RUNS_COLS = RUNS_COLS[:-1]
+# Done-when as check-result graded it. Deliberate: a bench's runs.tsv does not carry these, since a running bench and
+# the rows already written must stay readable; the report reads each run's result.txt, and a recorded.tsv, which every
+# report rewrites from scratch, keeps them for first runs whose result.txt has another name.
+DW_COUNT_KEYS = ["dw_claimed", "dw_confirmed", "dw_inferred"]
+RECORDED_COLS = RUNS_COLS + DW_COUNT_KEYS
+# A run makes at least one model call, so a zero here is a measure the log did not give (OpenCode rows from before
+# step_finish was read), not a real count.
+TELEMETRY_KEYS = ("turns", "peak_context", "mean_context")
 METRIC_KEYS = ["turns", "peak_context", "mean_context", "output_tokens", "cache_reads", "cost", "minutes", "denied"]
 # arms.tsv rows: label, spec, resolved ref, then agent and model. Rows written before arms had an agent hold only
 # the first three, and those arms ran Claude on dispatch's default model.
@@ -175,16 +183,30 @@ def done_when_items(task_md):
     return items or (1 if any(line.strip() for line in section) else 0)
 
 
+def done_when_lines(result_txt):
+    """(mark, status) of each done-when line check-result wrote. The mark carries its judgement of a "met": ok when the
+    cited evidence exists or the item named no file to check, FAIL when a cited file is missing, note when it was only
+    inferred."""
+    if not os.path.exists(result_txt):
+        return []
+    matches = (re.match(r"(ok|note|FAIL) +done-when (met|partial|open) ", line) for line in open(result_txt, errors="replace"))
+    return [m.groups() for m in matches if m]
+
+
 def done_when_from_check(result_txt):
     """Met and reported items from check-result's lines: a "met" whose evidence is missing (FAIL) is not met."""
-    met = reported = 0
-    if os.path.exists(result_txt):
-        for line in open(result_txt, errors="replace"):
-            m = re.match(r"(ok|note|FAIL) +done-when (met|partial|open) ", line)
-            if m:
-                reported += 1
-                met += m.group(1) != "FAIL" and m.group(2) == "met"
-    return met, reported
+    lines = done_when_lines(result_txt)
+    return sum(mark != "FAIL" and status == "met" for mark, status in lines), len(lines)
+
+
+def done_when_counts(result_txt):
+    """Items the builder claimed met, those check-result confirmed, and those met on inference alone. Empty when
+    check-result graded no item (no result.txt, or one from before the field existed): unknown, not zero."""
+    lines = done_when_lines(result_txt)
+    if not lines:
+        return {}
+    marks = [mark for mark, status in lines if status == "met"]
+    return {"dw_claimed": len(marks), "dw_confirmed": marks.count("ok"), "dw_inferred": marks.count("note")}
 
 
 def review_measures(review_json):
@@ -219,10 +241,10 @@ def recorded_add(path, task, base, jsonl, result_txt, review_json, task_md):
     row = {"run": f"{RECORDED}-{task}", "task": task, "arm": RECORDED, "trial": "1", "base": base, "state": "done",
            "tests": "pass" if review_json != "-" else "", "dw_met": met if reported else "",
            "dw_total": max(reported, done_when_items(task_md)) if reported else "",
-           "verdict": verdict, "blocking": blocking, **measures}
+           "verdict": verdict, "blocking": blocking, **measures, **done_when_counts(result_txt)}
     with locked(path):
-        rows = [r for r in read_tsv(path, RUNS_COLS) if r["task"] != task] + [row]
-        write_tsv(path, RUNS_COLS, rows)
+        rows = [r for r in read_tsv(path, RECORDED_COLS) if r["task"] != task] + [row]
+        write_tsv(path, RECORDED_COLS, rows)
         arms_path = os.path.join(os.path.dirname(path), "recorded-arms.tsv")
         model = run_model(jsonl) if exists else ""
         models = {r["model"] for r in read_tsv(arms_path, ARMS_COLS) if r["model"]} | ({model} if model else set())
@@ -261,6 +283,41 @@ def mean(values):
     return sum(values) / len(values) if values else None
 
 
+def measure(row, key):
+    value = number(row[key])
+    return None if key in TELEMETRY_KEYS and not value else value
+
+
+def claimed(row):
+    """A row with no graded lines falls back on dw_met, the only count it has."""
+    value = number(row.get("dw_claimed"))
+    return number(row["dw_met"]) if value is None else value
+
+
+def done_when_rate(rows, key):
+    """Share of the done-when items of the rows that have this count; a row with no graded lines is left out."""
+    known = [r for r in rows if number(r.get(key)) is not None]
+    total = sum(number(r["dw_total"]) or 0 for r in known)
+    return sum(number(r[key]) for r in known) / total if total else None
+
+
+def claimed_rate(rows):
+    total = sum(number(r["dw_total"]) or 0 for r in rows)
+    return sum(claimed(r) or 0 for r in rows) / total if total else None
+
+
+def done_when_text(rows):
+    """One task's done-when, claimed beside confirmed."""
+    total = sum(int(number(r["dw_total"]) or 0) for r in rows)
+    known = [r for r in rows if number(r.get("dw_confirmed")) is not None]
+    said = f"done-when claimed {sum(int(claimed(r) or 0) for r in rows)}/{total}"
+    if not known:
+        return f"{said} confirmed n/a inferred n/a"
+    confirmed = sum(int(number(r["dw_confirmed"])) for r in known)
+    inferred = sum(int(number(r["dw_inferred"])) for r in known)
+    return f"{said} confirmed {confirmed}/{sum(int(number(r['dw_total']) or 0) for r in known)} inferred {inferred}"
+
+
 def per_run_quality(row):
     """A measure left empty (a recorded run's tests after a later round, a run not reviewed) is unknown, not a zero."""
     met, total = number(row["dw_met"]), number(row["dw_total"])
@@ -269,18 +326,18 @@ def per_run_quality(row):
             "merge verdicts": None if row["verdict"] in ("", UNREVIEWED, UNREVIEWABLE) else 1.0 if row["verdict"] == "merge" else 0.0}
 
 
-def arm_rate(rows, measure):
-    if measure == "done-when met":
+def arm_rate(rows, rate):
+    if rate == "done-when met":
         total = sum(number(r["dw_total"]) or 0 for r in rows)
         return sum(number(r["dw_met"]) or 0 for r in rows) / total if total else None
-    return mean(per_run_quality(r)[measure] for r in rows)
+    return mean(per_run_quality(r)[rate] for r in rows)
 
 
-def trial_spread(rows, measure):
+def trial_spread(rows, rate):
     """Mean over tasks of the range between one arm's trials of a task: how much a rate moves by chance alone."""
     by_task = {}
     for r in rows:
-        value = per_run_quality(r)[measure]
+        value = per_run_quality(r)[rate]
         if value is not None:
             by_task.setdefault(r["task"], []).append(value)
     ranges = [max(v) - min(v) for v in by_task.values() if len(v) > 1]
@@ -299,9 +356,9 @@ def teeth_errors(rows):
     return sum(r.get("teeth", "").startswith("error") for r in rows)
 
 
-def fmt(value, kind=""):
+def fmt(value, kind="", missing="-"):
     if value is None:
-        return "-"
+        return missing
     if kind == "%":
         return f"{100 * value:.0f}%"
     if kind == "$":
@@ -309,10 +366,10 @@ def fmt(value, kind=""):
     return f"{value:.1f}" if abs(value) < 100 else f"{value:.0f}"
 
 
-def spread_text(values):
+def spread_text(values, missing="-"):
     values = [v for v in values if v is not None]
     if not values:
-        return "-"
+        return missing
     return f"{fmt(mean(values))} [{fmt(min(values))}-{fmt(max(values))}]"
 
 
@@ -361,14 +418,18 @@ def report(title, rows, baseline, arm_info):
           + (": n is small, so a gap within the trial spread is noise, and one beyond it is a reason to look, not proof"
              if n < SMALL_N else ""))
     width = max(12, *(len(text) + 2 for a in arms for text in (a, agent_of[a], model_of[a])))
-    head = lambda label: print(f"  {label:<16}" + "".join(f"{a:>{width}}" for a in arms))
-    line = lambda label, values: print(f"  {label:<16}" + "".join(f"{v:>{width}}" for v in values))
-    print("quality")
+    head = lambda label: print(f"  {label:<22}" + "".join(f"{a:>{width}}" for a in arms))
+    line = lambda label, values: print(f"  {label:<22}" + "".join(f"{v:>{width}}" for v in values))
+    print("quality (done-when confirmed: check-result found the cited evidence, or the item named no file to check; "
+          "inferred: met with nothing run)")
     head("")
     line("agent", [agent_of[a] for a in arms])
     line("model", [model_of[a] for a in arms])
-    for measure in ("tests passed", "done-when met", "merge verdicts"):
-        line(measure, [fmt(arm_rate(by_arm[a], measure), "%") for a in arms])
+    line("tests passed", [fmt(arm_rate(by_arm[a], "tests passed"), "%") for a in arms])
+    line("done-when claimed", [fmt(claimed_rate(by_arm[a]), "%") for a in arms])
+    line("done-when confirmed", [fmt(done_when_rate(by_arm[a], "dw_confirmed"), "%", "n/a") for a in arms])
+    line("done-when inferred", [fmt(done_when_rate(by_arm[a], "dw_inferred"), "%", "n/a") for a in arms])
+    line("merge verdicts", [fmt(arm_rate(by_arm[a], "merge verdicts"), "%") for a in arms])
     line("blocking/run", [fmt(mean(number(r["blocking"]) for r in by_arm[a])) for a in arms])
     line("teeth ok/toothless/n-a", [teeth_counts(by_arm[a]) for a in arms])
     errors = {a: teeth_errors(by_arm[a]) for a in arms}
@@ -378,18 +439,19 @@ def report(title, rows, baseline, arm_info):
     for key, label, kind in (("turns", "turns", ""), ("peak_context", "peak context", ""), ("mean_context", "mean context", ""),
                              ("output_tokens", "output tokens", ""), ("cache_reads", "cache reads", ""),
                              ("cost", "cost $", "$"), ("minutes", "minutes", ""), ("denied", "denied calls", "")):
-        line(label, [fmt(mean(number(r[key]) for r in by_arm[a]), kind) for a in arms])
+        missing = "n/a" if key in TELEMETRY_KEYS else "-"
+        line(label, [fmt(mean(measure(r, key) for r in by_arm[a]), kind, missing) for a in arms])
     if base in by_arm:
         for arm in arms:
             if arm == base:
                 continue
-            for measure in ("tests passed", "done-when met", "merge verdicts"):
-                ours, theirs = arm_rate(by_arm[arm], measure), arm_rate(by_arm[base], measure)
+            for rate in ("tests passed", "done-when met", "merge verdicts"):
+                ours, theirs = arm_rate(by_arm[arm], rate), arm_rate(by_arm[base], rate)
                 if ours is None or theirs is None:
                     continue
-                spread = max(trial_spread(by_arm[arm], measure), trial_spread(by_arm[base], measure))
+                spread = max(trial_spread(by_arm[arm], rate), trial_spread(by_arm[base], rate))
                 if theirs - ours > spread + 1e-9:
-                    print(f"quality drop: {arm} vs {base}: {measure} {fmt(ours, '%')} against {fmt(theirs, '%')} "
+                    print(f"quality drop: {arm} vs {base}: {rate} {fmt(ours, '%')} against {fmt(theirs, '%')} "
                           f"(lower by {100 * (theirs - ours):.0f} points; trial spread {100 * spread:.0f} points)")
         if trials < 2:
             print("one trial per task: the trial spread is unknown, so any gap is reported")
@@ -402,15 +464,13 @@ def report(title, rows, baseline, arm_info):
                 continue
             passed = sum(r["tests"] == "pass" for r in mine)
             tested = sum(r["tests"] != "" for r in mine)
-            met = sum(int(number(r["dw_met"]) or 0) for r in mine)
-            total = sum(int(number(r["dw_total"]) or 0) for r in mine)
             merges = sum(r["verdict"] == "merge" for r in mine)
             reviewed = sum(r["verdict"] not in ("", UNREVIEWED, UNREVIEWABLE) for r in mine)
             blocking = mean(number(r["blocking"]) for r in mine)
-            print(f"    {arm} ({agent_of[arm]} {model_of[arm]}): tests {passed}/{tested}  done-when {met}/{total}  merge {merges}/{reviewed}  "
+            print(f"    {arm} ({agent_of[arm]} {model_of[arm]}): tests {passed}/{tested}  {done_when_text(mine)}  merge {merges}/{reviewed}  "
                   f"blocking {fmt(blocking)}  cost $ {spread_text([number(r['cost']) for r in mine])}  "
-                  f"turns {spread_text([number(r['turns']) for r in mine])}  "
-                  f"peak context {spread_text([number(r['peak_context']) for r in mine])}  "
+                  f"turns {spread_text([measure(r, 'turns') for r in mine], 'n/a')}  "
+                  f"peak context {spread_text([measure(r, 'peak_context') for r in mine], 'n/a')}  "
                   f"minutes {spread_text([number(r['minutes']) for r in mine])}")
 
 
@@ -425,10 +485,12 @@ def report_all(args):
         slug, path = arg.split("=", 1)
         rows = read_tsv(path, RUNS_COLS)
         bench_dir = os.path.dirname(path)
+        for row in rows:
+            row.update(done_when_counts(os.path.join(os.path.dirname(bench_dir), row["run"] + ".result.txt")))
         arm_info = read_arms(os.path.join(bench_dir, "arms.tsv"))
         # The recorded first runs join the report only as the baseline asked for; bench.sh writes them just before.
         if baseline == RECORDED:
-            rows = read_tsv(os.path.join(bench_dir, "recorded.tsv"), RUNS_COLS) + rows
+            rows = read_tsv(os.path.join(bench_dir, "recorded.tsv"), RECORDED_COLS) + rows
             arm_info.update(read_arms(os.path.join(bench_dir, "recorded-arms.tsv")))
         report(slug, rows, baseline, arm_info)
         pooled += [dict(r, task=f"{slug}/{r['task']}") for r in rows]

@@ -73,8 +73,9 @@ while IFS= read -r slug; do
   fi
 
   declare -A seen=()
-  if [ -d "$path/.worktrees" ]; then
-    for d in "$path/.worktrees"/*/; do
+  wroot="$(worktree_root "$path")"
+  if [ -d "$wroot" ]; then
+    for d in "$wroot"/*/; do
       [ -d "$d" ] || continue
       wt=$(basename "$d")
       br=$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null || true)

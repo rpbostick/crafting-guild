@@ -49,9 +49,13 @@ echo "opencode-builder: $zdr"
 # The builder loads its own run-events plugin from this inline config. --pure would skip it (it skips every
 # external plugin), so the workspace cold-start plugin instead returns early when WS_RUN_EVENTS is set.
 unset OPENCODE_CONFIG
+# deny-guard reads WS_RUN_DENY, dispatch's deny file. Without it the plugin registers nothing, and a quoted option
+# word would pass OpenCode's own rules, so the run stops here.
+[ -s "${WS_RUN_DENY:-}" ] || die "no deny list (WS_RUN_DENY); a builder runs only under dispatch's deny rules"
 plugin_url="file://$WS/scripts/opencode-plugins/run-events.js"
-OPENCODE_CONFIG_CONTENT="$(jq --arg plugin "$plugin_url" '.plugin = ((.plugin // []) + [$plugin])' "$config")" \
-  || die "could not add the run-events plugin to $config"
+guard_url="file://$WS/scripts/opencode-plugins/deny-guard.js"
+OPENCODE_CONFIG_CONTENT="$(jq --arg plugin "$plugin_url" --arg guard "$guard_url" '.plugin = ((.plugin // []) + [$plugin, $guard])' "$config")" \
+  || die "could not add the builder's plugins to $config"
 export OPENCODE_CONFIG_CONTENT
 pid=""
 # A timeout or kill of this script stops OpenCode's whole process group, so a wrapper's child goes too. setsid makes

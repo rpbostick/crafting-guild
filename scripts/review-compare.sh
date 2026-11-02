@@ -64,43 +64,45 @@ run_opencode_review() { # <name> <out-base> <worktree> <base> <log>
   "$WS/scripts/review.sh" "${rev_args[@]}" "$name" > "$log" 2>&1 || true
 }
 
-# Each Claude blocking finding as file<TAB>line, from an automatic fix task's `## Blocking findings` bullets:
+# Each Claude blocking finding as file<TAB>line<TAB>why, from an automatic fix task's `## Blocking findings` bullets:
 # "- \`file:line\` (rule N): why".
 task_findings() {
   awk '
     /^## Blocking findings/ { on = 1; next }
     on && /^## / { exit }
     on && /^- `/ {
+      why = $0; sub(/^- `[^`]*`( \(rule [^)]*\))?:? */, "", why)
       line = $0; sub(/^- `/, "", line); sub(/`.*/, "", line)
       count = split(line, parts, ":")
       if (count < 2 || parts[count] !~ /^[0-9]+$/) next
       file = parts[1]
       for (i = 2; i < count; i++) file = file ":" parts[i]
-      print file "\t" parts[count]
+      print file "\t" parts[count] "\t" why
     }
   ' "$1"
 }
 
-# Each Claude blocking finding as file<TAB>line, from a review markdown's `## Blocking` bullets:
+# Each Claude blocking finding as file<TAB>line<TAB>why, from a review markdown's `## Blocking` bullets:
 # "- file:line (rule N): why", or "- none".
 markdown_findings() {
   awk '
     /^## Blocking/ { on = 1; next }
     on && /^## / { exit }
     on && /^- / {
+      why = $0; sub(/^- [^ ]* *(\(rule [^)]*\))?:? */, "", why)
       line = $0; sub(/^- /, "", line); sub(/ \(.*/, "", line)
       if (line == "none") next
       count = split(line, parts, ":")
       if (count < 2 || parts[count] !~ /^[0-9]+$/) next
       file = parts[1]
       for (i = 2; i < count; i++) file = file ":" parts[i]
-      print file "\t" parts[count]
+      print file "\t" parts[count] "\t" why
     }
   ' "$1"
 }
 
 findings_json() { # <file<TAB>line lines>
-  printf '%s\n' "$1" | jq -Rn '[inputs | select(length > 0) | split("\t") | {file: .[0], line: (.[1] | tonumber)}]'
+  printf '%s\n' "$1" | jq -Rn '[inputs | select(length > 0) | split("\t") | {file: .[0], line: (.[1] | tonumber), why: (.[2] // "")}]'
 }
 
 findings_count() {
@@ -142,12 +144,13 @@ recall_new() {
   recall_dir="$RUNS/review-recall"
   mkdir -p "$recall_dir"
   printf 'case\tsha\tclaude blocking\topencode verdict\topencode blocking\tclaude findings named\tverdict agree\n' > "$out"
-  total=0 agree=0 matched_total=0 claude_total=0
+  total=0 agree=0 matched_total=0 claude_total=0 near_total=0
 }
 
-record_case() { # <case> <sha> <claude verdict> <claude blocking> <opencode verdict> <opencode blocking> <named>
+record_case() { # <case> <sha> <claude verdict> <claude blocking> <opencode verdict> <opencode blocking> <named> <nearby>
   local case_name="$1" case_sha="$2" claude_verdict="$3" claude_blocking="$4" opencode_verdict="$5"
   local opencode_blocking="$6" named="$7" agrees=no
+  near_total=$((near_total + $8))
   if review_verdict_agrees "$claude_verdict" "$opencode_verdict"; then agrees=yes; agree=$((agree + 1)); fi
   total=$((total + 1))
   matched_total=$((matched_total + named)); claude_total=$((claude_total + claude_blocking))
@@ -161,6 +164,8 @@ recall_summary() {
     "$SLUG" "$total" "$agree" "$total" "$matched_total" "$claude_total"
   printf '== total: fix-first cases %s; verdict agreement %s/%s; findings named %s/%s (file and line within 5, approximate)\n' \
     "$total" "$agree" "$total" "$matched_total" "$claude_total"
+  printf '== recall by rule, same reviews: old %s/%s -> nearby text %s/%s; the counting rule changed, not the reviewer\n' \
+    "$matched_total" "$claude_total" "$near_total" "$claude_total"
 }
 
 recall_fix_first() {
@@ -211,7 +216,7 @@ recall_fix_first() {
     overd=$(jq -r '.verdict // "?"' "$out_base.json")
     oblock=$(jq -r '(.blocking // []) | length' "$out_base.json")
     matched=$(review_match_count "$claude_json" "$out_base.json")
-    record_case "$case_name" "$sha" fix-first "$cblock" "$overd" "$oblock" "$matched"
+    record_case "$case_name" "$sha" fix-first "$cblock" "$overd" "$oblock" "$matched" "$(review_named_count "$claude_json" "$out_base.json")"
   done < <(fix_first_cases)
 }
 
@@ -240,7 +245,7 @@ recall_bench() {
     if [ -f "$review_json" ] && jq -e '(.blocking | type) == "array"' "$review_json" >/dev/null 2>&1; then
       csha=$(jq -r '.reviewed_sha // empty' "$review_json")
       cblock=$(jq '(.blocking // []) | length' "$review_json")
-      claude_json=$(jq -c '[.blocking[]? | {file, line}]' "$review_json")
+      claude_json=$(jq -c '[.blocking[]? | {file, line, why}]' "$review_json")
     fi
     if [ -z "$cblock" ]; then
       # The full review markdown is in the bench review log (or the live run's log) and holds the same bullets.
@@ -277,11 +282,12 @@ recall_bench() {
     overd=$(jq -r '.verdict // "?"' "$out_base.json")
     oblock=$(jq -r '(.blocking // []) | length' "$out_base.json")
     matched=$(review_match_count "$claude_json" "$out_base.json")
-    record_case "$run" "$csha" fix-first "$cblock" "$overd" "$oblock" "$matched"
+    record_case "$run" "$csha" fix-first "$cblock" "$overd" "$oblock" "$matched" "$(review_named_count "$claude_json" "$out_base.json")"
   done
 }
 
 if [ "$mode" = merged ]; then
+  matched_total=0 claude_total=0 near_total=0
   out="$RUNS/review-compare.tsv"
   printf 'name\tclaude verdict\tclaude blocking\topencode verdict\topencode blocking\tmatched findings\n' > "$out"
   for name in "$@"; do
@@ -322,11 +328,15 @@ if [ "$mode" = merged ]; then
     fi
     overd=$(jq -r '.verdict // "?"' "$oc")
     oblock=$(jq -r '(.blocking // []) | length' "$oc")
-    claude_json=$(jq -c '[.blocking[]? | {file, line}]' "$rec")
+    claude_json=$(jq -c '[.blocking[]? | {file, line, why}]' "$rec")
     matched=$(review_match_count "$claude_json" "$oc")
+    near_total=$((near_total + $(review_named_count "$claude_json" "$oc")))
+    matched_total=$((matched_total + matched)); claude_total=$((claude_total + cblock))
     printf '%s\t%s\t%s\t%s\t%s\t%s/%s\n' "$name" "$cverd" "$cblock" "$overd" "$oblock" "$matched" "$cblock" >> "$out"
   done
   column -t -s $'\t' "$out" 2>/dev/null || cat "$out"
+  printf '== recall by rule, same reviews: old %s/%s -> nearby text %s/%s; the counting rule changed, not the reviewer\n' \
+    "$matched_total" "$claude_total" "$near_total" "$claude_total"
   exit "$status"
 fi
 

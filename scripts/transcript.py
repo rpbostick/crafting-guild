@@ -1,4 +1,5 @@
-"""Reading a builder's stream-json run log (runs/<slug>/<name>.jsonl); used by audit.py and bench.py."""
+"""Reading a builder's run log (runs/<slug>/<name>.jsonl), Claude's stream-json or OpenCode's events; used by audit.py
+and bench.py."""
 import json
 
 
@@ -18,12 +19,19 @@ def context_tokens(usage):
     return sum(usage.get(k) or 0 for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
 
 
+def step_usage(tokens):
+    """An OpenCode step_finish's tokens in the shape of a Claude message's usage."""
+    cache = tokens.get("cache") or {}
+    return {"input_tokens": tokens.get("input"), "output_tokens": tokens.get("output"),
+            "cache_read_input_tokens": cache.get("read"), "cache_creation_input_tokens": cache.get("write")}
+
+
 def run_metrics(path):
     """Turns, context, tokens, cost, minutes and denied calls of one run.
 
     A message is logged once per content block, each copy with its usage, so context is counted once per message
-    id (the last copy's). Without a result event (a killed run) the totals come from the messages, and cost,
-    minutes and denials are unknown (empty).
+    id (the last copy's). OpenCode logs one step_finish per model call, and each is one turn. Without a result event
+    (a killed run) the totals come from the messages, and cost, minutes and denials are unknown (empty).
     """
     per_message, result = {}, None
     for event in events(path):
@@ -31,6 +39,10 @@ def run_metrics(path):
             message = event.get("message") or {}
             if message.get("usage"):
                 per_message[message.get("id") or f"anonymous-{len(per_message)}"] = message["usage"]
+        elif event.get("type") == "step_finish":
+            part = event.get("part") or {}
+            if part.get("tokens"):
+                per_message[part.get("id") or f"anonymous-{len(per_message)}"] = step_usage(part["tokens"])
         elif event.get("type") == "result":
             result = event
     contexts = [context_tokens(u) for u in per_message.values()]

@@ -105,8 +105,10 @@ resume() {
     [ -n "$cmds" ] && { echo; printf '%s\n' "$cmds"; }
     echo; echo "## The original task (for context)"; sed 's/^#/##/' "$task"
   } > "$rt"
-  echo "wrote $rt"
   for a in "$@"; do case "$a" in --dry-run|--print-prompt) dry=true ;; esac; done
+  echo "wrote $rt"
+  # A dry run writes the task so it can be shown, but commits nothing: a dry run leaves the repo as it was.
+  $dry || commit_new_file "$rt" "plans: web sources for $name, round $k"
   "$WS/scripts/dispatch.sh" --project "$SLUG" "$@" "$name" "$rt" || die "the dispatch failed; the resume task is $rt"
   # The next round's requests start a fresh ledger; this one stays beside the run's other moved-aside files.
   $dry || { [ -f "$ledger" ] && mv "$ledger" "$RUNS/$name.$(date -u +%Y%m%dT%H%M%SZ).web.tsv"; }

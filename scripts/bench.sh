@@ -5,8 +5,9 @@
 # Usage: bench.sh [--project slug] add <name>...
 #        bench.sh run <slug> --arm <label>=<git-ref|dir>[,agent=A][,model=M] --arm ... [--review none|claude]
 #                     [--trials N] [--parallel P] [--dry-run] [tasks...]
-#        bench.sh report [--baseline <label>|recorded] <slug>...
+#        bench.sh report [--baseline <label>|recorded] [--runs DIR] <slug>...
 # --baseline recorded compares with the corpus tasks' first runs as recorded at the time, without replaying them.
+# --runs reads the bench from another runs/ directory (a linked worktree has none of its own).
 # Corpus: plans/<slug>/bench/<name>.md (the task as first dispatched) and corpus.tsv. Runs: runs/<slug>/bench/
 # runs.tsv (opaque run name -> task, arm, trial, and the run's measures), arms.tsv, arms/, logs/, evidence/<run>/,
 # and recorded.tsv with recorded-arms.tsv (rewritten by each report --baseline recorded).
@@ -165,8 +166,18 @@ start_run() {
     || { echo "bench: dispatch of $run failed; see runs/$SLUG/bench/logs/$run.log"; return 1; }
 }
 
-# One replay: dispatch under the opaque name, wait, review (blind: the reviewer sees the run name only), test the
-# tip in the worktree, record, then remove the worktree and branch and keep the evidence.
+# run_one's $run: move its worktree's evidence to the bench's, and remove its worktree and branch.
+keep_evidence() {
+  if [ -d "$wt/.ws-evidence" ]; then rm -rf "$BENCH/evidence/$run"; mkdir -p "$BENCH/evidence"; mv "$wt/.ws-evidence" "$BENCH/evidence/$run"; fi
+  mkdir -p "$BENCH/evidence/$run"
+}
+drop_replay() {
+  git -C "$PROJECT_PATH" worktree remove --force "$wt" 2>/dev/null
+  git -C "$PROJECT_PATH" branch -q -D "$(branch_of "$run")" 2>/dev/null
+}
+
+# One replay: dispatch under the opaque name, wait, fail it if it committed nothing, review (blind: the reviewer sees
+# the run name only), test the tip in the worktree, record, then remove the worktree and branch and keep the evidence.
 run_one() { # <task> <arm> <trial>
   local task="$1" arm="$2" trial="$3" got run state wt log base budget mins dir tests rc ep wake review teeth="" limits=0; local -a fl
   base=$(corpus_field "$task" base); budget=$(corpus_field "$task" budget); dir="$BENCH/arms/$arm"
@@ -197,6 +208,17 @@ run_one() { # <task> <arm> <trial>
     start_run || return 1
   done
   [ "$rc" -eq 3 ] && { echo "bench: $run still running after $mins minutes; run the bench again to resume"; return 1; }
+  # A replay with no committed change has nothing to grade. It fails here, before tests or a review are spent on it;
+  # its row stays unfinished, so the next pass replays it from the base.
+  git -C "$wt" diff --quiet "$base" HEAD 2>/dev/null; rc=$?
+  if [ "$rc" -ne 1 ]; then
+    local reason="it committed nothing, so its saved patch would be empty"
+    [ "$rc" -eq 0 ] || reason="git diff from $(short "$base") failed in its worktree (exit $rc), so it has no patch to save"
+    echo "bench: $run FAILED: $reason; see runs/$SLUG/$run.result.txt" >&2
+    keep_evidence; printf '%s\n' "$reason" > "$BENCH/evidence/$run/empty-patch.txt"
+    drop_replay
+    return 1
+  fi
   review="$RUNS/$run.review.json"
   if [ "$REVIEW" = none ]; then review="-"
   else
@@ -207,11 +229,10 @@ run_one() { # <task> <arm> <trial>
   fi
   if "$WS/scripts/merge.sh" --project "$SLUG" --test-only "$run" >> "$log" 2>&1; then tests=pass; else tests=fail; fi
   python3 "$PY" runs-finish "$TSV" "$run" "$tests" "$RUNS/$run.result.txt" "$review" "$RUNS/$run.jsonl" "$WS/plans/$SLUG/bench/$task.md" "$teeth" || return 1
-  if [ -d "$wt/.ws-evidence" ]; then rm -rf "$BENCH/evidence/$run"; mkdir -p "$BENCH/evidence"; mv "$wt/.ws-evidence" "$BENCH/evidence/$run"; fi
+  keep_evidence
   # The replay's committed change, kept so it can be graded later (e.g. against the original builder's test files).
-  mkdir -p "$BENCH/evidence/$run"; git -C "$wt" diff --binary "$base" HEAD > "$BENCH/evidence/$run/replay.patch" 2>/dev/null
-  git -C "$PROJECT_PATH" worktree remove --force "$wt" 2>/dev/null
-  git -C "$PROJECT_PATH" branch -q -D "$(branch_of "$run")" 2>/dev/null
+  git -C "$wt" diff --binary "$base" HEAD > "$BENCH/evidence/$run/replay.patch" 2>/dev/null
+  drop_replay
   if [ "$review" = - ]; then echo "bench: $run done: tests $tests, not reviewed (--review none)"
   else echo "bench: $run done: tests $tests, review $(jq -r '.verdict // "none"' "$review" 2>/dev/null || echo none)"; fi
 }
@@ -354,7 +375,8 @@ bench_review_one() { # <run> <base> <arm> <task>
   # Teeth first, so the review sees the verdict and runs.tsv records it beside the review.
   "$WS/bin/ws" --project "$SLUG" teeth "$run" >> "$log" 2>&1 || true
   teeth=$(teeth_of "$run")
-  # A review from an interrupted pass is not read when this attempt fails to produce one.
+  # A review from an interrupted pass is not read when this attempt fails to produce one; rounds/ keeps it.
+  if [ -f "$review" ]; then keep_review_round "$review" "${review%.json}.md"; fi
   rm -f "$review"
   "$WS/scripts/review.sh" --project "$SLUG" "$run" >> "$log" 2>&1 || true
   verdict=$(jq -r '.verdict // empty' "$review" 2>/dev/null || true)
@@ -418,11 +440,18 @@ bench_review() {
 
 bench_report() {
   local -a args=() base=()
-  [ "${1:-}" = --baseline ] && { base=(--baseline "${2:?--baseline needs an arm label}"); shift 2; }
-  [ $# -gt 0 ] || die "usage: ws bench report [--baseline <label>|recorded] <slug>..."
+  local runs_root=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --baseline) base=(--baseline "${2:?--baseline needs an arm label}"); shift 2 ;;
+    --runs) runs_root="${2:?--runs needs a directory}"; shift 2 ;;
+    *) break ;;
+  esac; done
+  [ $# -gt 0 ] || die "usage: ws bench report [--baseline <label>|recorded] [--runs DIR] <slug>..."
+  # --baseline recorded rewrites recorded.tsv, and --runs only reads.
+  [ -z "$runs_root" ] || [ "${base[1]:-}" != recorded ] || die "--runs reads another runs/ directory and --baseline recorded writes to one; use one of them"
   local s tsv
   for s in "$@"; do
-    s=$(resolve_slug "$s") || exit 1; tsv="$WS/runs/$s/bench/runs.tsv"
+    s=$(resolve_slug "$s") || exit 1; tsv="${runs_root:-$WS/runs}/$s/bench/runs.tsv"
     [ -f "$tsv" ] || die "no bench runs for $s ($tsv)"
     [ "${base[1]:-}" = recorded ] && write_recorded "$s"
     args+=("$s=$tsv")
@@ -435,5 +464,5 @@ case "$sub" in
   run) bench_run "$@" ;;
   review) bench_review "$@" ;;
   report) bench_report "$@" ;;
-  *) die "usage: ws bench add <name>... | ws bench run <slug> --arm L=<ref|dir>[,agent=A][,model=M] --arm ... [--review none|claude] [--trials N] [--parallel P] [--dry-run] [tasks...] | ws bench review <slug> [--arm L] [--limit N] [--dry-run] [runs...] | ws bench report [--baseline L|recorded] <slug>..." ;;
+  *) die "usage: ws bench add <name>... | ws bench run <slug> --arm L=<ref|dir>[,agent=A][,model=M] --arm ... [--review none|claude] [--trials N] [--parallel P] [--dry-run] [tasks...] | ws bench review <slug> [--arm L] [--limit N] [--dry-run] [runs...] | ws bench report [--baseline L|recorded] [--runs DIR] <slug>..." ;;
 esac

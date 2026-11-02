@@ -5,8 +5,9 @@
 #   writes .ws-evidence/<label>.log (output, then "exit N") and appends a row to .ws-evidence/runs.tsv:
 #   time, label, exit, seconds, command. The reviewer, the precheck and `ws audit` read runs.tsv.
 # The command must match one of the builder's own Bash grants (dispatch exports WS_RUN_GRANTS, a file
-# outside the worktree), so the runner adds no permission the builder did not already have. It runs the
-# command directly, never through a shell: no pipes, redirects or `&&`.
+# outside the worktree) and none of its deny rules (WS_RUN_DENY, likewise), so the runner adds no permission
+# the builder did not already have. It runs the command directly, never through a shell: no pipes, redirects
+# or `&&`.
 set -uo pipefail
 label="${1:-}"; shift || true
 [ -n "$label" ] && [ $# -gt 0 ] || { echo "usage: ws-run <label> <command> [args...]" >&2; exit 2; }
@@ -14,6 +15,14 @@ case "$label" in *[!A-Za-z0-9._-]*) echo "ws-run: label '$label' may use only le
 grants="${WS_RUN_GRANTS:-}"
 [ -n "$grants" ] && [ -f "$grants" ] || { echo "ws-run: no grant list (WS_RUN_GRANTS); it runs only inside a dispatched builder" >&2; exit 2; }
 cmd="$*"; allowed=false
+denies="${WS_RUN_DENY:-}"
+if [ -n "$denies" ] && [ -f "$denies" ]; then
+  while IFS= read -r pat; do
+    [ -n "$pat" ] || continue
+    # shellcheck disable=SC2053  # the rule is a glob on purpose, as Claude Code's Bash(...) rules are
+    [[ "$cmd" == $pat ]] && { echo "ws-run: '$cmd' matches one of this builder's deny rules" >&2; exit 2; }
+  done < "$denies"
+fi
 while IFS= read -r pat; do
   [ -n "$pat" ] || continue
   # shellcheck disable=SC2053  # the grant is a glob on purpose, as Claude Code's Bash(...) rules are

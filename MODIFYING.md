@@ -12,7 +12,7 @@ bin/ws                  the command. Subcommands call the scripts below; `ws <sl
                         `ws alerts on` adds the attention hooks beside it, and `off` removes only those.
 CLAUDE.md               what the orchestrator session reads. Under 60 lines on purpose.
 config.sh               defaults: budgets, timeout, memory caps, models, timezone, lessons cap, preview ports,
-                        browser command, attribution words.
+                        browser command, attribution words, whether builder shells run in a sandbox.
 config.local.sh         optional private overrides, sourced after config.sh (your own names for WS_ATTRIBUTION_RE).
 CLAUDE.local.md         optional private orchestrator preferences; Claude Code loads it beside CLAUDE.md.
 AGENTS.md               the same orchestrator brief for OpenCode, with OpenCode's wait, question and session-start
@@ -22,7 +22,10 @@ opencode.json           OpenCode project config: loads CLAUDE.local.md and the t
 .opencode/commands/cold-start.md  `/cold-start`: prints scripts/cold-start.sh --brief, the session-start context
                         Claude Code gets from its hook.
 docs/opencode-orchestrator.md    which OpenCode pages back each substitution, and how the two briefs avoid drift.
-scripts/lib.sh          shared helpers; loads projects/<slug>.conf into variables.
+scripts/lib.sh          shared helpers; loads projects/<slug>.conf into variables. `commit_new_file <path> <message>`
+                        commits one file a tool just wrote, that path only (`git commit --only`), in the workspace
+                        repo: another session's staged or modified files stay out, and a missing repo, an ignored
+                        path or a failed commit leaves the file and prints one line instead of failing the tool.
 scripts/cold-start.sh   ground truth in ~20 s. Git state, worktrees, running builders, servers, in-flight block.
 scripts/dispatch.sh     creates the worktree, builds the builder prompt and grant, runs claude -p in the background,
                         then runs check-result.sh when it ends. `--agent opencode` (or WS_AGENT) runs opencode-builder.sh
@@ -36,8 +39,30 @@ scripts/opencode-builder.sh  the OpenCode launcher: zdr-check.sh on the model's 
                         budget; continues the session once when the reply is not a valid result; appends a Claude-shaped
                         `result` line (cost, tokens, permission_denials, structured_output) for check-result.sh.
 scripts/opencode_run.py the launcher's parts: the permission config (bash deny except each Bash grant, the DENY list last,
-                        nothing left at "ask"), the budget watch, the stdlib schema check, the result line.
-scripts/fixtures/       a real OpenCode log the selftest's stand-in opencode replays.
+                        nothing left at "ask"), the budget watch, the stdlib schema check, the result line. With
+                        WS_SANDBOX=bwrap the builder config also names scripts/ws-sandbox-shell.sh as OpenCode's shell.
+scripts/ws-sandbox-shell.sh  OpenCode's builder shell when WS_SANDBOX=bwrap: one command in bubblewrap with the home
+                        directory masked (only the worktree, node_modules/.venv links, the git paths, bin/ and the
+                        real install directories of node/npm/npx found under $HOME are visible) and no network; it
+                        refuses a missing, setuid or below-floor bwrap, any tool bind that would expose a credentials
+                        folder, a tool no bound folder holds by name, and a tool root at or above the worktree, instead
+                        of running unsandboxed. The floor is 0.12 (CVE-2026-87766, recommended 0.13.1); Ubuntu's
+                        0.9.0-1ubuntu0.3 package does not meet it, and `WS_SANDBOX_MIN_VERSION` lowers it for the probes.
+                        `--check` runs the bwrap prerequisites and the tool scan; the worktree refusal needs its working
+                        directory inside a git worktree, the only tree it can see.
+                        A link resolving to an ancestor of the worktree is not bound: it would cover the writable bind.
+scripts/sandbox-check.sh  the sandbox's rollout probes through the wrapper against the real bwrap: git writes in a
+                        temporary worktree, a one-folder-down node_modules link readable, a link to an ancestor leaving
+                        the worktree writable, a credential read and curl failing, bin/ws-run writing evidence and
+                        refusing a command a deny rule matches, and node's and npx's versions matching the host's; one
+                        pass or FAIL line each, and a note for a credential file the host does not have. Below the floor
+                        run it with `WS_SANDBOX_MIN_VERSION`. The selftest runs it with that set to 0.9 when the wrapper's
+                        `--check` passes, and prints a skip line otherwise.
+scripts/sandbox-binds-check.sh  the binds and PATH the wrapper hands a stand-in bwrap on throwaway layouts (an ancestor link,
+                        a dangling link, a parent root, a tool outside a bin folder, a tool with no reachable name, a
+                        tool root at or above the worktree) and what `--check` reports on them; the selftest runs it.
+scripts/fixtures/       a real OpenCode log the selftest's stand-in opencode replays, and the generated OpenCode
+                        config with the builder shell sandbox off (WS_SANDBOX empty).
 scripts/zdr-check.sh    whether an OpenCode Go model is zero-retention with no training, from OpenCode's Go page.
 scripts/check-result.sh reads the run's final JSON and checks its claims against the branch: commits, test logs,
                         each done-when item (a `done` with an item not met fails; observed evidence must exist), the
@@ -48,12 +73,31 @@ scripts/review.sh       diff to a read-only reviewer (stdin for Claude, in the p
                         opencode-review.sh with a read-only permission config; `--worktree`, `--base` and `--out`
                         let review-compare review another checkout and write beside the record. With
                         `WS_REVIEW_SHADOW=opencode` it starts a detached shadow review after writing the deciding one.
+                        The review a new one replaces is copied to rounds/<name>.review.<n>.{json,md} beside it; merge,
+                        hold and chain read only the current path.
 scripts/review-shadow.sh  a shadow review: the same SHA and merge base reviewed on OpenCode in its own scratch
-                        worktree, written to runs/<slug>/shadow/<name>-<sha>.{json,md} and paired with the deciding
+                        worktree, with the branch's evidence copied into .ws-evidence/ (from the builder's worktree, or
+                        the copy a merge or bench run kept), written to runs/<slug>/shadow/<name>-<sha>.{json,md} (an
+                        earlier record at that SHA moves to shadow/rounds/) and paired with the deciding
                         review in runs/<slug>/review-shadow.tsv (verdicts, blocking counts, Claude findings named
                         within five lines, shadow-only blocking, cost). `ws review-shadow [--project slug|--all]`
-                        prints the agreement, recall and shadow-only blockers per project and in total. It never
+                        prints the agreement, recall and shadow-only blockers per project and in total, then a
+                        second line with recall recomputed under the nearby-text rule. It never
                         changes a verdict, a chain step or a merge.
+scripts/review_match.py  the nearby-text rule: same file, and a line within five or within 20 with the same fault by
+                        word match. `count` is one pair, `report` recomputes review-shadow.tsv from kept records and
+                        writes nothing. The TSV's named column stays under the five-line rule so its rows stay comparable.
+                        A row whose records changed after it was written keeps its written count and is named in
+                        the output, as is any record that does not parse.
+scripts/orchestrator-record.sh  `ws orchestrator-record [--project slug|--all] [--since YYYY-MM-DD] [--runs DIR]`: one
+                        project's record and totals per orchestrator (WS_ORCHESTRATOR_OPENCODE), read from first-parent
+                        history, runs/<slug>/chain.log, runs/<slug>/stop-notes.tsv, the look records and the merge-tests logs. Each
+                        --no-review and --no-look reason prints; visible merges count from the project's first look, earlier ones as `not recorded`. Commits touching only plans/, reports/,
+                        lessons/, project confs, *.local.md, *.local.sh, changelogs or VERSION count as bookkeeping, not direct code.
+                        A number with no source prints `not recorded`. A stop with no note prints as `not noted`, never
+                        as handled; a note row matching no stop is counted on its own line.
+                        --runs names another runs/ directory, since a linked worktree has none of its own.
+scripts/orchestrator-record-check.sh  its check on a throwaway project with a known mix; selftest.sh runs it.
 scripts/opencode-review.sh  the OpenCode review launcher: zdr-check.sh first, then `opencode run` under the read-only
                         config, the budget watch, one continue on an invalid review, and the result line review.sh reads.
                         Both launchers take their prompt arguments from lib.sh's opencode_prompt_args: over 96 KiB the prompt
@@ -71,6 +115,21 @@ scripts/review-compare.sh   `ws review-compare`: runs an OpenCode review on each
 scripts/merge.sh        pinned-SHA merge, test gate, push, post-merge chore, cleanup. The test run (and `--test-only`)
                         is killed, with its whole process group, after `WS_MERGE_TEST_TIMEOUT` seconds (config.sh); a
                         timed-out run fails like failing tests, so the merge is undone and the lock released.
+                        `--no-review "<reason>"` puts the reason in the merge subject. A branch that changes visible
+                        files (lib.sh's visible_files, or a `UI: yes` task) with no look at its tip is refused, in a
+                        chain too, where the step stops as a failed merge. `ws look` at the tip passes it, and so does
+                        `--no-look "<reason>"`, whose reason follows the review text in the subject as
+                        `; --no-look: <reason>` (no override reason may hold that text; a --no-look that was not needed is not
+                        recorded). A merge of the SHA the chain stopped at for a gate writes that look itself.
+scripts/merge-gates-check.sh  the --no-review and --no-look reasons, the look refusal and the look records on a throwaway project; selftest.sh runs it.
+scripts/look.sh         `ws look <name> "<what they said>"`: appends epoch, time, tip, source and note to
+                        runs/<slug>/<name>.look. It records only; merge.sh and orchestrator-record.sh read it.
+scripts/hold.sh         `ws hold`: the operator's fault note in runs/<slug>/<name>.hold (time, branch tip, note).
+                        merge.sh refuses the held tip and chain.sh stops on it until a commit after it and a newer
+                        merge review pass it, or `ws hold --clear <name>` removes it.
+scripts/stop-note.sh    `ws stop-note <step> handled|re-explained "<note>"`: appends note time, step, stop reason, class,
+                        note and stop time to runs/<slug>/stop-notes.tsv, answering the newest stop at that step with no
+                        note yet. Refuses another class and a step with no stop in chain.log, under a lock.
 scripts/post-merge.sh   merge.sh starts it detached in the main checkout for a project's POST_MERGE_CMD; writes
                         runs/<slug>/post-merge.status (ok or failed) and notifies on failure.
 scripts/chain.sh        runs a queue of steps (dispatch, wait, review, one automatic fix round, merge, next); stops on
@@ -90,6 +149,8 @@ scripts/teeth.sh        `ws teeth`: checks the branch tip out in a scratch workt
                         before the review, where toothless blocks under rule 2 unless the reviewer explains why.
 scripts/doctor.sh       `ws doctor`: required and optional tools, the Claude sign-in, OpenCode's presence and credential,
                         the SessionStart hook, the selected project's conf; `--parity` probes each agent's structured output.
+                        Warns about untracked files under plans/ or projects/ older than WS_PILE_MINUTES (60) and
+                        prints the `git add ... && git commit ...` line that commits them.
 scripts/claude.sh       `ws claude`: one delegated Claude Code job from a non-Claude session (budget, schema, read-only tools,
                         no worktree); the delegation path for Claude-only capabilities.
 scripts/opencode-perms.sh  `ws opencode-perms`: writes the orchestrator's OpenCode config (registered project
@@ -104,7 +165,8 @@ scripts/site.sh         `ws site`: copies a project's SITE_SYNC files (or its Gi
                         checks each copy byte for byte, runs the site's tests, commits, pushes, waits until live.
 scripts/audit.py        `ws audit`: repeated hand work in the run logs. Writes runs/<slug>/audit.last for cold-start.
 scripts/transcript.py   reads a run log (runs/<slug>/<name>.jsonl): its events, and a run's turns, peak and mean
-                        context (once per message id), output tokens, cache reads, cost, minutes, denied calls.
+                        context (once per message id, or per step_finish in an OpenCode log), output tokens, cache
+                        reads, cost, minutes, denied calls.
 scripts/bench.sh        `ws bench`: replays merged tasks from their base commit under one or more arms of builder
                         instructions (a workspace git ref, or a directory with agents/builder.md and lessons/builder*.md),
                         each optionally with `,agent=<claude|opencode>` and `,model=<id>` after it (dispatch --agent
@@ -113,16 +175,20 @@ scripts/bench.sh        `ws bench`: replays merged tasks from their base commit 
                         reserved. `add` builds the corpus (plans/<slug>/bench/: the task as first dispatched, from this
                         repo's history at its start time, and corpus.tsv); `run` dispatches each task x arm x trial under
                         an opaque bench-<8 hex> name (dispatch --base --instructions), waits while any project's merge
-                        lock is held, reviews blind (`--review claude`, the default) or not at all (`--review none`),
+                        lock is held, fails a replay that committed nothing (empty-patch.txt in its evidence; the bench
+                        stops and its next pass replays that run), reviews blind (`--review claude`, the default) or not at all (`--review none`),
                         runs `ws teeth`, tests the tip with `merge.sh --test-only`, records the run (with its teeth
                         verdict) in runs/<slug>/bench/runs.tsv, removes the worktree and branch, keeps
                         evidence/<run>/; resumable. `report --baseline recorded`
                         first writes recorded.tsv: each corpus task's first run from its dispatch record (cost, minutes,
                         done-when; tests and verdict only when no later round of the task followed), no replay.
 scripts/bench.py        the bench's tables (corpus.tsv, runs.tsv, recorded.tsv, locked writes) and `ws bench report`: per
-                        arm, its agent and model, quality (tests passed, done-when met, merge verdicts, blocking
-                        findings, teeth ok/toothless/n-a) before cost; cost as each agent reports it (OpenCode's is Go's notional per-token
-                        prices); an unknown measure (an unreviewed run's verdict) is left out, not counted as a zero;
+                        arm, its agent and model, quality (tests passed, done-when claimed, confirmed and inferred,
+                        merge verdicts, blocking findings, teeth ok/toothless/n-a) before cost; confirmed and inferred
+                        are read at report time from the marks check-result left in each run's result.txt, so runs.tsv
+                        does not carry them; cost as each agent reports it (OpenCode's is Go's notional per-token
+                        prices); an unknown measure (an unreviewed run's verdict) is left out, not counted as a zero,
+                        and turns or context of 0 (an OpenCode row from before step_finish was read) prints n/a;
                         "quality drop" when an arm's rate is below the baseline's by more than the trial spread; several
                         slugs and a total.
 scripts/statusline.sh   the Claude Code status line: each running builder (elapsed time, tool calls, seconds since
@@ -160,7 +226,13 @@ docs/alerts-claude-hooks.json  the Notification/UserPromptSubmit/PreToolUse/Post
 scripts/lessons-check.py pairs each lessons/<role>.local.md bullet with the shared bullet it restates (difflib
                         similarity) and fails on one that adds no date, number or name of its own; selftest runs it.
                         `--removed <old> <new> <shared>` shows where each sentence of a pruned file still lives.
-bin/ws-run              the builders' evidence runner: one granted command, its log, its exit code, a row in runs.tsv.
+scripts/opencode-plugins/deny-guard.js  a builder's second deny check: OpenCode matches its rules with the command's
+                        quotes kept, so this hook re-tests WS_RUN_DENY on the unquoted text before the bash tool runs.
+                        It removes quoting and splits at separators, no more: a word the shell computes
+                        (`x=-c; python3 $x 1`) is out of its reach. opencode-builder.sh refuses to start without the list.
+bin/ws-run              the builders' evidence runner: one granted and not-denied command, its log, its exit code,
+                        a row in runs.tsv. Its grant file holds the grants without quotes: it matches the words the
+                        shell passed it, while the agent matches a grant as written.
 scripts/selftest.sh     syntax checks plus a dry run against a scratch repo. Run it after any change here.
 agents/*.md             the three roles. Plain prose, pasted into prompts.
 lessons/*.md            per-role notes, pasted into prompts. The whole memory system. lessons/<role>.local.md, when
@@ -180,8 +252,8 @@ state/current           the last project opened with `ws <slug>`; what a termina
 
 | You want to | Change |
 |---|---|
-| Give builders another command | `EXTRA_TOOLS` in `projects/<slug>.conf` for one project; the `TOOLS` array in `scripts/dispatch.sh` for all. Rules are Claude Code permission patterns: `Bash(cmd *)`, `Edit(./**)`. |
-| Forbid something | the `DENY` array in `scripts/dispatch.sh`. |
+| Give builders another command | `EXTRA_TOOLS` in `projects/<slug>.conf` for one project; the `TOOLS` array in `scripts/dispatch.sh` for all. Rules are Claude Code permission patterns: `Bash(cmd *)`, `Edit(./**)`. A `## Commands` entry that starts with a shell is granted as written (`bash scripts/t.sh` becomes `Bash(bash scripts/t.sh)`), never by its first word, an entry whose option word carries a `c` (`-c`, `-lc`, `--norc`) is not granted, and neither is one whose script is a bare glob (`bash *`). An interpreter (`python`, `python3`, `node`, `perl`, `ruby`) is granted by the script it names (`node scripts/build.js`), not by its first word: `node *` and its `-c`/`-e`/`--eval`/`-p`/`--print` forms are not granted. `node --test` stays runnable. |
+| Forbid something | the `DENY` array in `scripts/dispatch.sh`; a deny beats every allow on both agents and in `bin/ws-run`, including a broad `EXTRA_TOOLS` grant such as `Bash(node *)`. The interpreter eval options (`-c`, `-e`, `--eval`, `-p`, `--print`) are denied there, as are the combined short-option bundles listed in `interp_combos` (`-uc`, `-Buc`, `-anle`); a bundle with another flag, order or length is not (a glob cannot match every cluster without thousands of rules). A later code option is denied only in an option-first command (`node --no-warnings -p 1`): a word after the script is the script's own, so `node scripts/serve.js -p 8080` runs, and `python -m pytest -c setup.cfg` stays denied because a glob cannot see where the options end. On OpenCode, `scripts/opencode-plugins/deny-guard.js` applies the list to the unquoted command as well. |
 | Change what counts as attribution | `WS_ATTRIBUTION_RE` in `config.sh` (merge refuses added lines, dispatch refuses task files; `--names-ok` for a scrub task). Intended credits: `CREDIT_PATHS` in the project's conf. |
 | Change the default budget, timeout or model | `config.sh`; or per run with `--budget`, `--timeout`, `--model`, `--effort`. |
 | Run builders on OpenCode | `WS_AGENT="opencode"` in `config.sh`, or `--agent opencode` per run (also in a chain queue's flags); the model is `WS_OPENCODE_MODEL` or `--model provider/model`, and it must be in `WS_OPENCODE_MODEL_NAMES` with its Go page name, or the launcher refuses it. |
@@ -191,12 +263,13 @@ state/current           the last project opened with `ws <slug>`; what a termina
 | Run reviews on OpenCode, or measure them | `WS_REVIEW_AGENT="opencode"` in `config.sh`, or `ws review --agent opencode --model provider/model <name>` (default `WS_OPENCODE_MODEL`; the model must be in `WS_OPENCODE_MODEL_NAMES`, read-only permissions, no writes or network). `ws review-compare <name>...` sets an OpenCode review beside the recorded Claude one for the same branch and prints what matched; `--fix-first` measures recall on the commits Claude marked fix-first (from the chain log and automatic fix tasks), and `--bench <slug> [--arm L]` does the same for fix-first bench runs rebuilt from their patches. Both recall modes write `runs/<slug>/review-recall.tsv` and keep each OpenCode review under `runs/<slug>/review-recall/`; it never merges. `WS_REVIEW_SHADOW=opencode` instead measures during normal work: every deciding review (unless it is already OpenCode's) starts a detached OpenCode review of the same SHA, and `ws review-shadow [--project slug\|--all]` prints the recorded pairs' agreement and recall from `runs/<slug>/review-shadow.tsv`. Model and budget: `WS_REVIEW_SHADOW_MODEL` (default `WS_OPENCODE_MODEL`) and `WS_REVIEW_SHADOW_BUDGET`; the run is capped by `WS_REVIEW_MEM`. |
 | Change what counts as a valid result | `schema/result.json`; then update the checks in `scripts/check-result.sh`. A full-track builder result answers `edge_cases` (platform, time, stored data, state that resets), a light-track one warns when it does not; the planner marks a visible change `UI: yes` in its task header, and such a run must leave a render or saved HTML snapshot in `.ws-evidence/`. `scripts/review.sh` puts the answers in the reviewer's prompt. |
 | Change what cold-start shows | `scripts/cold-start.sh`. Keep it under half a minute; it runs on every session start and after every compaction. Never put a test run in it. |
-| Change the merge gate | `scripts/merge.sh`. Today: pinned SHA, review on record, clean trees, no home paths or username in lines the branch adds (`home_path_leaks` in `scripts/lib.sh`, which precheck rule 18 shares; exempt: only the project's `ATTRIBUTION_EXEMPT`, its private files, so a home path in a LICENSE, manifest or `CREDIT_PATHS` file is flagged by review and refused by merge), no attribution in them (`WS_ATTRIBUTION_RE` in `config.sh`; exempt: LICENSE, manifests, license lists, the project's `CREDIT_PATHS`), tests via `TEST_CMD` (timed; warns over `WS_SUITE_WARN_S`), push on green, evidence moved to `runs/`. |
+| Change the merge gate | `scripts/merge.sh`. Today: pinned SHA, review on record, an operator hold passed only by a commit after it and a newer merge review (`scripts/hold.sh`; a chain stops on a held step like a gate), clean trees, no home paths or username in lines the branch adds (`home_path_leaks` in `scripts/lib.sh`, which precheck rule 18 shares; exempt: only the project's `ATTRIBUTION_EXEMPT`, its private files, so a home path in a LICENSE, manifest or `CREDIT_PATHS` file is flagged by review and refused by merge), no attribution in them (`WS_ATTRIBUTION_RE` in `config.sh`; exempt: LICENSE, manifests, license lists, the project's `CREDIT_PATHS`), tests via `TEST_CMD` (timed; warns over `WS_SUITE_WARN_S`), push on green, evidence moved to `runs/`. |
 | Run a chore after every merge | `POST_MERGE_CMD` in the project's conf (empty = none). It runs detached in the main checkout after the push, or after the local merge when the project has no remote, with `WS_MERGED_SHA`, `WS_MERGED_NAME` and `WS_PROJECT` set, under `WS_SERVE_MEM`; `scripts/post-merge.sh` logs it to `runs/<slug>/post-merge-<name>.log`, records `ok`/`failed` in `runs/<slug>/post-merge.status`, notifies on failure, and never changes the merge's exit code. |
 | Change where evidence goes | `.ws-evidence/` is created by `scripts/dispatch.sh`, named in `agents/builder.md` and `agents/reviewer.md`, excluded via `.git/info/exclude`, and moved by `scripts/merge.sh`. |
 | Change the timeouts | `WS_DEFAULT_TIMEOUT` and `WS_LIGHT_TIMEOUT` in `config.sh`; `scripts/dispatch.sh` picks the light one when the task says `Track: light`. |
 | Change the builder memory cap | `WS_BUILDER_MEM` in `config.sh` (systemd `MemoryMax` form, empty = none); `scripts/dispatch.sh` wraps the run in `systemd-run --user --scope` when systemd is there. |
-| Change where worktrees live | `WT_ROOT` in `scripts/lib.sh`. They are under `<project>/.worktrees/` (excluded via `.git/info/exclude`) so the project's own `CLAUDE.md` applies to builders and this workspace's does not. |
+| Turn the builder shell sandbox on | `WS_SANDBOX=bwrap` in `config.sh`: `scripts/opencode_run.py config` then names `scripts/ws-sandbox-shell.sh` as OpenCode's shell, so builder commands run in bubblewrap with the home masked and no network. Probe it with `bash scripts/sandbox-check.sh`; `ws doctor` fails when it is on but bwrap is missing, setuid or older than the 0.12 floor, which the Ubuntu package does not meet; with it off doctor does not check. |
+| Change where worktrees live | `worktree_root` in `scripts/lib.sh`: `WT_ROOT`, `worktree_of`, `brief`, `opencode-perms`, `dispatch`'s exclude line and `doctor` all build on it, so one change moves every worktree. They are under `<project>/.worktrees/` (excluded via `.git/info/exclude`) so the project's own `CLAUDE.md` applies to builders and this workspace's does not. |
 | Change the orchestrator's instructions | `CLAUDE.md`, and the same meaning in `AGENTS.md` for OpenCode; selftest fails when a `bin/ws` command named in either is missing from the other. Keep both short; long instruction files are how v1 spent 50,000 tokens before starting work. |
 | Change the OpenCode config, or what a session starts with | `opencode.json`; `.opencode/commands/cold-start.md` for `/cold-start`. `docs/opencode-orchestrator.md` names the page behind each choice. |
 | Change what runs without the orchestrator | `scripts/chain.sh`: what stops a chain, the automatic fix round (`WS_CHAIN_FIX_ROUNDS`), how suggestions carry forward. |

@@ -31,9 +31,22 @@ ws review-compare --bench <slug> [--arm L] [--limit N] [run...]   the same for f
                                 their base and replay.patch with their evidence restored
 ws review-shadow [--project slug|--all]   shadow reviews (WS_REVIEW_SHADOW=opencode): per project and in total, the
                                 verdict agreement, findings named (recall) and shadow-only blocking, from the TSVs
+ws orchestrator-record [--project slug|--all] [--since YYYY-MM-DD] [--runs DIR]   the orchestrator's record per
+                                project and in total: merges reviewed at the merged SHA, --no-review, direct code and
+                                bookkeeping commits, test runs on record, gates, chain stops by how they were noted,
+                                each --no-review and --no-look reason, visible merges with and without a look; `not recorded` when no
+                                source holds a number; owners from WS_ORCHESTRATOR_OPENCODE
 ws teeth <name>                 check the branch tip without its non-test changes: ok (its tests fail), toothless
                                 (they pass), n/a or error; runs/<slug>/<name>.teeth.txt, chain runs it before review
-ws merge <name> <sha>           merge a reviewed branch, test, push, clean up
+ws merge [--no-review "<reason>"] [--no-look "<reason>"] <name> <sha>   merge a reviewed branch, test, push, clean up;
+                                a reason goes in the merge subject; a visible branch with no look at its tip is refused
+                                until ws look records one or --no-look overrides it; a gated chain step passes
+ws look <name> "<what they said>"   record that the operator saw the branch at its tip (runs/<slug>/<name>.look)
+ws hold <name> "<note>"         record the operator's fault note on a step: the merge refuses the held SHA until a
+                                commit after it and a newer merge review pass it; ws hold <name> prints it,
+                                ws hold --clear <name> removes it
+ws stop-note <step> handled|re-explained "<note>"   record how the newest unnoted chain stop at a step went: handled
+                                without the operator explaining it, or re-explained by them (runs/<slug>/stop-notes.tsv)
 ws chain <queue-file>           run a queue of steps: dispatch, wait, review (one automatic fix round), merge, next;
                                 stops on a failure, a gate or a judgment call (run it under run_in_background)
 ws chain-wait                   wait on the project's running chain (from any session) and print where it stopped
@@ -54,8 +67,9 @@ ws bench review <slug> [--arm L] [--limit N] [--dry-run] [runs...]
                                 review runs an earlier pass left unjudged, from the replay.patch each kept, under its
                                 opaque name; writes the verdict and blocking count back (resumable); a patch that
                                 does not apply is recorded unreviewable with the reason
-ws bench report [--baseline L|recorded] <slug>...   quality first, then cost, per arm (agent, model) and task; flags
-                                a quality drop; recorded = the corpus tasks' first runs as recorded, not replayed
+ws bench report [--baseline L|recorded] [--runs DIR] <slug>...   quality first, then cost, per arm (agent, model) and task;
+                                flags a quality drop; recorded = the corpus tasks' first runs as recorded, not replayed;
+                                --runs reads another runs/ directory (a linked worktree has none of its own)
 ws stop <name>                  stop a running builder
 ws serve <name|main> [port]     start the project's preview server from a worktree (or the main checkout)
 ws autostart [on|off|status]    keep the live app (WS_LIVE_PROJECTS) and, with WS_BENCH_AUTOSTART=1, the bench running across crashes and reboots (systemd user units)
@@ -147,6 +161,7 @@ case "$cmd" in
       bak="$conf_file.bak-$(date -u +%Y%m%dT%H%M%SZ)"; cp "$conf_file" "$bak"; echo "backed up the existing conf to projects/$(basename "$bak")"
     fi
     printf '%s\n' "$conf" > "$conf_file"
+    commit_new_file "$conf_file" "projects: register $slug"
     mkdir -p "$WS/plans/$slug" "$WS/runs/$slug"
     for e in .worktrees .ws-evidence; do grep -qx "$e" "$excl" 2>/dev/null || echo "$e" >> "$excl"; done
     echo "registered $slug: $path (branch $branch; tests: ${tests:-none})"
@@ -171,7 +186,11 @@ case "$cmd" in
   review) "$WS/scripts/review.sh" ${proj:+--project "$proj"} "$@" ;;
   review-compare) "$WS/scripts/review-compare.sh" ${proj:+--project "$proj"} "$@" ;;
   review-shadow) "$WS/scripts/review-shadow.sh" ${proj:+--project "$proj"} "$@" ;;
+  orchestrator-record) "$WS/scripts/orchestrator-record.sh" ${proj:+--project "$proj"} "$@" ;;
   merge) "$WS/scripts/merge.sh" ${proj:+--project "$proj"} "$@" ;;
+  hold) "$WS/scripts/hold.sh" ${proj:+--project "$proj"} "$@" ;;
+  look) "$WS/scripts/look.sh" ${proj:+--project "$proj"} "$@" ;;
+  stop-note) "$WS/scripts/stop-note.sh" ${proj:+--project "$proj"} "$@" ;;
   release) "$WS/scripts/release.sh" ${proj:+--project "$proj"} "$@" ;;
   site) "$WS/scripts/site.sh" ${proj:+--project "$proj"} "$@" ;;
   autostart)
@@ -235,7 +254,7 @@ case "$cmd" in
     while [ -f "$RUNS/chain.pid" ] && kill -0 "$(cat "$RUNS/chain.pid")" 2>/dev/null; do sleep 15; done
     grep -E "review at|merged \(|STOP|fix round|carried|chain (start|done)" "$RUNS/chain.log" 2>/dev/null | tail -20
     st=$(cat "$RUNS/chain.status" 2>/dev/null || echo "no status"); echo "status: $st"
-    case "$st" in done*) exit 0 ;; *gated*) exit 4 ;; *) exit 1 ;; esac ;;
+    case "$st" in done*) exit 0 ;; *gated*|*held:*) exit 4 ;; *) exit 1 ;; esac ;;
   web) "$WS/scripts/web.sh" ${proj:+--project "$proj"} "$@" ;;
   precheck) "$WS/scripts/precheck.sh" ${proj:+--project "$proj"} "$@" ;;
   teeth) "$WS/scripts/teeth.sh" ${proj:+--project "$proj"} "$@" ;;

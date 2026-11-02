@@ -20,7 +20,11 @@ echo $$ > "$pidf"; trap 'rm -f "$pidf"' EXIT
 tee_to="$logf"; [ "$(readlink -f /proc/$$/fd/1 2>/dev/null)" = "$(readlink -f "$logf" 2>/dev/null)" ] && tee_to=/dev/null
 log() { echo "$(now_local)  $*" | tee -a "$tee_to"; }
 status() { echo "$1 $(now_local) $2" > "$statf"; }
-stop() { status stopped "$1: $2"; log "STOP at $1: $2"; exit "${3:-1}"; }
+# The STOP line stays the bare reason: orchestrator-record classifies it and stop-note quotes it.
+stop() {
+  local noting="before the next run, note this stop: ws stop-note $1 handled|re-explained \"<note>\""
+  status stopped "$1: $2; $noting"; log "STOP at $1: $2"; log "$noting"; exit "${3:-1}"
+}
 # grep -c, not grep -q: -q exits at the first match, git dies of SIGPIPE, and pipefail turns a match into a failure
 # (on a long history only, where it re-dispatches a merged step).
 # merged <name> <task>: the newest merge of agent/<name> is newer than the task file's first commit in this workspace
@@ -114,13 +118,24 @@ for i in "${!steps[@]}"; do
       done
     fi
     verdict=$(jq -r .verdict "$rv"); log "$name: review at $(short "$tip"): $verdict"
-    [ "$verdict" = merge ] && break
+    if [ "$verdict" = merge ]; then
+      # An operator's fault note holds the merge like a gate: the review cannot see the fault, so only a commit
+      # after the held tip and a review newer than the hold pass it (or ws hold --clear).
+      if hold_blocks "$PROJECT_PATH" "$name" "$tip"; then
+        stop "$name" "held: $(hold_field "$(hold_file "$name")" note)" 4
+      fi
+      break
+    fi
     [ "$verdict" = do-not-merge ] && stop "$name" "review says do-not-merge: $(jq -r .summary "$rv" | cut -c1-300)"
     fix=$((fix+1)); [ "$fix" -le "$max_fix" ] || stop "$name" "still fix-first after $max_fix automatic fix round(s); see runs/$SLUG/$name.review.md"
     # Automatic fix round: the same builder, its blocking findings as the task.
-    ft="$(dirname "$task")/$(basename "$task" .md)-fix-auto-$fix.md"
-    write_fix_task "$task" "$rv" "$fix" "$(short "$tip")" "$ft"
-    log "$name: fix-first; automatic fix round $fix ($ft)"
+    # `fix` restarts at 1 with each chain run, so the round number continues past the files earlier runs left: a fix
+    # task is the only record of its review's findings once the review is overwritten, and review_match.py reads it.
+    round=$fix
+    while ft="$(dirname "$task")/$(basename "$task" .md)-fix-auto-$round.md"; [ -e "$ft" ]; do round=$((round+1)); done
+    write_fix_task "$task" "$rv" "$round" "$(short "$tip")" "$ft"
+    commit_new_file "$ft" "plans: automatic fix round $round for $name"
+    log "$name: fix-first; automatic fix round $round ($ft)"
     ws dispatch "${flags[@]}" "$name" "$ft" 2>&1 | tee -a "$tee_to" | tail -1; running "$name" || stop "$name" "fix dispatch failed (see $logf)"
   done
   $gate && stop "$name" "reviewed $(short "$tip"), verdict merge; gated: show the operator, then run ws merge $name $tip and restart the chain" 4

@@ -26,17 +26,24 @@ WS_REVIEW_MODEL_LIGHT="opus"    # reviewer for a branch whose task is marked `Tr
 WS_REVIEW_AGENT="${WS_REVIEW_AGENT:-claude}"  # what runs a review: "claude" or "opencode" (scripts/opencode-review.sh); ws review --agent overrides
 WS_EFFORT=""                    # builder effort (low|medium|high|xhigh|max); empty = default
 WS_AGENT="${WS_AGENT:-claude}"  # what runs a builder: "claude" (claude -p) or "opencode" (scripts/opencode-builder.sh); ws dispatch --agent overrides
+# OpenCode builder shell commands run in scripts/ws-sandbox-shell.sh (bubblewrap: home masked, no network) when
+# this is "bwrap"; empty (off) leaves the generated OpenCode config as it was. Claude builders are out of scope.
+WS_SANDBOX="${WS_SANDBOX-}"
 WS_OPENCODE_MODEL="opencode-go/deepseek-v4.1-flash"   # builder model for --agent opencode (provider/model); --model overrides
 WS_MIN_OPENCODE="1.19.1"        # oldest OpenCode whose SDK/plugin API the launchers use: the server's json_schema output and experimental.* hooks
 # OpenCode model IDs and the names OpenCode's Go page gives them in its privacy table, which zdr-check reads: a model
 # not listed here is refused, since its retention cannot be checked.
 WS_OPENCODE_MODEL_NAMES=("opencode-go/deepseek-v4.1-flash=DeepSeek V4.1 Flash")
 WS_REVIEW_SHADOW="${WS_REVIEW_SHADOW-}"   # empty = off; "opencode" also reviews every deciding review on OpenCode and records the pair
+WS_ORCHESTRATOR_OPENCODE="${WS_ORCHESTRATOR_OPENCODE-}"   # slugs (space-separated) an OpenCode session owns; ws orchestrator-record counts the rest as Claude's, and with this empty prints the owner as not recorded
 WS_REVIEW_SHADOW_MODEL="${WS_REVIEW_SHADOW_MODEL:-$WS_OPENCODE_MODEL}"   # provider/model for a shadow review
 WS_REVIEW_SHADOW_BUDGET="${WS_REVIEW_SHADOW_BUDGET:-$WS_REVIEW_BUDGET}"   # dollars, for one shadow review
 WS_REVIEW_MEM="${WS_REVIEW_MEM:-3G}"   # memory cap for a shadow review and everything it starts (systemd MemoryMax); empty = none
 WS_WEB_MAX_MB="${WS_WEB_MAX_MB:-20}"   # ws web refuses a file larger than this many MB (the environment may set it for one call)
 WS_LESSONS_CAP="40"            # cold-start warns when a lessons/ file (shared or .local.md) passes this many lines
+# A line in a plan that says a decision waits on the operator (an ERE; empty lists none). config.local.sh may
+# override it, and the environment may for one call.
+WS_WAITING_RE="${WS_WAITING_RE-[Ww]aiting on (the operator|you)}"
 # Words that attribute work to people or to this process. ws merge refuses a branch that adds a line
 # matching them (case-insensitive ERE), and ws dispatch refuses a task file that contains them: repos
 # state reasons, the workspace's plans keep who and when. Exempt: LICENSE*, package manifests, license

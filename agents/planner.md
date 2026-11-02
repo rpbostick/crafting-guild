@@ -31,7 +31,7 @@ Read first: <files>.
 <What to reuse, with its licence, or why nothing fits.>
 
 ## Commands
-`<one command per backtick item; every command the builder must run>`
+`<one command per backtick item; every command the builder must run. Name an interpreter's script (`node scripts/build.js`, not `node *`): a bare or eval form (`node -e`, `python3 -c`) is not granted>`
 
 ## Leave alone
 <Paths and files this step must not touch.>

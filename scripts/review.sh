@@ -140,6 +140,7 @@ if [ -z "$so" ] || [ "$so" = "null" ]; then
   fi
   tail -n 5 "$errf"; exit 2
 fi
+[ ! -f "$out" ] || keep_review_round "$out" "$mdf"
 jq -n --arg sha "$tip" --arg when "$(now_local)" --argjson r "$so" '{reviewed_sha:$sha, when:$when} + $r' > "$out"
 verdict=$(jq -r '.verdict' "$out")
 if [ "$agent" = opencode ]; then cost=$(printf '%s' "$result_line" | jq -r '.total_cost_usd // "?"' 2>/dev/null); else cost=$(jq -r '.total_cost_usd // "?"' "$out.raw" 2>/dev/null); fi
@@ -153,7 +154,7 @@ if [ "$agent" = opencode ]; then cost=$(printf '%s' "$result_line" | jq -r '.tot
 cat "$mdf"
 # The deciding review's verdict, count and findings, taken while this file is still this SHA's review: a chain's
 # fix round reviews the next SHA into the same path, so the shadow must not read it again when it finishes.
-claude_findings=$(jq -c '[.blocking[]? | {file, line}]' "$out" 2>/dev/null || true)
+claude_findings=$(jq -c '[.blocking[]? | {file, line, why}]' "$out" 2>/dev/null || true)
 claude_blocking_n=$(jq -r '(.blocking // []) | length' "$out" 2>/dev/null || true)
 # A shadow review: the same SHA and merge base reviewed on another agent, beside the deciding review. It runs
 # detached so it outlives this review and a chain's later merge, checks the SHA out in its own scratch worktree

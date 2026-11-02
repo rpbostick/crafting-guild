@@ -7,6 +7,9 @@ After=default.target
 
 [Service]
 ExecStart=%h/crafting-guild/scripts/bench-autostart.sh
+# A service started at login does not get a shell's PATH: without this, dispatch cannot find
+# opencode and the merge gate cannot find npm (2026-10-29: all 48 night runs died this way).
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Restart=on-failure
 RestartSec=60
 

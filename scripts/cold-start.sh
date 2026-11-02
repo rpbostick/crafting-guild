@@ -10,17 +10,21 @@ slug="${1:-}"
 echo "=== ws cold-start $(now_local) (v$(cat "$WS/VERSION" 2>/dev/null || echo ?)) ==="
 # The hourly brief: name the file, its age and what waits on you, so a session knows where to look.
 if $brief; then
-  bn=0
+  bn=0; planw=""
   while IFS= read -r bslug; do
     [ -n "$bslug" ] || continue
     while IFS= read -r _; do bn=$((bn + 1)); done < <(waiting_lines "$bslug" "$WS/runs/$bslug" \
       "$(conf_var "$WS/projects/$bslug.conf" PROJECT_PATH)" "$(conf_var "$WS/projects/$bslug.conf" PROJECT_BRANCH)")
+    while IFS= read -r planline; do
+      if [ -n "$planline" ]; then planw+="$bslug: $planline"$'\n'; fi
+    done < <(plan_waiting_lines "$WS/plans/$bslug")
   done < <(project_slugs)
   if [ -f "$WS/reports/brief.md" ]; then
     echo "brief: reports/brief.md, $(age_str "$(stat -c %Y "$WS/reports/brief.md")") old, $bn waiting on you (ws brief prints it)"
   else
     echo "brief: no reports/brief.md yet, $bn waiting on you (ws brief prints one; --write saves it)"
   fi
+  if [ -n "$planw" ]; then printf '%s' "$planw" | sed 's/^/  /'; fi
 fi
 if [ -z "$slug" ] || [ ! -f "$WS/projects/$slug.conf" ]; then
   echo "no project selected. Registered: $(find "$WS/projects" -maxdepth 1 -name '*.conf' -printf '%f\n' 2>/dev/null | sort | sed 's/\.conf$//' | paste -sd' ' | grep . || echo none)"

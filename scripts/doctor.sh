@@ -8,6 +8,49 @@ fails=0
 ok()   { echo "ok    $*"; }
 warn() { echo "warn  $1"; [ -n "${2:-}" ] && echo "      fix: $2"; }
 fail() { echo "FAIL  $1"; [ -n "${2:-}" ] && echo "      fix: $2"; fails=$((fails+1)); }
+# Files under plans/ or projects/ that are untracked and older than WS_PILE_MINUTES: a tool wrote them and no
+# session committed them, so they pile up across sessions. A younger file is work in progress, and a tracked file
+# with changes may be another session's open edit, so neither is listed. Deliberate: the age is the file's mtime,
+# not a commit time, and the fix line quotes every path and carries the workspace, so it runs as printed from
+# any directory and a path with a space survives it.
+WS_PILE_MINUTES="${WS_PILE_MINUTES:-60}"
+# A leading zero is octal to bash arithmetic, so 08 would fail the `* 60` below; read the checked digits as decimal.
+# A value that comes to zero is no wait at all, so it takes the bad-value path too.
+pile_minutes="$WS_PILE_MINUTES"
+case "$WS_PILE_MINUTES" in
+  ''|*[!0-9]*) WS_PILE_MINUTES=0 ;;
+  *) WS_PILE_MINUTES=$((10#$WS_PILE_MINUTES)) ;;
+esac
+if [ "$WS_PILE_MINUTES" -le 0 ]; then
+  warn "WS_PILE_MINUTES='$pile_minutes' is not a positive whole number of minutes; using 60" \
+    "set WS_PILE_MINUTES to a positive whole number, or unset it for 60"; WS_PILE_MINUTES=60
+fi
+# One file's mtime in epoch seconds. Its own function so a caller can stand in a read that fails, and so the
+# caller sees the failure (an unreadable age is named, not dropped).
+file_mtime() { stat -c %Y -- "$1" 2>/dev/null; }
+pile_up_warn() {
+  local now f mt n=0 paths=() unreadable=() quoted=() fix wsq q
+  now=$(date +%s)
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if ! mt=$(file_mtime "$WS/$f"); then unreadable+=("$f"); continue; fi
+    [ $(( now - mt )) -ge $(( WS_PILE_MINUTES * 60 )) ] || continue
+    n=$((n + 1))
+    [ "${#paths[@]}" -ge 5 ] || paths+=("$f")
+  done < <(git -C "$WS" ls-files --others --exclude-standard -- plans projects 2>/dev/null)
+  # A listed file that stat cannot read has no age to compare, so name it instead of dropping it.
+  [ "${#unreadable[@]}" -eq 0 ] \
+    || warn "${#unreadable[@]} untracked file(s) under plans/ or projects/ whose age cannot be read: ${unreadable[*]}"
+  [ "$n" -gt 0 ] || return 0
+  printf -v wsq '%q' "$WS"
+  for f in "${paths[@]}"; do printf -v q '%q' "$f"; quoted+=("$q"); done
+  fix="git -C $wsq add -- ${quoted[*]} && git -C $wsq commit -m 'plans: commit the files the tools wrote' -- ${quoted[*]}"
+  if [ "$n" -gt "${#paths[@]}" ]; then
+    warn "$n untracked file(s) under plans/ or projects/, older than $WS_PILE_MINUTES min (first ${#paths[@]}): ${paths[*]}" "$fix"
+  else
+    warn "$n untracked file(s) under plans/ or projects/, older than $WS_PILE_MINUTES min: ${paths[*]}" "$fix"
+  fi
+}
 # Version strings compare as dotted numbers.
 newer_or_equal() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
 
@@ -51,6 +94,13 @@ if command -v opencode >/dev/null; then
 elif [ -n "$oc_agents" ]; then
   fail "opencode not found ($oc_agents is opencode, so those runs cannot start)" "install OpenCode (https://opencode.ai) or set WS_AGENT/WS_REVIEW_AGENT to claude"
 else warn "opencode not found: only Claude builders can run" "optional: install OpenCode"; fi
+# The builder shell sandbox is opt-in, so off is no failure; once on, a missing, setuid or old bwrap fails every
+# shell command, so doctor fails before a dispatch rather than letting a builder stall on its first command. The
+# wrapper's message names the floor, which lives only there.
+if [ "${WS_SANDBOX:-}" = bwrap ]; then
+  if sb=$("$WS/scripts/ws-sandbox-shell.sh" --check 2>&1); then ok "builder shell sandbox: $sb"
+  else fail "WS_SANDBOX=bwrap but the builder shell sandbox is unavailable: $sb" "install a bubblewrap at the wrapper's floor without the setuid bit, or empty WS_SANDBOX"; fi
+fi
 # The identity that authors every commit: a personal address here is how an address reaches a public repo.
 id_email=$(git config --global --get user.email 2>/dev/null || true)
 case "$id_email" in
@@ -129,6 +179,7 @@ for lf in "$WS_LESSONS_DIR"/*.md; do
   [ "$n" -gt "${WS_LESSONS_CAP:-40}" ] && warn "lessons/$(basename "$lf") is $n lines, over WS_LESSONS_CAP (${WS_LESSONS_CAP:-40})" "delete stale lines"
 done
 [ -f "$WS/config.local.sh" ] && ok "config.local.sh is loaded after config.sh"
+pile_up_warn
 
 echo "--- project ---"
 [ -z "$slug" ] && slug="${WS_PROJECT:-}"; [ -z "$slug" ] && [ -f "$WS/state/current" ] && slug="$(head -n1 "$WS/state/current")"
@@ -140,14 +191,20 @@ else
   git -C "$PROJECT_PATH" rev-parse -q --verify "refs/heads/$PROJECT_BRANCH" >/dev/null 2>&1 && ok "branch $PROJECT_BRANCH" || fail "branch $PROJECT_BRANCH does not exist" "fix PROJECT_BRANCH in projects/$SLUG.conf"
   [ -n "$TEST_CMD" ] && ok "test command: $TEST_CMD" || warn "no TEST_CMD: merges run without a test gate" "set TEST_CMD in projects/$SLUG.conf"
   git -C "$PROJECT_PATH" remote get-url origin >/dev/null 2>&1 && ok "remote origin (merges push to it)" || warn "no remote origin: merges stay local" "git -C $PROJECT_PATH remote add origin <url>"
-  excl="$(git -C "$PROJECT_PATH" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/info/exclude"
-  grep -qx .worktrees "$excl" 2>/dev/null && ok ".worktrees is excluded from the project's git" || warn ".worktrees is not in $excl" "ws init $PROJECT_PATH --force (backs up the conf) or add the line by hand"
-  # The merge gate runs jest from the main checkout, where each builder worktree is a copy of the repo.
-  jcfg="$(ls "$PROJECT_PATH"/jest.config.* 2>/dev/null | head -n1)"
-  if [ -n "$jcfg" ] || grep -q '"jest"' "$PROJECT_PATH/package.json" 2>/dev/null; then
-    grep -qE 'roots|\.worktrees' ${jcfg:-"$PROJECT_PATH/package.json"} && ok "jest is scoped away from .worktrees/" \
-      || warn "jest config sets neither roots nor a .worktrees ignore: the merge gate collects every worktree's tests" "set roots: ['<rootDir>/src'] (or testPathIgnorePatterns: ['/.worktrees/'])"
-  fi
+  wroot="$(worktree_root "$PROJECT_PATH")"; wrel="${wroot#"$PROJECT_PATH"/}"
+  case "$wrel" in
+    ''|/*|"$wroot") fail "worktree_root must be inside the project: $wroot is not under $PROJECT_PATH" "point worktree_root at a path inside $PROJECT_PATH" ;;
+    *)
+      excl="$(git -C "$PROJECT_PATH" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/info/exclude"
+      grep -qx "$wrel" "$excl" 2>/dev/null && ok "$wrel is excluded from the project's git" || warn "$wrel is not in $excl" "ws init $PROJECT_PATH --force (backs up the conf) or add the line by hand"
+      # The merge gate runs jest from the main checkout, where each builder worktree is a copy of the repo.
+      jcfg="$(ls "$PROJECT_PATH"/jest.config.* 2>/dev/null | head -n1)"
+      if [ -n "$jcfg" ] || grep -q '"jest"' "$PROJECT_PATH/package.json" 2>/dev/null; then
+        wpat="$(printf '%s' "$wrel" | sed 's/[][\.*^$]/\\&/g')"
+        grep -qE "roots|$wpat" ${jcfg:-"$PROJECT_PATH/package.json"} && ok "jest is scoped away from $wrel/" \
+          || warn "jest config sets neither roots nor a $wrel ignore: the merge gate collects every worktree's tests" "set roots: ['<rootDir>/src'] (or testPathIgnorePatterns: ['/$wrel/'])"
+      fi ;;
+  esac
   [ -n "$PREVIEW_CMD" ] && ok "preview command set" || echo "note  no PREVIEW_CMD: ws serve is off for $SLUG"
 fi
 

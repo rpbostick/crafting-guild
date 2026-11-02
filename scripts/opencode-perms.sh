@@ -43,7 +43,8 @@ done
 # Last matching rule wins: the catch-all comes first, then one allow per registered path, then /tmp.
 external='{"*":"ask"}'
 for path in "${paths[@]}"; do
-  for rule in "$path/**" "$path/.worktrees/**"; do
+  wroot="$(worktree_root "$path")"
+  for rule in "$path/**" "$wroot/**"; do
     external=$(jq -c --arg rule "$rule" '. + {($rule): "allow"}' <<< "$external") || die "could not build the external_directory rules"
   done
 done
