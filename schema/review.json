@@ -6,7 +6,7 @@
     "blocking": {
       "type": "array",
       "items": {"type": "object", "properties": {
-        "file": {"type": "string"}, "line": {"type": "integer"}, "rule": {"type": ["integer", "string"]}, "why": {"type": "string"}},
+        "file": {"type": "string"}, "line": {"type": "integer"}, "rule": {"anyOf": [{"type": "integer"}, {"type": "string"}]}, "why": {"type": "string"}},
         "required": ["file", "line", "rule", "why"]}
     },
     "suggestions": {

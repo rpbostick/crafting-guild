@@ -38,6 +38,7 @@ cost=$(printf '%s' "$res" | jq -r '.total_cost_usd // "?"'); dur=$(printf '%s' "
 tok=$(printf '%s' "$res" | jq -r '.usage // {} | "out=\(.output_tokens // 0) cache_read=\(.cache_read_input_tokens // 0)"')
 claude_version=$(sed -n 's/^claude_version=//p' "$RUNS/$name.task.txt" 2>/dev/null | tail -1)
 opencode_version=$(printf '%s' "$res" | jq -r '.opencode_version // empty' 2>/dev/null || true)
+variant=$(printf '%s' "$res" | jq -r '.variant // empty' 2>/dev/null || true)
 so=$(printf '%s' "$res" | jq -c '.structured_output // empty')
 if [ -z "$so" ] || [ "$so" = "null" ]; then
   flag "no structured result: $(printf '%s' "$res" | jq -r '.result // .subtype // "?"' | head -c 200)"
@@ -120,5 +121,5 @@ nweb=$(printf '%s' "$so" | jq '.web_requests // [] | length')
 printf '%s' "$so" | jq -r '.web_requests // [] | to_entries[] | .value as $r
   | "web   request \(.key + 1): \(if ($r.url // "") != "" then $r.url else "search: \($r.query // "(no url or query)")" end); why: \($r.why // ""); needed: \($r.needed // "")"
   | gsub("[\t\n]"; " ") | .[0:400]'
-echo "cost=\$$cost ${dur}min $tok tip=$(git -C "$wt" rev-parse --short HEAD)${claude_version:+ claude=$claude_version}${opencode_version:+ opencode=$opencode_version}"
+echo "cost=\$$cost ${dur}min $tok tip=$(git -C "$wt" rev-parse --short HEAD)${claude_version:+ claude=$claude_version}${opencode_version:+ opencode=$opencode_version}${variant:+ variant=$variant}"
 [ "$problems" -eq 0 ]

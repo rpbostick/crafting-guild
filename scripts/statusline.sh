@@ -4,13 +4,14 @@
 # Wired in .claude/settings.json as statusLine; Claude Code pipes session JSON on stdin (ignored).
 cat > /dev/null
 WS="$(cd "$(dirname "$0")/.." && pwd)"
+. "$WS/scripts/lib.sh"
 # A session opened with `ws <slug>` is pinned (WS_PROJECT); the tutor tab sets WS_STATUS_ALL=1 to see every project.
 slug="${WS_PROJECT:-$(cat "$WS/state/current" 2>/dev/null)}"; [ -n "$slug" ] || { echo "ws: no project"; exit 0; }
 RUNS="$WS/runs/$slug"; now=$(date +%s); out=()
 for pidf in "$RUNS"/*.pid; do
   [ -f "$pidf" ] || continue
   n=$(basename "$pidf" .pid); [[ $n == serve-* ]] && continue
-  kill -0 "$(cat "$pidf")" 2>/dev/null || continue
+  pid_file_alive "$pidf" || continue
   el=$(( now - $(stat -c %Y "$pidf") ))
   last=$(stat -c %Y "$RUNS/$n.jsonl" 2>/dev/null || echo "$now"); idle=$(( now - last ))
   calls=$(grep -o '"type":"tool_use"' "$RUNS/$n.jsonl" 2>/dev/null | wc -l)
@@ -26,7 +27,7 @@ while read -r _ et args; do
 done < <(ps -eo pid=,etimes=,args= | grep -E "bash [^ ]*/scripts/(merge|review)\.sh " | grep -v grep)
 for sf in "$RUNS"/serve-*.pid; do
   [ -f "$sf" ] || continue
-  kill -0 "$(cut -d' ' -f1 "$sf")" 2>/dev/null || continue
+  pid_file_alive "$sf" || continue
   w=$(basename "$sf" .pid); out+=("◉ ${w#serve-} :$(cut -d' ' -f2 "$sf")")
 done
 # The clock, then the last chain event with its time, so a reader can place what happened when.

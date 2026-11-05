@@ -41,22 +41,28 @@ while IFS= read -r slug; do
       n=$(basename "$pidf" .pid)
       case "$n" in chain|serve-*) continue ;; esac
       pid=$(cat "$pidf")
-      kill -0 "$pid" 2>/dev/null || continue
+      pid_file_alive "$pidf" || continue
       started=$(stat -c %Y "$pidf" 2>/dev/null || date +%s)
       last=$(stat -c %Y "$runs/$n.jsonl" 2>/dev/null || echo "$started")
       printf '%s: builder %s running %s min (pid %s), last output %ss ago\n' \
         "$slug" "$n" "$(( ($(date +%s) - started) / 60 ))" "$pid" "$(( $(date +%s) - last ))" >> "$tmp/running"
       mark
     done
-    if [ -f "$runs/chain.pid" ] && kill -0 "$(cat "$runs/chain.pid")" 2>/dev/null; then
+    if pid_file_alive "$runs/chain.pid"; then
       st=$(head -n1 "$runs/chain.status" 2>/dev/null || true)
       printf '%s: chain running (pid %s): %s\n' "$slug" "$(cat "$runs/chain.pid")" "${st:-status unknown}" >> "$tmp/running"
       mark
+    else
+      dead=$(chain_dead_line "$runs")
+      if [ -n "$dead" ]; then
+        printf '%s: %s\n' "$slug" "$dead" >> "$tmp/running"
+        mark
+      fi
     fi
     for sf in "$runs"/serve-*.pid; do
       [ -f "$sf" ] || continue
       pid=$(cut -d' ' -f1 "$sf"); port=$(cut -d' ' -f2 "$sf")
-      kill -0 "$pid" 2>/dev/null || continue
+      pid_file_alive "$sf" || continue
       printf '%s: preview %s on :%s (pid %s)\n' "$slug" "$(basename "$sf" .pid | sed 's/^serve-//')" "$port" "$pid" >> "$tmp/running"
       mark
     done
@@ -128,6 +134,7 @@ while IFS= read -r s; do
 done < <(project_slugs)
 
 base="$tmp/brief.md"
+allowance=$(allowance_lines)
 {
   echo "# Crafting Guild brief"
   echo
@@ -136,6 +143,11 @@ base="$tmp/brief.md"
   echo "## Waiting on you"
   if [ "${nw:-0}" -gt 0 ]; then sed 's/^/- /' "$tmp/waiting"; else echo "- none"; fi
   echo
+  if [ -n "$allowance" ]; then
+    echo "## OpenCode Go allowance"
+    printf '%s\n' "$allowance" | sed 's/^/- /'
+    echo
+  fi
   echo "## Running"
   if [ "${nr:-0}" -gt 0 ]; then sed 's/^/- /' "$tmp/running"; else echo "- none"; fi
   echo

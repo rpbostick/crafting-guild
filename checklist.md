@@ -1,6 +1,6 @@
 # Review checklist
 
-Twenty rules. A rule is removed when it proves wrong and fine-tuned when it proves imprecise; rules are not folded into one another to make room. A rule earns its place by having cost real time twice; the twenty are distilled from two earlier checklists of 101 and 46 rules.
+Twenty-one rules. A rule is removed when it proves wrong and fine-tuned when it proves imprecise; rules are not folded into one another to make room. A rule earns its place by having cost real time twice; the twenty-one are distilled from two earlier, longer checklists.
 
 1. No silent fallbacks where missing or invalid data should fail loud (`.get(x, 0)`, bare `except: pass`, default branches that hide a bad state).
 2. A test proves it can fail and tests the real thing: the branch shows a failing run before the fix, or the task log does, and the test exercises the production code path, not a copy or a fixture alone.
@@ -22,3 +22,4 @@ Twenty rules. A rule is removed when it proves wrong and fine-tuned when it prov
 18. No secrets, credentials, absolute home-directory paths or personal identifiers in tracked files.
 19. Tracked files state reasons, never who asked, decided or approved, or when: no names outside intended credits, no "the operator", no dated decisions or quotes. A fixed choice reads "Deliberate: <reason>".
 20. New code does not reimplement what a maintained open-source library already does (a diff, a Markdown or date parser, a CSV reader, an HTTP client, a UI widget) unless the task's `## Prior art` section says why. A hand-written replacement without that reason is a finding; name the library and its licence.
+21. A number in a report, doc, plan or result (a count, a total, a percentage) comes from a command whose output is in the evidence, or names the file it was counted from; a number with neither is a finding. Two costs: a plan's shadow-only blocking count read higher than the command counted, and counts typed into reviews needed correction.

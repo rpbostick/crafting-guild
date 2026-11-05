@@ -9,12 +9,13 @@ The model remembers nothing between sessions. Everything it needs is in files an
 | `CLAUDE.md` | How the orchestrator works: the loop, the rules, where things are | You, rarely | By Claude Code, at every session start |
 | `CLAUDE.local.md` | Your own preferences: how to ask you, previews, budgets | You | By Claude Code, after `CLAUDE.md` |
 | `.claude/settings.json` | A `SessionStart` hook that runs `scripts/cold-start.sh --brief` | The tool | On startup, resume, compaction and `/clear` |
+| `.opencode/plugins/cold-start.js`, `.opencode/commands/cold-start.md` | The same brief for an OpenCode orchestrator: the plugin appends it once per session and again at compaction, and `/cold-start` refreshes it mid-session | The tool | By OpenCode (see `docs/opencode-orchestrator.md`) |
 | `state/current`, `WS_PROJECT` | Which project this session acts on (`ws <slug>` pins it) | `ws <slug>` | By cold start and every `ws` command |
 | `projects/<slug>.conf` | The project's path, branch, test command, grants, preview | `ws init`, then you | By every `ws` command |
 | `plans/<slug>/<plan>.md` | The plan, topped by an **In flight right now** block: what is running, what just finished, what is next, decisions made | The orchestrator, at every dispatch, merge and decision | Printed by cold start |
 | `plans/<slug>/task-*.md` | One step each, complete enough for a builder to run cold | The orchestrator | By the builder it is dispatched to |
 | `plans/<slug>/*.queue` | Steps for `ws chain` | The orchestrator | By the chain, which skips merged steps |
-| `runs/<slug>/` | Each run's result, review, merge log and evidence; `chain.status`; server pid files | The scripts | Cold start lists the latest; the orchestrator reads them |
+| `runs/<slug>/` | Each run's result, review, merge log and evidence; `chain.status`; `wake/`, `wake.log`, `wake.failed`; server pid files | The scripts | Cold start lists the latest; the orchestrator reads them |
 | `lessons/<role>.md`, `<role>.local.md` | Short lessons from earlier runs, one file per role | The orchestrator, when something cost time | Pasted into every builder and reviewer prompt; the orchestrator reads its own before the first dispatch |
 | The project's git | Branches, worktrees, commits, what is pushed | Builders and merges | By cold start: the ground truth |
 | Claude Code's auto-memory | Your standing preferences, across sessions | Claude Code | By Claude Code itself |

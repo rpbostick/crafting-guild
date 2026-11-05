@@ -10,6 +10,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$CLAUDE_PROJECT_DIR/scripts/reply-time-check.py\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   },
   "statusLine": {

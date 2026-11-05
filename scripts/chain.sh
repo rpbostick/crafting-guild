@@ -14,17 +14,33 @@ queue=$(ws_path "${1:?usage: chain.sh [--project slug] <queue-file>}"); [ -f "$q
 load_project "$slug"
 ws() { "$WS/bin/ws" --project "$SLUG" "$@"; }
 pidf="$RUNS/chain.pid"; statf="$RUNS/chain.status"; logf="$RUNS/chain.log"
-if [ -f "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null; then die "a chain is already running for $SLUG (pid $(cat "$pidf"))"; fi
-echo $$ > "$pidf"; trap 'rm -f "$pidf"' EXIT
+if pid_file_alive "$pidf"; then die "a chain is already running for $SLUG (pid $(cat "$pidf"))"; fi
+echo $$ > "$pidf"
 # Detached (ws chain), stdout is the log itself: write lines once. Attached, show them and append them to the log.
 tee_to="$logf"; [ "$(readlink -f /proc/$$/fd/1 2>/dev/null)" = "$(readlink -f "$logf" 2>/dev/null)" ] && tee_to=/dev/null
 log() { echo "$(now_local)  $*" | tee -a "$tee_to"; }
 status() { echo "$1 $(now_local) $2" > "$statf"; }
+current_step=""
+# A signal that ends the chain leaves the step and the re-run command in both the log and the status, so no reader
+# has to infer a killed chain from a log ending in Terminated. A normal finish or a stop keeps its own status.
+on_signal() { # <signal-name>
+  log "killed by SIG$1 at ${current_step:-start}"
+  status killed "${current_step:-start}: re-run ws chain $queue to resume"
+  exit 1
+}
+trap 'rm -f "$pidf"' EXIT
+trap 'on_signal TERM' TERM
+trap 'on_signal INT' INT
+trap 'on_signal HUP' HUP
 # The STOP line stays the bare reason: orchestrator-record classifies it and stop-note quotes it.
 stop() {
   local noting="before the next run, note this stop: ws stop-note $1 handled|re-explained \"<note>\""
   status stopped "$1: $2; $noting"; log "STOP at $1: $2"; log "$noting"; exit "${3:-1}"
 }
+# An unfinished merge holds a commit on the main branch whose tests never ran. A chain would skip that step as
+# already merged, so it refuses until the merge is finished by hand; a held lock means the merge is still running.
+ufline=$(unfinished_merge_line "$RUNS" "$PROJECT_PATH" "$PROJECT_BRANCH")
+[ -z "$ufline" ] || stop start "$ufline"
 # grep -c, not grep -q: -q exits at the first match, git dies of SIGPIPE, and pipefail turns a match into a failure
 # (on a long history only, where it re-dispatches a merged step).
 # merged <name> <task>: the newest merge of agent/<name> is newer than the task file's first commit in this workspace
@@ -36,7 +52,10 @@ merged() {
   tt=$(git -C "$WS" log --diff-filter=A --format=%ct -- "$2" 2>/dev/null | tail -1); [ -n "$tt" ] || tt=$(stat -c %Y "$2" 2>/dev/null || echo 0)
   [ "$mt" -gt "$tt" ]
 }
-running() { [ -f "$RUNS/$1.pid" ] && kill -0 "$(cat "$RUNS/$1.pid")" 2>/dev/null; }
+running() { pid_file_alive "$RUNS/$1.pid"; }
+# What a dispatch says that reaches the chain's own output: its last line, and an allowance warning, which is the one
+# word a chain gets from the hold.
+dispatch_lines() { awk '/this work is not held/ { print } { last = $0 } END { print last }'; }
 max_fix="${WS_CHAIN_FIX_ROUNDS:-1}"
 
 # A broken setup (a missing tool, an old Claude Code, a bad conf) would fail hours in; find out now.
@@ -55,6 +74,7 @@ for i in "${!steps[@]}"; do
   # Quoted flags (--allow "Bash(npm run x*)") stay one word; globbing is off so a pattern is not expanded.
   set -f; eval "f=( ${steps[$i]} )"; set +f; name="${f[0]}"; task="${f[1]:-}"; gate=false; flags=()
   for x in "${f[@]:2}"; do [ "$x" = gate ] && gate=true || flags+=("$x"); done
+  current_step="$name"
   [ -n "$task" ] && task=$(ws_path "$task")
   [ -f "$task" ] || stop "$name" "no task file $task"
   if merged "$name" "$task"; then log "$name: already merged, skipping"; continue; fi
@@ -64,24 +84,32 @@ for i in "${!steps[@]}"; do
   # A "NO RESULT" file is what a stopped run leaves: no result, not a failed one.
   elif [ -d "$wt" ] && [ -f "$RUNS/$name.result.txt" ] && ! grep -q '^NO RESULT' "$RUNS/$name.result.txt"; then log "$name: worktree and result exist; going to review"
   elif [ -d "$wt" ] && grep -q '^Resume:' "$task"; then log "$name: stopped run; its task has a Resume note, dispatching it again"
-    ws dispatch "${flags[@]}" "$name" "$task" 2>&1 | tee -a "$tee_to" | tail -1; running "$name" || stop "$name" "resume dispatch failed (see $logf)"
+    ws dispatch "${flags[@]}" "$name" "$task" 2>&1 | tee -a "$tee_to" | dispatch_lines; running "$name" || stop "$name" "resume dispatch failed (see $logf)"
   elif [ -d "$wt" ]; then stop "$name" "worktree exists with no run and no result (a stopped run?); add a line starting 'Resume:' to its task and run the chain again"
-  else ws dispatch "${flags[@]}" "$name" "$task" 2>&1 | tee -a "$tee_to" | tail -1; running "$name" || stop "$name" "dispatch failed (see $logf)"; fi
+  else ws dispatch "${flags[@]}" "$name" "$task" 2>&1 | tee -a "$tee_to" | dispatch_lines; running "$name" || stop "$name" "dispatch failed (see $logf)"; fi
   fix=0
   while :; do
-    # The wait outlives the run's own timeout, so a timed-out run still reports.
+    # The wait outlives the run's own timeout, so a timed-out run still reports. Backing it with `wait` lets a
+    # trapped signal run at once; a foreground child would defer the trap until the builder finished.
     tmo=$(sed -n 's/^timeout=//p' "$RUNS/$name.task.txt" 2>/dev/null); mins=$(( ${tmo%m} + 15 )); [ "$mins" -gt 15 ] || mins=150
-    ws wait "$name" "$mins" >> "$logf" 2>&1; rc=$?
+    ws wait "$name" "$mins" >> "$logf" 2>&1 & wait $!; rc=$?
     head -1 "$RUNS/$name.result.txt" 2>/dev/null | cut -c1-160 | sed "s/^/$name result: /" | tee -a "$tee_to"
     # Usage limit: wait for the reset, then resume the same step (its work so far is in the worktree).
     if grep -q '^LIMIT' "$RUNS/$name.result.txt" 2>/dev/null; then
-      ep=$(sed -n 's/^reset_epoch=//p' "$RUNS/$name.result.txt"); case "$ep" in ''|*[!0-9]*) stop "$name" "usage limit, reset time unknown: $(head -1 "$RUNS/$name.result.txt")" ;; esac
-      limits=$((${limits:-0}+1)); [ "$limits" -le 3 ] || stop "$name" "usage limit hit 3 times on this step"
-      wake=$((ep + 120)); status waiting "$name: usage limit, resuming at $(date -d "@$wake" '+%H:%M')"; log "$name: usage limit; resuming at $(date -d "@$wake" '+%H:%M')"
-      while [ "$(date +%s)" -lt "$wake" ]; do sleep 60; done
+      # A result written before this boot (or over an hour ago) may describe a limit that has since ended: resume
+      # now instead of waiting on its reset.
+      if limit_result_stale "$RUNS/$name.result.txt"; then
+        log "$name: its saved usage limit was written before this boot or over an hour ago; resuming now"
+      else
+        ep=$(sed -n 's/^reset_epoch=//p' "$RUNS/$name.result.txt"); case "$ep" in ''|*[!0-9]*) stop "$name" "usage limit, reset time unknown: $(head -1 "$RUNS/$name.result.txt")" ;; esac
+        limits=$((${limits:-0}+1)); [ "$limits" -le 3 ] || stop "$name" "usage limit hit 3 times on this step"
+        wake=$((ep + 120)); status waiting "$name: usage limit, resuming at $(wake_time "$wake")"; log "$name: usage limit; resuming at $(wake_time "$wake")"
+        read -r probe_agent probe_model <<< "$(dispatch_agent_model "${flags[@]}")"
+        wait_for_limit_reset "$ep" "$probe_agent" "$probe_model" "$logf"
+      fi
       rt="$(dirname "$task")/$(basename "$task" .md)-resume-limit.md"
       { echo "# Resume after the usage limit"; echo; echo "An earlier run of this task stopped at the usage limit. Run \`git status\` and \`git log --oneline main..\` first, keep what is there, and finish the task below."; echo; sed 's/^#/##/' "$task"; } > "$rt"
-      ws dispatch "${flags[@]}" "$name" "$rt" 2>&1 | tee -a "$tee_to" | tail -1; running "$name" || stop "$name" "resume dispatch failed (see $logf)"
+      ws dispatch "${flags[@]}" "$name" "$rt" 2>&1 | tee -a "$tee_to" | dispatch_lines; running "$name" || stop "$name" "resume dispatch failed (see $logf)"
       status running "$name"; continue
     fi
     [ "$rc" -eq 0 ] || stop "$name" "the run's result did not check out (runs/$SLUG/$name.result.txt)"
@@ -111,8 +139,9 @@ for i in "${!steps[@]}"; do
           ep=""; [ -n "$when" ] && ep=$(TZ="${tz:-${WS_TZ:-}}" date -d "$when" +%s 2>/dev/null); [ -n "$ep" ] && [ "$dated" = 0 ] && [ "$ep" -le "$(date +%s)" ] && ep=$((ep + 86400))
           case "$ep" in ''|*[!0-9]*) stop "$name" "the review hit the usage limit, reset time unknown: $msg" ;; esac
           rlimits=$((rlimits+1)); [ "$rlimits" -le 3 ] || stop "$name" "the review hit the usage limit 3 times"
-          wake=$((ep + 120)); status waiting "$name: review hit the usage limit, retrying at $(date -d "@$wake" '+%H:%M')"; log "$name: review hit the usage limit; retrying at $(date -d "@$wake" '+%H:%M')"
-          while [ "$(date +%s)" -lt "$wake" ]; do sleep 60; done; continue
+          wake=$((ep + 120)); status waiting "$name: review hit the usage limit, retrying at $(wake_time "$wake")"; log "$name: review hit the usage limit; retrying at $(wake_time "$wake")"
+          read -r probe_agent probe_model <<< "$(review_probe_agent_model "$name")"
+          wait_for_limit_reset "$ep" "$probe_agent" "$probe_model" "$logf"; continue
         fi
         stop "$name" "the review failed (see $logf)"
       done
@@ -136,7 +165,7 @@ for i in "${!steps[@]}"; do
     write_fix_task "$task" "$rv" "$round" "$(short "$tip")" "$ft"
     commit_new_file "$ft" "plans: automatic fix round $round for $name"
     log "$name: fix-first; automatic fix round $round ($ft)"
-    ws dispatch "${flags[@]}" "$name" "$ft" 2>&1 | tee -a "$tee_to" | tail -1; running "$name" || stop "$name" "fix dispatch failed (see $logf)"
+    ws dispatch "${flags[@]}" "$name" "$ft" 2>&1 | tee -a "$tee_to" | dispatch_lines; running "$name" || stop "$name" "fix dispatch failed (see $logf)"
   done
   $gate && stop "$name" "reviewed $(short "$tip"), verdict merge; gated: show the operator, then run ws merge $name $tip and restart the chain" 4
   ws merge "$name" "$tip" >> "$logf" 2>&1 || stop "$name" "the merge failed or the tests failed (see $logf and runs/$SLUG/$name.merge-tests.log)"

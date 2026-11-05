@@ -1,0 +1,10 @@
+{"type":"user","message":{"content":"placeholder operator message"}}
+{"type":"assistant","timestamp":"2026-10-16T08:30:00Z","message":{"content":[{"type":"text","text":"08:30 — placeholder earlier reply"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_placeholder_question","name":"AskUserQuestion"}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_placeholder_question","content":"placeholder answer"}]}}
+{"type":"attachment"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_placeholder_tool","name":"Bash"}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_placeholder_tool","content":"placeholder output"}]}}
+{"type":"attachment"}
+{"type":"assistant","timestamp":"2026-10-16T09:00:00Z","message":{"content":[{"type":"text","text":"09:05 — placeholder reply"}]}}
+{"type":"system"}

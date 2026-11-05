@@ -39,6 +39,20 @@ is_bookkeeping() {
     *) return 1 ;;
   esac
 }
+# Paths a direct commit may touch as a doc line or a config value, which the rules allow without a builder. The project
+# conf may add its own globs in RECORD_CONFIG_PATHS (space separated).
+record_config_paths=""
+is_doc_config() {
+  local path="$1" pat
+  case "$path" in
+    *.md|docs/*|.gitignore|.editorconfig) return 0 ;;
+  esac
+  for pat in $record_config_paths; do
+    # shellcheck disable=SC2254  # the conf's entry is a glob, matched as a pattern
+    case "$path" in $pat) return 0 ;; esac
+  done
+  return 1
+}
 stop_kind() { # <reason>
   case "$1" in
     *"gated: show the operator"*) echo gate ;;
@@ -69,6 +83,7 @@ add() { totals["$1.$2"]=$(( ${totals["$1.$2"]:-0} + $3 )); }
 report_project() { # <slug>
   local s="$1" conf="$WS/projects/$1.conf" path branch owner test_cmd runs log
   path=$(conf_var "$conf" PROJECT_PATH); branch=$(conf_var "$conf" PROJECT_BRANCH); test_cmd=$(conf_var "$conf" TEST_CMD)
+  record_config_paths=$(conf_var "$conf" RECORD_CONFIG_PATHS)
   owner=$(orchestrator_of "$s")
   # An empty -C is a no-op, so without the first test git would read the repository the caller stands in.
   if [ -z "$path" ] || ! git -C "$path" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1; then
@@ -134,16 +149,22 @@ report_project() { # <slug>
     fi
   done < <(git -C "$path" log "$branch" --first-parent --merges ${since_args[@]+"${since_args[@]}"} --format=$'%H\t%P\t%ct\t%s')
 
-  local direct_code=0 direct_book=0 line in_commit=false code=false
+  local direct_code=0 direct_book=0 direct_docs=0 line sha in_commit=false code=false book=false docs=false code_shas=""
   finish_commit() {
     $in_commit || return 0
-    if $code; then direct_code=$((direct_code + 1)); else direct_book=$((direct_book + 1)); fi
+    # Any code file makes the commit code; bookkeeping keeps priority over a doc edit in the same commit, as before.
+    if $code; then direct_code=$((direct_code + 1)); code_shas+=" ${sha:0:7}"
+    elif $book; then direct_book=$((direct_book + 1))
+    elif $docs; then direct_docs=$((direct_docs + 1))
+    else direct_book=$((direct_book + 1)); fi
   }
   while IFS= read -r line; do
     case "$line" in
-      $'\x01'*) finish_commit; in_commit=true; code=false ;;
+      $'\x01'*) finish_commit; in_commit=true; code=false; book=false; docs=false; sha="${line#$'\x01'}" ;;
       '') ;;
-      *) is_bookkeeping "$line" || code=true ;;
+      *) if is_bookkeeping "$line"; then book=true
+         elif is_doc_config "$line"; then docs=true
+         else code=true; fi ;;
     esac
   done < <(git -C "$path" log "$branch" --first-parent --no-merges ${since_args[@]+"${since_args[@]}"} --name-only --format=%x01%H)
   finish_commit
@@ -192,7 +213,8 @@ report_project() { # <slug>
   [ "$owner" = "not recorded" ] || group_list+=("$owner")
   for g in "${group_list[@]}"; do
     add "$g" projects 1; add "$g" merges "$merges"; add "$g" reviewed "$reviewed"; add "$g" no_review "$no_review"; add "$g" no_look "$no_look"
-    add "$g" other_sha "$other_sha"; add "$g" unrecognised "$unrecognised"; add "$g" code "$direct_code"; add "$g" book "$direct_book"
+    add "$g" other_sha "$other_sha"; add "$g" unrecognised "$unrecognised"; add "$g" code "$direct_code"; add "$g" docs "$direct_docs"
+    add "$g" book "$direct_book"
     if $tests_recorded; then add "$g" tests_seen 1; add "$g" tests_on "$tests_on"; add "$g" tests_off "$tests_off"; else add "$g" tests_missing 1; fi
     if $chain_recorded; then add "$g" chain_seen 1; add "$g" stops "$stops"; add "$g" gates "${#gates[@]}"; add "$g" gates_passed "$gates_passed"
       add "$g" handled "$handled"; add "$g" re_explained "$re_explained"; add "$g" not_noted "$not_noted"
@@ -201,7 +223,7 @@ report_project() { # <slug>
     else add "$g" looks_missing 1; fi
   done
 
-  if [ $((merges + direct_code + direct_book + stops)) -eq 0 ]; then
+  if [ $((merges + direct_code + direct_docs + direct_book + stops)) -eq 0 ]; then
     echo "== $s (orchestrator $owner): nothing on $branch in the window"
     return 0
   fi
@@ -214,6 +236,8 @@ report_project() { # <slug>
   else echo "  visible merges: not recorded (no look on record)"; fi
   [ "$bad_looks" -eq 0 ] || echo "  look rows that do not parse: $bad_looks (runs/$s/*.look)"
   echo "  direct commits: $direct_code code; $direct_book bookkeeping"
+  echo "  direct docs and config commits: $direct_docs"
+  [ -z "$code_shas" ] || echo "  direct code commits:$code_shas"
   if $tests_recorded; then
     echo "  merges with a test run on record: $tests_on; without: $tests_off$([ -n "$test_cmd" ] || echo " (no TEST_CMD in the conf)")"
   else echo "  merges with a test run on record: not recorded (no runs/$s)"; fi
@@ -239,7 +263,7 @@ print_total() { # <group>
   count() { echo "${totals["$g.$1"]:-0}"; }
   [ "$(count projects)" -gt 0 ] || return 0
   echo "== total$label: $(count projects) project(s); merges $(count merges), $(count reviewed) reviewed at the merged SHA, $(count no_review) --no-review, $(count unrecognised) no recognisable subject, $(count other_sha) subject names another SHA, $(count no_look) --no-look"
-  echo "   direct commits $(count code) code, $(count book) bookkeeping; test run on record $(total_field "$g" tests_seen tests_missing "$(count tests_on), without $(count tests_off)")"
+  echo "   direct commits $(count code) code, $(count docs) docs and config, $(count book) bookkeeping; test run on record $(total_field "$g" tests_seen tests_missing "$(count tests_on), without $(count tests_off)")"
   echo "   gates passed of reached $(total_field "$g" chain_seen chain_missing "$(count gates_passed) of $(count gates)"); chain stops $(total_field "$g" chain_seen chain_missing "$(count stops)")"
   echo "   stops handled without the operator re-explaining: $(total_field "$g" chain_seen chain_missing "handled $(count handled), re-explained $(count re_explained), not noted $(count not_noted)")"
   echo "   visible merges $(total_field "$g" looks_seen looks_missing "$(count vis_with) with a look, $(count vis_without) without, $(count vis_earlier) earlier not recorded")"

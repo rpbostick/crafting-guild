@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Run one builder through OpenCode (`opencode run`) in place of `claude -p`; dispatch.sh launches it in the worktree.
 # Usage: opencode-builder.sh --model provider/model --budget USD --config <opencode.json> --log <run .jsonl>
-#                            --name <title> <prompt-file>
+#                            --name <title> [--variant <name>] <prompt-file>
 # Stdout is the run's log (OpenCode's JSON events); this script appends the Claude-shaped result line check-result reads.
 # The model must pass scripts/zdr-check.sh first (WS_ZDR_PAGE: a saved copy of the page, for tests).
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
-model="" budget="" config="" log="" title=""
+model="" budget="" config="" log="" title="" variant=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --model) model="$2"; shift 2 ;;
@@ -14,6 +14,7 @@ while [ $# -gt 0 ]; do
     --config) config="$2"; shift 2 ;;
     --log) log="$2"; shift 2 ;;
     --name) title="$2"; shift 2 ;;
+    --variant) variant="$2"; shift 2 ;;
     -*) die "unknown flag $1" ;;
     *) break ;;
   esac
@@ -21,10 +22,12 @@ done
 pf="${1:?usage: opencode-builder.sh [flags] <prompt-file>}"
 for v in model budget config log title; do [ -n "${!v}" ] || die "--$v is required"; done
 [ -f "$config" ] || die "no OpenCode config $config"
+# `opencode run`, then one free-text continue if the reply is not a valid result.
 # The version goes into the result line beside the model: a capability change is then traceable to an upgrade.
 WS_RUN_MODEL="$model"
+WS_RUN_VARIANT="$variant"
 WS_RUN_OPENCODE_VERSION=$(opencode --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
-export WS_RUN_MODEL WS_RUN_OPENCODE_VERSION="${WS_RUN_OPENCODE_VERSION:-unknown}"
+export WS_RUN_MODEL WS_RUN_VARIANT WS_RUN_OPENCODE_VERSION="${WS_RUN_OPENCODE_VERSION:-unknown}"
 helper="$WS/scripts/opencode_run.py" schema="$WS/schema/result.json"
 t0=$(date +%s%3N)
 finish() { python3 -I "$helper" result "$log" "$schema" "$budget" "$(( $(date +%s%3N) - t0 ))" "$@"; }
@@ -61,15 +64,17 @@ pid=""
 # A timeout or kill of this script stops OpenCode's whole process group, so a wrapper's child goes too. setsid makes
 # the background opencode a session leader, so its PID is its group's ID; killing the group is safe and by PID.
 trap '[ -n "$pid" ] && kill -- "-$pid" 2>/dev/null; exit 143' TERM INT
+over() { python3 -I "$helper" over "$log" "$budget"; }
 # One OpenCode call with the budget watched across the whole log; stdin closed, or `opencode run` waits on it.
 run() {
-  setsid opencode run --format json --model "$model" --title "$title" "$@" < /dev/null &
+  local -a varargs=()
+  [ -n "$variant" ] && varargs=(--variant "$variant")
+  setsid opencode run "${varargs[@]}" --format json --model "$model" --title "$title" "$@" < /dev/null &
   pid=$!
   python3 -I "$helper" watch "$log" "$budget" "$pid" & watcher=$!
   wait "$pid"; pid=""
   kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null
 }
-over() { python3 -I "$helper" over "$log" "$budget"; }
 
 opencode_prompt_args "$pf"
 run "${OPENCODE_PROMPT_ARGS[@]}"

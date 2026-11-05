@@ -30,6 +30,12 @@ else
 fi
 [ "$mode" = bench ] || [ -z "$bench_arm" ] || die "--arm only applies with --bench"
 load_project "$slug"
+# A comparison is test work: past the hold it stops, so the allowance stays for builders and orchestrators. It is
+# checked again before each review, because a long list can cross the hold on its way.
+stop_past_hold() {
+  allowance_check "${model:-$WS_OPENCODE_MODEL}" || die "stopped before the next review: $ALLOWANCE_REASON"
+}
+stop_past_hold
 status=0 scratch="" scratch_branch=""
 cleanup_scratch() {
   [ -n "$scratch" ] && git -C "$PROJECT_PATH" worktree remove --force "$scratch" 2>/dev/null
@@ -202,6 +208,7 @@ recall_fix_first() {
       base=$(git -C "$PROJECT_PATH" merge-base "$PROJECT_BRANCH" "$sha" 2>/dev/null || true)
     fi
     if [ -z "$base" ]; then note "$cname: no merge base for $(short "$sha"); skipped"; status=1; continue; fi
+    stop_past_hold
     scratch="$(worktree_dir "$cname")-recall-$$"
     if ! git -C "$PROJECT_PATH" worktree add -q --detach "$scratch" "$sha"; then
       note "$cname: could not check out $(short "$sha") in $scratch; skipped"; status=1; scratch=""; continue
@@ -264,6 +271,7 @@ recall_bench() {
     if [ "$cblock" -eq 0 ]; then note "$run: the Claude review has no blocking findings; skipped"; status=1; continue; fi
     # A bench run's recorded base is the branch's merge base (bench add records it), so the replay and this
     # review start where the original branch did, not from main at merge time.
+    stop_past_hold
     wt="$(worktree_dir "$run")"; log="$RUNS/bench/logs/$run.recall.log"
     mkdir -p "$RUNS/bench/logs"; : > "$log"
     if ! replay_worktree "$PROJECT_PATH" "$base" "$wt" "$(branch_of "$run")" "$RUNS/bench/evidence/$run/replay.patch" "$RUNS/bench/evidence/$run" "$log" "$run"; then
@@ -296,6 +304,7 @@ if [ "$mode" = merged ]; then
     cverd=$(jq -r '.verdict // "?"' "$rec")
     cblock=$(jq -r '(.blocking // []) | length' "$rec")
     sha=$(jq -r '.reviewed_sha // empty' "$rec")
+    stop_past_hold
     wt="$(worktree_dir "$name")"
     # Use the branch's own checkout when it is still at the reviewed SHA; otherwise check that SHA out in a scratch
     # worktree, so a merged or moved branch is reviewed at the commit the recorded review names.

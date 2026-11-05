@@ -13,6 +13,8 @@ days = int(sys.argv[6]) if len(sys.argv) > 6 else 30
 since = time.time() - days * 86400
 
 PROBE = re.compile(r"^(node|python3?|\S*/python3?)\s+-[ce]\b|^(npx )?tsx -e\b|^(node|python3?|(npx )?tsx)\s+\S*(/tmp/|\.ws-evidence/)")
+# A fetch or clone into scratch is how a builder got a web source before `ws web` existed, not a probe.
+WEB_SOURCE = re.compile(r"https?://|\bgit clone\b|\bcurl\b|\bwget\b")
 WRAPPER = re.compile(r"(run_logged|run\.js|run_check|grid\.js|scripts/evidence/)")
 TEST = re.compile(r"^(npx )?(jest|vitest)|^npm (run )?test|pytest|-m unittest|^node --test")
 SCRIPT = re.compile(r"^(npx )?tsx\s+((scripts|spike)/\S+)|^(node|python3?|\S*/python3?)\s+((scripts|spike)/\S+)")
@@ -39,7 +41,9 @@ for f in runs:
             elif WRAPPER.search(cmd):
                 cat["hand-written evidence wrappers"] += 1
                 if os.path.getmtime(f) >= wsrun_added: wrappers[name] += 1  # older runs had no ws-run to use
-            elif PROBE.search(cmd): cat["one-off probe scripts"] += 1; probes += 1
+            elif PROBE.search(cmd):
+                if WEB_SOURCE.search(cmd): cat["web source fetches"] += 1
+                else: cat["one-off probe scripts"] += 1; probes += 1
             elif m := SCRIPT.search(cmd): cat["committed scripts run by hand"] += 1; per_script[m.group(2) or m.group(5)].add(name)
             elif cmd.startswith("git "): cat["git"] += 1
             else: cat["other"] += 1
@@ -68,8 +72,16 @@ tests_text = ""
 for p in tracked("test/*", "tests/*", "*/tests/*", "*.test.*"):
     try: tests_text += open(os.path.join(path, p), errors="replace").read()
     except (OSError, IsADirectoryError): pass
+def hand_run(p):
+    """A check script marked for a person to run is not a check the suite forgot."""
+    try:
+        with open(os.path.join(path, p), errors="replace") as fh:
+            return any("# ws-audit: run by hand" in fh.readline() for _ in range(10))
+    except OSError:
+        return False
 unrun = [p for p in tracked("scripts/*", "*/scripts/*")
          if re.search(r"(check|e2e|verify|validate)[^/]*\.(js|ts|py|sh)$", p, re.I)
+         and not hand_run(p)
          and os.path.splitext(os.path.basename(p))[0] not in gate_text
          and os.path.splitext(os.path.basename(p))[0] not in tests_text]
 

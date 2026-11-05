@@ -79,8 +79,22 @@ if $test_only; then
   exit "$rc"
 fi
 pin="${2:?missing the reviewed SHA}"
+# A marker left by a merge whose tests or push did not finish names a commit already on the branch. Starting another
+# merge would overwrite it, and if this merge's tests fail the earlier commit would stay unverified with nothing
+# naming it, so refuse until a person finishes that merge by hand. Checked before the lock too, so a merge with no
+# lock held refuses at once instead of taking it: while another merge still runs its held lock keeps this quiet, and
+# the check is repeated once this merge holds the lock (the merge ahead of it can crash or fail its push meanwhile).
+unfinished=$(unfinished_merge_line "$RUNS" "$PROJECT_PATH" "$PROJECT_BRANCH")
+[ -z "$unfinished" ] || die "$unfinished
+Finish that merge by hand before starting another."
 # One merge at a time per project: two lanes can finish together, and both merge in the same main checkout.
 exec 9>"$RUNS/merge.lock"; flock -n 9 || { echo "waiting for another merge of $SLUG to finish"; flock -w 3600 9 || die "another merge of $SLUG held the lock for an hour"; }
+# Re-check with the lock held: a merge ahead of this one can have crashed or failed its push during the wait and left
+# the marker, and the pre-lock check stayed quiet because that merge held the lock. `held` skips the lock probe,
+# which would see this process's own descriptor as another holder.
+unfinished=$(unfinished_merge_line "$RUNS" "$PROJECT_PATH" "$PROJECT_BRANCH" held)
+[ -z "$unfinished" ] || die "$unfinished
+Finish that merge by hand before starting another."
 tip=$(git -C "$PROJECT_PATH" rev-parse "$br" 2>/dev/null) || die "no branch $br"
 pinfull=$(git -C "$PROJECT_PATH" rev-parse --verify "$pin^{commit}" 2>/dev/null) || die "unknown SHA $pin"
 [ "$tip" = "$pinfull" ] || die "branch $br is at $(short "$tip"), not the reviewed $(short "$pin"). Review again."
@@ -176,6 +190,10 @@ how="reviewed at $(short "$tip")"; $need_review || how="merged at $(short "$tip"
 ! $no_look_used || how+="$no_look_mark$no_look_reason"
 git -C "$PROJECT_PATH" merge --no-ff "$br" -m "Merge $br${title:+: $title} ($how)" || { git -C "$PROJECT_PATH" merge --abort; restore_allowed; die "merge conflict; resolve by hand or ask a builder to merge $PROJECT_BRANCH into $br"; }
 merged=$(git -C "$PROJECT_PATH" rev-parse --short HEAD); merged_full=$(git -C "$PROJECT_PATH" rev-parse HEAD)
+# A crash before the tests and push finish leaves this behind: the next cold start and chain name the merge commit
+# that sits on the main branch untested, instead of trusting a stale chain status or skipping the step as merged.
+# It holds the step name, the reviewed branch tip, the merge commit and the stage: tests, then push once they pass.
+printf '%s %s %s tests\n' "$name" "$tip" "$merged_full" > "$RUNS/merge.unfinished"
 # A branch that changed a package-lock.json needs those dependencies in the main checkout before the
 # tests run (builders install them in their worktree only). Install scripts are skipped unless the
 # project's conf sets MERGE_NPM_FLAGS (e.g. empty, for git dependencies that build in `prepare`).
@@ -191,6 +209,9 @@ if [ -n "$TEST_CMD" ]; then
   t0=$(date +%s)
   run_suite "$PROJECT_PATH" "$TEST_CMD" "$log"; rc=$?; secs=$(( $(date +%s) - t0 ))
   if [ "$rc" -eq 0 ]; then
+    # The tests passed but the push has not run yet: a crash during the restore below or the push must still name
+    # the commit left unpushed on main, so the marker moves to the push stage instead of being removed.
+    printf '%s %s %s push\n' "$name" "$tip" "$merged_full" > "$RUNS/merge.unfinished"
     echo "--- ws merge: suite ${secs}s ---" >> "$log"
     echo "tests passed in ${secs}s (log: ${log#"$WS/"})"
     # Apart from the allowed plans/reports files above (whose local changes stay), any tracked file modified
@@ -210,14 +231,16 @@ if [ -n "$TEST_CMD" ]; then
     [ "$secs" -gt "${WS_SUITE_WARN_S:-300}" ] && echo "ws: the suite took ${secs}s, over WS_SUITE_WARN_S=${WS_SUITE_WARN_S:-300}. Every merge pays this; a builder task to speed up the slowest test files pays for itself in a few merges (one such task took a suite from 28 min to 2 min for \$3.75)."
   elif timed_out "$rc" "$secs"; then
     git -C "$PROJECT_PATH" reset --hard ORIG_HEAD -q
+    rm -f "$RUNS/merge.unfinished"
     restore_allowed
     show_timeout_log "$log"; die "the suite timed out after ${WS_MERGE_TEST_TIMEOUT} s (WS_MERGE_TEST_TIMEOUT) on the merged tree; merge undone. Log: ${log#"$WS/"}"
   else
     git -C "$PROJECT_PATH" reset --hard ORIG_HEAD -q
+    rm -f "$RUNS/merge.unfinished"
     restore_allowed
     tail -n 30 "$log"; die "tests failed on the merged tree; merge undone. Log: ${log#"$WS/"}"
   fi
-else echo "no TEST_CMD for $SLUG; merging without a test gate"; fi
+else printf '%s %s %s push\n' "$name" "$tip" "$merged_full" > "$RUNS/merge.unfinished"; echo "no TEST_CMD for $SLUG; merging without a test gate"; fi
 [ -f "$hf" ] && rm -f "$hf" && echo "hold on $name removed (the merge passed it)"
 if $gate_look; then record_look "$name" "$tip" chain-gate "merged from the chain's gate at $(short "$tip")"; echo "look recorded on $name from the chain's gate"; fi
 push_failed=false
@@ -225,6 +248,9 @@ if $has_remote; then
   if git -C "$PROJECT_PATH" push -q origin "$PROJECT_BRANCH"; then echo "pushed $merged to origin/$PROJECT_BRANCH"
   else push_failed=true; fi
 fi
+# Only a push that finished (or no remote to push to) finishes the merge: a failed push leaves the marker so the
+# next cold start and chain name the commit that sits unpushed on main.
+if ! $push_failed; then rm -f "$RUNS/merge.unfinished"; fi
 $push_failed || start_post_merge
 if [ -d "$wt/.ws-evidence" ] && [ -n "$(ls -A "$wt/.ws-evidence" 2>/dev/null)" ]; then
   rm -rf "$RUNS/evidence/$name"; mkdir -p "$RUNS/evidence"; mv "$wt/.ws-evidence" "$RUNS/evidence/$name" && echo "evidence kept at runs/$SLUG/evidence/$name/"

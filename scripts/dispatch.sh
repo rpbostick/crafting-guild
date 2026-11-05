@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Run one builder on one task, headless, in its own worktree on branch agent/<name>.
 # Usage: dispatch.sh [--project slug] [--budget USD] [--model M] [--effort E] [--timeout 90m]
-#                    [--allow "Bash(cmd *)"]... [--dry-run] [--print-prompt] [--names-ok]
-#                    [--base <sha>] [--instructions <dir>] [--input <file>]... [--agent claude|opencode] <name> <task-file>
+#                    [--temperature T] [--top-p P] [--allow "Bash(cmd *)"]... [--dry-run] [--print-prompt]
+#                    [--names-ok] [--base <sha>] [--instructions <dir>] [--input <file>]...
+#                    [--agent claude|opencode] <name> <task-file>
 # --agent opencode runs the builder through scripts/opencode-builder.sh (default WS_AGENT); --model is then a
-# provider/model ID, WS_OPENCODE_MODEL when not given.
+# provider/model ID, WS_OPENCODE_MODEL when not given. --effort is a model variant there (`opencode run --variant`),
+# checked against `opencode models <provider> --verbose` before anything starts. --temperature and --top-p set the
+# OpenCode build agent's sampling; Claude has no such settings and the flags are ignored with a warning there.
 # --input copies a file the builder needs but cannot fetch or write (a data file, a prebuilt grid) into the
 # worktree's .ws-evidence/ before the builder starts; the task names it there.
 # --print-prompt is a dry run that also prints the builder's whole prompt.
@@ -19,7 +22,7 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 slug="" budget="$WS_DEFAULT_BUDGET" model="$WS_MODEL" effort="$WS_EFFORT" tmo="" dry=false show_prompt=false names_ok=false from="" instr=""; extra=() inputs=()
-agent="$WS_AGENT" model_flag=false
+temperature="" top_p=""; agent="$WS_AGENT" model_flag=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --project) slug="$2"; shift 2 ;;
@@ -27,6 +30,8 @@ while [ $# -gt 0 ]; do
     --model) model="$2"; model_flag=true; shift 2 ;;
     --agent) agent="$2"; shift 2 ;;
     --effort) effort="$2"; shift 2 ;;
+    --temperature) temperature="$2"; shift 2 ;;
+    --top-p) top_p="$2"; shift 2 ;;
     --timeout) tmo="$2"; shift 2 ;;
     --allow) extra+=("$2"); shift 2 ;;
     --dry-run) dry=true; shift ;;
@@ -46,6 +51,26 @@ case "$agent" in
   opencode) $model_flag || model="$WS_OPENCODE_MODEL"; case "$model" in */*) ;; *) die "--agent opencode takes a provider/model ID for --model, not '$model'" ;; esac ;;
   *) die "unknown agent '$agent' (claude or opencode)" ;;
 esac
+# OpenCode takes effort as a model variant. An unknown one fails here, with the model's list, rather than after
+# OpenCode has started without the reasoning the caller asked for.
+variant=""
+if [ "$agent" = opencode ] && [ -n "$effort" ]; then
+  if ! valid_variants=$(python3 -I "$WS/scripts/opencode_run.py" variants "$model" 2>&1); then
+    die "cannot read the variants of $model for --effort '$effort': $valid_variants"
+  fi
+  [ -n "$valid_variants" ] || die "$model has no variants, so --effort '$effort' cannot be set"
+  grep -qxF -- "$effort" <<< "$valid_variants" \
+    || die "--effort '$effort' is not a variant of $model; valid: $(paste -sd ',' <<< "$valid_variants" | sed 's/,/, /g')"
+  variant="$effort"
+fi
+[ -z "$temperature" ] || sampling_temperature --temperature "$temperature"
+[ -z "$top_p" ] || sampling_top_p --top-p "$top_p"
+if [ "$agent" = claude ] && [ -n "$temperature$top_p" ]; then
+  ignored=""
+  [ -n "$temperature" ] && ignored="--temperature"
+  [ -n "$top_p" ] && ignored="${ignored:+$ignored and }--top-p"
+  note "warning: Claude ignores $ignored; sampling applies only to --agent opencode"
+fi
 case "$name" in *[!A-Za-z0-9._-]*) die "bad name '$name'" ;; esac
 task=$(ws_path "$task"); [ -f "$task" ] || die "no task file $task"
 # Builders copy a task's wording into comments: tasks state requirements, not who asked or when.
@@ -74,7 +99,7 @@ if [ -n "$instr" ]; then
   fi
 fi
 wt="$(worktree_dir "$name")"; br="$(branch_of "$name")"
-if [ -f "$RUNS/$name.pid" ] && kill -0 "$(cat "$RUNS/$name.pid")" 2>/dev/null; then die "a run named $name is still going (pid $(cat "$RUNS/$name.pid"))"; fi
+if pid_file_alive "$RUNS/$name.pid"; then die "a run named $name is still going (pid $(cat "$RUNS/$name.pid"))"; fi
 
 # Worktree: create on a fresh branch from the main branch, or reuse an existing one (a resume).
 fresh_wt=false fresh_br=false
@@ -166,7 +191,11 @@ TOOLS=(Read Grep Glob "Edit(./**)"
   "Bash(git add *)" "Bash(git commit *)" "Bash(git branch --show-current)" "Bash(git checkout -- *)"
   "Bash(git restore *)" "Bash(git clean -f -- *)" "Bash(git ls-tree*)" "Bash(git check-ignore*)" "Bash(stat *)" "Bash(sha256sum *)" "Bash(file *)"
   "Bash(git rm *)" "Bash(git mv *)" "Bash(ls *)" "Bash(cat *)" "Bash(grep *)" "Bash(wc *)" "Bash(head *)" "Bash(tail *)"
-  "Bash(mkdir *)" "Bash(cp *)" "Bash(chmod *)" "Bash(expr *)" "Bash(date *)" "Bash(diff *)" "Bash(bash -n *)" "Bash(git grep *)" "Bash(pwd)" "Bash(find *)" "Bash(sed *)" "Bash(which *)")
+  "Bash(mkdir *)" "Bash(cp *)" "Bash(chmod *)" "Bash(expr *)" "Bash(date *)" "Bash(diff *)" "Bash(bash -n *)" "Bash(git grep *)" "Bash(pwd)" "Bash(find *)" "Bash(sed *)" "Bash(which *)"
+  # Read-only probes the audit found builders denied: command lookup, printed versions, jq, echo and a syntax
+  # compile. The versions are listed, not `* --version`: that leading wildcard also runs a script ending in it.
+  "Bash(command -v *)" "Bash(jq *)" "Bash(echo *)" "Bash(python3 -m py_compile *)"
+  "Bash(bash --version)" "Bash(opencode --version)" "Bash(node --version)" "Bash(python3 --version)" "Bash(npm --version)")
 [ -z "$from" ] && TOOLS+=("Bash(git merge $PROJECT_BRANCH)" "Bash(git merge $PROJECT_BRANCH --no-edit)")
 [ -n "$TEST_CMD" ] && TOOLS+=("Bash($TEST_CMD)" "Bash($TEST_CMD *)")
 # Per-project extras from projects/<slug>.conf (EXTRA_TOOLS), then this dispatch's --allow flags.
@@ -531,14 +560,18 @@ cmd=(claude -p "$prompt" --allowedTools "${TOOLS[@]}" --disallowedTools "${DENY[
 [ -n "$model" ] && cmd+=(--model "$model")
 [ -n "$effort" ] && cmd+=(--effort "$effort")
 # OpenCode: the same grants as an OpenCode permission config, the prompt from a file, the result line written by
-# the launcher. Effort has no OpenCode equivalent here and is not passed.
+# the launcher. Effort arrives as the model variant checked above.
 if [ "$agent" = opencode ]; then
   oc_config="$RUNS/$name.opencode.json"; oc_prompt="$RUNS/$name.prompt.txt"
   dargs=(); for d in "${DENY[@]}"; do dargs+=(--deny "$d"); done
-  WS_SANDBOX="$WS_SANDBOX" python3 -I "$WS/scripts/opencode_run.py" config "${TOOLS[@]}" "${dargs[@]}" > "$oc_config" || die "could not build the OpenCode config"
-  [ -n "$effort" ] && echo "note: OpenCode ignores --effort '$effort'"
+  sampling=()
+  [ -n "$temperature" ] && sampling+=(--temperature "$temperature")
+  [ -n "$top_p" ] && sampling+=(--top-p "$top_p")
+  WS_SANDBOX="$WS_SANDBOX" python3 -I "$WS/scripts/opencode_run.py" config ${sampling[@]+"${sampling[@]}"} "${TOOLS[@]}" "${dargs[@]}" > "$oc_config" || die "could not build the OpenCode config"
+  variant_args=()
+  [ -n "$variant" ] && variant_args=(--variant "$variant")
   printf '%s\n' "$prompt" > "$oc_prompt"
-  cmd=("$WS/scripts/opencode-builder.sh" --model "$model" --budget "$budget" --config "$oc_config" --log "$RUNS/$name.jsonl" --name "ws:$SLUG:$name" "$oc_prompt")
+  cmd=("$WS/scripts/opencode-builder.sh" --model "$model" --budget "$budget" --config "$oc_config" --log "$RUNS/$name.jsonl" --name "ws:$SLUG:$name" "${variant_args[@]}" "$oc_prompt")
 fi
 
 # The agent matches a grant as written, quotes included; ws-run matches the words the shell passed it, so its copy
@@ -546,7 +579,7 @@ fi
 printf '%s\n' "${TOOLS[@]}" | sed -n 's/^Bash(\(.*\))$/\1/p' | grep -v '/bin/ws-run ' | tr -d "\"'\\\\" > "$RUN_GRANTS"
 printf '%s\n' "${DENY[@]}" | sed -n 's/^Bash(\(.*\))$/\1/p' > "$RUN_DENY"
 if $dry; then
-  [ "$agent" = opencode ] && { echo "agent: opencode model: $model"; echo "opencode config ($oc_config):"; cat "$oc_config"; }
+  [ "$agent" = opencode ] && { echo "agent: opencode model: $model${variant:+ variant: $variant}"; echo "opencode config ($oc_config):"; cat "$oc_config"; }
   echo "cwd: $wt"; echo "tools: ${TOOLS[*]}"; echo "deny: ${DENY[*]}"; echo "budget: \$$budget timeout: $tmo model: ${model:-default} memory cap: ${WS_BUILDER_MEM:-none}"
   echo "prompt bytes: ${#prompt}"; echo "evidence: $wt/.ws-evidence"; echo "base: $(git -C "$wt" rev-parse HEAD)"
   if $show_prompt; then echo "--- prompt ---"; printf '%s\n' "$prompt"; fi
@@ -556,9 +589,10 @@ if $dry; then
   exit 0
 fi
 
+if [ "$agent" = opencode ]; then allowance_warn "$model"; fi
 # Previous run's files move aside; this run's log, pid and task record are written fresh.
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
-for ext in jsonl result.txt task.txt events.jsonl; do [ -e "$RUNS/$name.$ext" ] && mv "$RUNS/$name.$ext" "$RUNS/$name.$stamp.$ext"; done
+for ext in jsonl result.txt task.txt events.jsonl serve.log; do [ -e "$RUNS/$name.$ext" ] && mv "$RUNS/$name.$ext" "$RUNS/$name.$stamp.$ext"; done
 # The Claude Code version goes into the run record, so a capability change is traceable to an upgrade.
 claude_version=""
 if [ "$agent" = claude ]; then

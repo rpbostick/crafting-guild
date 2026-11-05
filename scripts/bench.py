@@ -33,9 +33,12 @@ RECORDED_COLS = RUNS_COLS + DW_COUNT_KEYS
 # step_finish was read), not a real count.
 TELEMETRY_KEYS = ("turns", "peak_context", "mean_context")
 METRIC_KEYS = ["turns", "peak_context", "mean_context", "output_tokens", "cache_reads", "cost", "minutes", "denied"]
-# arms.tsv rows: label, spec, resolved ref, then agent and model. Rows written before arms had an agent hold only
-# the first three, and those arms ran Claude on dispatch's default model.
-ARMS_COLS = ["label", "spec", "resolved", "agent", "model"]
+# arms.tsv rows: label, spec, resolved ref, then agent, model, temp, top_p and effort. Rows written before arms had
+# an agent hold only the first three and ran Claude on dispatch's default model; rows from before sampling hold five;
+# rows from before effort hold seven.
+ARMS_COLS = ["label", "spec", "resolved", "agent", "model", "temp", "top_p", "effort"]
+LEGACY_ARMS_COLS = ["label", "spec", "resolved", "agent", "model"]
+SAMPLING_ARMS_COLS = ["label", "spec", "resolved", "agent", "model", "temp", "top_p"]
 RECORDED = "recorded"
 UNREVIEWED = "unreviewed"
 # A replay whose saved patch no longer applies could not be judged: recorded so the gap is visible, but not a
@@ -64,6 +67,8 @@ def read_tsv(path, cols):
     if header != cols:
         if cols == RUNS_COLS and header == LEGACY_RUNS_COLS:
             header = list(cols)  # old rows have no teeth yet; zip fills it empty
+        elif cols == ARMS_COLS and header in (LEGACY_ARMS_COLS, SAMPLING_ARMS_COLS):
+            header = list(cols)  # old rows have no sampling or effort; zip fills them empty
         else:
             sys.exit(f"bench: {path} has columns {header}, expected {cols}")
     return [dict(zip(cols, line.split("\t") + [""] * (len(cols) - len(line.split("\t"))))) for line in lines[1:] if line]
@@ -374,14 +379,14 @@ def spread_text(values, missing="-"):
 
 
 def read_arms(path):
-    """label -> (agent, model) from an arms.tsv. Old rows lack the last two fields; an empty one is what dispatch chose
-    (WS_AGENT, then WS_MODEL or the corpus flags), shown as "default"."""
+    """label -> (agent, model, temp, top_p, effort) from an arms.tsv. Old rows lack the last fields; an empty agent or
+    model is what dispatch chose (WS_AGENT, then WS_MODEL or the corpus flags), shown as "default"."""
     info = {}
     if os.path.exists(path):
         for line in open(path).read().splitlines():
             fields = line.split("\t") + [""] * len(ARMS_COLS)
             if fields[0] and fields[0] != "label":
-                info[fields[0]] = (fields[3] or "default", fields[4] or "default")
+                info[fields[0]] = (fields[3] or "default", fields[4] or "default", fields[5], fields[6], fields[7])
     return info
 
 
@@ -393,8 +398,12 @@ def report(title, rows, baseline, arm_info):
     if not arms:
         print("no finished runs")
         return
-    agent_of = {a: arm_info.get(a, ("default", "default"))[0] for a in arms}
-    model_of = {a: arm_info.get(a, ("default", "default"))[1] for a in arms}
+    default_arm = ("default", "default", "", "", "")
+    agent_of = {a: arm_info.get(a, default_arm)[0] for a in arms}
+    model_of = {a: arm_info.get(a, default_arm)[1] for a in arms}
+    temp_of = {a: arm_info.get(a, default_arm)[2] for a in arms}
+    top_p_of = {a: arm_info.get(a, default_arm)[3] for a in arms}
+    effort_of = {a: arm_info.get(a, default_arm)[4] for a in arms}
     print("cost $ is as each agent reports it"
           + ("; OpenCode's step costs are OpenCode Go's notional per-token prices, not what the subscription charges"
              if "opencode" in agent_of.values() else ""))
@@ -425,6 +434,12 @@ def report(title, rows, baseline, arm_info):
     head("")
     line("agent", [agent_of[a] for a in arms])
     line("model", [model_of[a] for a in arms])
+    if any(temp_of.values()):
+        line("temperature", [temp_of[a] or "-" for a in arms])
+    if any(top_p_of.values()):
+        line("top_p", [top_p_of[a] or "-" for a in arms])
+    if any(effort_of.values()):
+        line("effort", [effort_of[a] or "-" for a in arms])
     line("tests passed", [fmt(arm_rate(by_arm[a], "tests passed"), "%") for a in arms])
     line("done-when claimed", [fmt(claimed_rate(by_arm[a]), "%") for a in arms])
     line("done-when confirmed", [fmt(done_when_rate(by_arm[a], "dw_confirmed"), "%", "n/a") for a in arms])

@@ -1,10 +1,10 @@
 # Crafting Guild
 
-Crafting Guild Agentic Workspace: build software with a small team of Claude Code agents from one folder, on projects that live in other folders.
+Crafting Guild Agentic Workspace: build software with a small team of coding agents from one folder, on projects that live in other folders.
 
 You open one Claude Code session here and point it at a project. That session is the orchestrator: it plans, dispatches headless builders into git worktrees of the project, checks what they claim, reviews each branch once, and merges with the project's tests as the gate. Plans live in files that survive context compaction, and a twenty-second cold start runs at every session start and after every compaction, so a resumed session never guesses.
 
-No servers, no Docker, no cron, no MCP: about 1,300 lines of shell, one small Python script and a few pages of prose.
+No daemon, no database, no service to run: about 13,500 lines of shell and JavaScript across `bin/` and `scripts/`, eight Python helpers of about 2,900 lines, and a few pages of prose, with a self-test that runs the loop against throwaway repositories. An OpenCode orchestrator may load an optional browser MCP; nothing else needs a server.
 
 ## Why use it
 
@@ -23,15 +23,19 @@ Nothing is kept in the model. A `SessionStart` hook runs a cold start at every s
 
 ## Requirements
 
-- Linux or macOS with `bash`, `git`, `jq`, GNU `timeout` and `python3`
-- [Claude Code](https://code.claude.com) CLI 2.1.257 or later, signed in
+- Linux or macOS with bash 4+, git with a commit identity (`user.name` and `user.email` set), `jq`, GNU `timeout` and `python3`
+- **[Claude Code](https://code.claude.com) CLI 2.1.257 or later, signed in, and/or [OpenCode](https://opencode.ai) 1.19.1 or later with a credential.** At least one is required. `ws doctor` fails only for the client a configured role needs.
+- By default builders (`WS_AGENT`) and reviews (`WS_REVIEW_AGENT`) use Claude Code; set either to `opencode` to move that role, and `WS_REVIEW_SHADOW=opencode` adds an OpenCode shadow review. The orchestrator follows the command: `ws <slug>` starts Claude Code, `ws oc <slug>` starts OpenCode.
 - Optional: systemd user scopes (Linux), so builders and previews run under a memory cap (`WS_BUILDER_MEM`, `WS_SERVE_MEM`) and a chain survives the session that started it
 - Optional: `gh`, for `ws release` to attach a build to a GitHub release; `rsync`, for `ws site`
 
 ## Install
 
+You need git with `user.name` and `user.email` set (`git config --global user.name <name>` and `git config --global user.email <id>+<login>@users.noreply.github.com`), bash 4+, `jq`, `python3`, and either Claude Code (`claude --version`) or OpenCode (`opencode --version`) installed; the default builder and review roles use Claude Code. [Requirements](#requirements) has the full list.
+
 ```bash
 git clone <this repository's URL> ~/crafting-guild
+mkdir -p ~/.local/bin
 ln -s ~/crafting-guild/bin/ws ~/.local/bin/ws          # or add bin/ to your PATH
 bash ~/crafting-guild/scripts/selftest.sh              # checks the scripts against a throwaway repo
 ws doctor                                              # checks this machine; says what to fix
@@ -43,14 +47,14 @@ ws doctor                                              # checks this machine; sa
 
 | Checks | Required | Optional (a `warn` says what you lose without it) |
 |---|---|---|
-| This machine | bash 4+, git, jq, GNU `timeout`, python3, Claude Code at or above the minimum version | systemd user scopes (memory caps, chains that outlive the session), `gh` signed in (release assets), `rsync` (`ws site`), `shellcheck` (the selftest's lint), the `WS_BROWSER_CMD` browser |
+| This machine | bash 4+, git with a commit identity, jq, GNU `timeout`, python3, and Claude Code or OpenCode at or above its minimum version and signed in (a credential for OpenCode): at least one, and every configured role's client | the client no role uses; systemd user scopes (memory caps, chains that outlive the session), `gh` signed in (release assets), `rsync` (`ws site`), `shellcheck` (the selftest's lint), the `WS_BROWSER_CMD` browser |
 | The workspace | the `SessionStart` hook that runs the cold start | `ws` on your PATH, lessons files under their line cap |
-| The selected project (or `--project <slug>`) | its conf exists, the path is a git repository, the branch exists | a test command (without one, merges are not gated), an `origin` remote (without one, merges stay local), `.worktrees` excluded from the project's git, a preview command |
+| The selected project (or `--project <slug>`) | its conf exists, the path is a git repository, the branch exists (a repository with no commits is named as such) | a test command (without one, merges are not gated), an `origin` remote (without one, merges stay local), `.worktrees` excluded from the project's git, a preview command |
 
 Run it:
 
-- **After installing**, before the first `ws init`: it finds a missing tool or an old Claude Code before a builder does.
-- **On a new machine, or after an OS or Claude Code update:** a missing `jq` or a macOS `timeout` would otherwise break dispatches midway.
+- **After installing**, before the first `ws init`: it finds a missing tool or an old client before a builder does.
+- **On a new machine, or after an OS or client update:** a missing `jq` or a macOS `timeout` would otherwise break dispatches midway.
 - **Before an unattended chain or an overnight run:** if systemd scopes are unavailable, the chain ends with the session and builders run without a memory cap. Better to know before you walk away.
 - **When a run fails strangely:** the cold start missing from new sessions, merges that never push, or builders without memory caps each map to one of its lines.
 - **After registering or moving a project:** it confirms the conf's path, branch, test command and remote, which `ws init` guessed.
@@ -113,18 +117,20 @@ The orchestrator itself runs under OpenCode too: start `opencode` in this folder
 | Command | What it does |
 |---|---|
 | `ws <slug>` | open an orchestrator session for a registered project |
-| `ws init <path> [--tests CMD] [--branch B] [--dry-run] [--force]` | register a project; `--dry-run` shows the conf and changes first; an existing conf is replaced only with `--force`, after a backup, keeping keys init does not write |
-| `ws doctor` | check this machine and the selected project, with a fix for each failure |
-| `ws list`, `ws status [slug]`, `ws version` | registered projects; cold-start by hand; the version |
-| `ws dispatch [--budget N] [--timeout T] [--model M] [--effort E] [--agent claude\|opencode] [--allow RULE]... <name> <task-file>` | run a builder (`--dry-run` or `--print-prompt` to see what it would get) |
+| `ws oc <slug> [args]` | open an OpenCode orchestrator session, pinned to the project (`--print` shows the command) |
+| `ws init <path> [--tests CMD] [--branch B] [--yes] [--dry-run] [--force]` | register a project; `--dry-run` shows the conf and changes first; an existing conf is replaced only with `--force`, after a backup, keeping keys init does not write |
+| `ws doctor [--parity]` | check this machine and the selected project, with a fix for each failure; `--parity` runs one paid probe per agent |
+| `ws list`, `ws status [slug]`, `ws brief [--write] [--since <file>]`, `ws version` | registered projects; cold-start by hand; the status page across projects; the version |
+| `ws dispatch [--budget N] [--timeout T] [--model M] [--effort E] [--temperature T] [--top-p P] [--agent claude\|opencode] [--allow RULE]... <name> <task-file>` | run a builder (`--dry-run` or `--print-prompt` to see what it would get) |
 | `ws wait <name>`, `ws tail <name>`, `ws runs`, `ws stop <name>` | wait for, watch, list, stop runs |
-| `ws serve <name\|main> [port]`, `ws serve stop [name]` | preview server from a worktree or the main checkout |
+| `ws serve <name\|main> [port]`, `ws serve stop [name\|main]`, `ws serve list` | preview server from a worktree or the main checkout |
 | `ws review [--agent claude\|opencode] <name>`, `ws precheck <name>` | review the branch (prints the verdict and the SHA to merge); the mechanical checks alone |
 | `ws review-compare <name>...` | run an OpenCode review beside the recorded Claude one: verdicts, blocking counts, matched findings; never merges |
-| `ws merge <name> <sha>` | merge a reviewed branch, run the tests, push on green, clean up |
-| `ws chain <queue>`, `ws chain-wait` | run a queue of steps unattended; wait on a running chain |
+| `ws merge [--no-review "<reason>"] [--no-look "<reason>"] <name> <sha>` | merge a reviewed branch, run the tests, push on green, clean up |
+| `ws chain <queue>`, `ws chain-wait` | run a queue of steps unattended; wait on a running chain (exit 5 when a running status has no live chain) |
+| `ws wake <session> "<message>" [--at <time>\|--when-chain-stops\|--every <OnCalendar> [--until YYYY-MM-DD]]` | send one message into an idle OpenCode session |
 | `ws audit [days]` | what builders keep doing by hand, from the run logs |
-| `ws release [--dry-run]` | publish main (or its `RELEASE_PATHS`) as one audited commit on a public repository |
+| `ws release [--dry-run] [--notes T] [--no-asset]` | publish main (or its `RELEASE_PATHS`) as one audited commit on a public repository |
 | `ws rollback [--dry-run] [vX.Y.Z]` | put the published files back to a public release, as one new commit (files outside `RELEASE_PATHS` untouched); without a version, list the releases |
 | `ws site [--dry-run]` | copy a project's published files into a site project, test, push, wait until live |
 | `ws --project <slug> <command> ...` | act on a registered project other than the selected one |
@@ -146,7 +152,7 @@ The workspace keeps your working material beside the tool, and none of it is mea
 - `*.local.md`: `CLAUDE.local.md` (your preferences for the orchestrator) and `lessons/<role>.local.md` (lessons that name your projects, people or dates), loaded after the shared files when present
 - `config.local.sh`: your private settings
 
-`.gitignore` ignores only `runs/`, `state/` and logs (`*.log`), so a private copy of the workspace can track the rest; add `*.local.md`, `config.local.sh`, `plans/` and `projects/*.conf` to it if you keep a public fork.
+`.gitignore` ignores `runs/`, `state/`, logs (`*.log`), `__pycache__/` and the generated brief files under `reports/`, so a private copy of the workspace can track the rest; add `*.local.md`, `config.local.sh`, `plans/` and `projects/*.conf` to it if you keep a public fork.
 
 ## Changing the tool
 

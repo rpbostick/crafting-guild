@@ -10,7 +10,7 @@ slug="${1:-}"
 echo "=== ws cold-start $(now_local) (v$(cat "$WS/VERSION" 2>/dev/null || echo ?)) ==="
 # The hourly brief: name the file, its age and what waits on you, so a session knows where to look.
 if $brief; then
-  bn=0; planw=""
+  bn=0; planw=""; ufw=""
   while IFS= read -r bslug; do
     [ -n "$bslug" ] || continue
     while IFS= read -r _; do bn=$((bn + 1)); done < <(waiting_lines "$bslug" "$WS/runs/$bslug" \
@@ -18,12 +18,16 @@ if $brief; then
     while IFS= read -r planline; do
       if [ -n "$planline" ]; then planw+="$bslug: $planline"$'\n'; fi
     done < <(plan_waiting_lines "$WS/plans/$bslug")
+    ufline=$(unfinished_merge_line "$WS/runs/$bslug" \
+      "$(conf_var "$WS/projects/$bslug.conf" PROJECT_PATH)" "$(conf_var "$WS/projects/$bslug.conf" PROJECT_BRANCH)")
+    [ -z "$ufline" ] || ufw+="$bslug: $ufline"$'\n'
   done < <(project_slugs)
   if [ -f "$WS/reports/brief.md" ]; then
     echo "brief: reports/brief.md, $(age_str "$(stat -c %Y "$WS/reports/brief.md")") old, $bn waiting on you (ws brief prints it)"
   else
     echo "brief: no reports/brief.md yet, $bn waiting on you (ws brief prints one; --write saves it)"
   fi
+  if [ -n "$ufw" ]; then printf '%s' "$ufw" | sed 's/^/  /'; fi
   if [ -n "$planw" ]; then printf '%s' "$planw" | sed 's/^/  /'; fi
 fi
 if [ -z "$slug" ] || [ ! -f "$WS/projects/$slug.conf" ]; then
@@ -72,28 +76,38 @@ else echo "  no worktrees"; fi
 running=0
 for pidf in "$RUNS"/*.pid; do
   [ -f "$pidf" ] || continue
-  n=$(basename "$pidf" .pid); pid=$(cat "$pidf")
-  if kill -0 "$pid" 2>/dev/null; then
+  n=$(basename "$pidf" .pid)
+  # A preview's and the chain's own pid files have their own lines below.
+  case "$n" in chain|serve-*) continue ;; esac
+  if pid_file_alive "$pidf"; then
+    pid=$(cat "$pidf")
     started=$(stat -c %Y "$pidf"); el=$(( $(date +%s) - started ))
     last=$(stat -c %Y "$RUNS/$n.jsonl" 2>/dev/null || echo "$started"); idle=$(( $(date +%s) - last ))
     echo "  RUNNING $n (pid $pid, $((el/60)) min, last output $((idle))s ago)"; running=$((running+1))
   fi
 done
 [ "$running" -eq 0 ] && echo "  no builder running"
+# A merge a crash cut off leaves its commit on the main branch untested. It replaces a stale chain running line:
+# a chain cannot be live around an unheld unfinished merge, so that status is the one the crash left behind.
+ufline=$(unfinished_merge_line "$RUNS" "$PROJECT_PATH" "$PROJECT_BRANCH")
 if [ -f "$RUNS/chain.status" ]; then
   cs=$(cat "$RUNS/chain.status")
-  if [ -f "$RUNS/chain.pid" ] && kill -0 "$(cat "$RUNS/chain.pid")" 2>/dev/null; then echo "  CHAIN running (pid $(cat "$RUNS/chain.pid")): $cs (log runs/$SLUG/chain.log; wait on it again under run_in_background if this session did not start it)"
-  else echo "  chain: $cs"; fi
-fi
+  dead=$(chain_dead_line "$RUNS")
+  if pid_file_alive "$RUNS/chain.pid"; then echo "  CHAIN running (pid $(cat "$RUNS/chain.pid")): $cs (log runs/$SLUG/chain.log; wait on it again under run_in_background if this session did not start it)"
+  elif [ -n "$ufline" ] && [ "${cs%% *}" = running ]; then echo "  $ufline"
+  elif [ -n "$dead" ]; then echo "  $dead"; [ -z "$ufline" ] || echo "  $ufline"
+  else echo "  chain: $cs"; [ -z "$ufline" ] || echo "  $ufline"; fi
+elif [ -n "$ufline" ]; then echo "  $ufline"; fi
 for sf in "$RUNS"/serve-*.pid; do
   [ -f "$sf" ] || continue; sp=$(cut -d' ' -f1 "$sf"); port=$(cut -d' ' -f2 "$sf"); what=$(basename "$sf" .pid); what="${what#serve-}"
-  if kill -0 "$sp" 2>/dev/null; then echo "  SERVING $what on :$port (pid $sp; stop: ws serve stop $what)"; else rm -f "$sf"; fi
+  if pid_file_alive "$sf"; then echo "  SERVING $what on :$port (pid $sp; stop: ws serve stop $what)"; else rm -f "$sf"; fi
 done
 # A merge's post-merge chore that failed: the line says who and the exit code, the log is beside it.
 if [ -f "$RUNS/post-merge.status" ] && [ "$(cut -d' ' -f1 "$RUNS/post-merge.status")" = failed ]; then
   pm=$(cat "$RUNS/post-merge.status"); pm_name=$(cut -d' ' -f3 "$RUNS/post-merge.status")
   echo "  POST-MERGE FAILED: $pm (log: runs/$SLUG/post-merge-$pm_name.log)"
 fi
+"$WS/scripts/wake.sh" --project "$SLUG" status-lines
 for r in $(ls -t "$RUNS"/*.result.txt 2>/dev/null | head -5); do
   n=$(basename "$r" .result.txt); echo "  last: $n: $(head -n1 "$r" | cut -c1-110)"
 done
@@ -105,6 +119,9 @@ for p in "$WS/plans/$SLUG"/*.md; do
   [ -f "$p" ] || continue
   has_inflight "$p" || continue
   echo "  ${p#"$WS/"}:"; inflight_block "$p" 12 "    "; found=1
+  if [ "$(inflight_count "$p")" -gt 1 ]; then
+    echo "    more than one in-flight block: ws archive-inflight keeps the first and moves the rest to plans/$SLUG/in-flight-history.md"
+  fi
 done
 [ "$found" -eq 0 ] && echo "  none. Plans: $(find "$WS/plans/$SLUG" -maxdepth 1 -name '*.md' -printf '%f\n' 2>/dev/null | sort | paste -sd' ' | grep . || echo none)"
 echo
@@ -119,6 +136,8 @@ if [ "$al" = never ] || [ $(( ( $(date +%s) - $(date -d "$al" +%s 2>/dev/null ||
   echo "  automation audit due (last: $al): run ws audit and turn its top finding into the next tool fix or light task"
 fi
 # ws doctor, quietly: only its failures (with their fix) and warnings are printed.
+allowance=$(allowance_lines)
+if [ -n "$allowance" ]; then echo "--- OpenCode Go allowance ---"; printf '%s\n' "$allowance" | sed 's/^/  /'; fi
 echo "--- setup (ws doctor) ---"
 doc=$("$WS/scripts/doctor.sh" --project "$SLUG" 2>&1); dx=$?
 problems=$(printf '%s\n' "$doc" | grep -E '^(FAIL|warn)  ' | sed 's/^/  /')

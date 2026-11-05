@@ -10,14 +10,22 @@ ws [--project <slug>] <command> ...   every command below takes the selected pro
 ws <slug>                       open a Claude orchestrator session for a registered project
 ws oc <slug> [args]             open an OpenCode orchestrator session, pinned to the project (--print shows the
                                 command); the alias is ws opencode
-ws init <path> [--tests CMD] [--branch B] [--yes]   register a project (and retire v1 hooks if found)
+ws init <path> [--tests CMD] [--branch B] [--yes] [--dry-run] [--force]   register a project (and retire v1
+                                hooks if found); --dry-run shows the conf first, --force replaces an existing one after a backup
 ws list                         registered projects
 ws status [slug]                cold-start: ground truth in twenty seconds
 ws brief [--write] [--since <file>]   one status page across every registered project: what waits on you, what is
                                 running, each plan's in-flight block, open branches, recent work; --write saves
                                 reports/brief.md and ends with what changed since the previous one
+ws allowance                    OpenCode Go spend, one shared weighted pool, in the last 5 hours, 7 days and 30 days
+                                against each model's limit (WS_ALLOWANCE_LIMITS, WS_ALLOWANCE_STARTS), all estimates;
+                                past WS_ALLOWANCE_HOLD percent of the summed window total ws bench run waits, ws
+                                review-compare stops and shadow reviews are skipped; chains and dispatches warn
 ws dispatch [flags] <name> <task-file>   run a builder (see scripts/dispatch.sh for flags); --agent opencode runs it
-                                through OpenCode on a zero-retention model (--model provider/model, WS_OPENCODE_MODEL)
+                                through OpenCode on a zero-retention model (--model provider/model, WS_OPENCODE_MODEL);
+                                --effort E is then a model variant ("opencode run --variant", e.g. high or max), checked
+                                against the model's list; --temperature T (0-2) and --top-p P (over 0 up to 1) set
+                                its build agent's sampling
 ws wait <name> [minutes]        block until the run finishes; exit 0 if its result checks out
 ws tail <name>                  follow a run's log as readable lines
 ws runs [slug]                  runs and their results
@@ -34,7 +42,7 @@ ws review-shadow [--project slug|--all]   shadow reviews (WS_REVIEW_SHADOW=openc
 ws orchestrator-record [--project slug|--all] [--since YYYY-MM-DD] [--runs DIR]   the orchestrator's record per
                                 project and in total: merges reviewed at the merged SHA, --no-review, direct code and
                                 bookkeeping commits, test runs on record, gates, chain stops by how they were noted,
-                                each --no-review and --no-look reason, visible merges with and without a look; `not recorded` when no
+                                each --no-review and --no-look reason, visible merges with and without a look; "not recorded" when no
                                 source holds a number; owners from WS_ORCHESTRATOR_OPENCODE
 ws teeth <name>                 check the branch tip without its non-test changes: ok (its tests fail), toothless
                                 (they pass), n/a or error; runs/<slug>/<name>.teeth.txt, chain runs it before review
@@ -45,11 +53,41 @@ ws look <name> "<what they said>"   record that the operator saw the branch at i
 ws hold <name> "<note>"         record the operator's fault note on a step: the merge refuses the held SHA until a
                                 commit after it and a newer merge review pass it; ws hold <name> prints it,
                                 ws hold --clear <name> removes it
+ws archive-inflight [--dry-run] [<plan.md>...]   keep the first In flight block in each plan and move later ones,
+                                in order, to the plan's in-flight-history.md; the default plans are the selected
+                                project's plans/<slug>/*.md except in-flight-history.md and task-*.md
 ws stop-note <step> handled|re-explained "<note>"   record how the newest unnoted chain stop at a step went: handled
                                 without the operator explaining it, or re-explained by them (runs/<slug>/stop-notes.tsv)
 ws chain <queue-file>           run a queue of steps: dispatch, wait, review (one automatic fix round), merge, next;
                                 stops on a failure, a gate or a judgment call (run it under run_in_background)
-ws chain-wait                   wait on the project's running chain (from any session) and print where it stopped
+ws chain-wait                   wait on the project's running chain (from any session) and print where it stopped;
+                                exit 5 when a running/waiting status has no live chain (DEAD: re-run ws chain <queue>)
+ws wake <session> "<message>" [--at <time>|--when-chain-stops|--every <OnCalendar> [--until YYYY-MM-DD]] [--url <server>]
+                                send one message into an idle OpenCode session from a systemd timer: now, at a time,
+                                when the chain stops, or on a calendar spec repeating until a date (persistent unit
+                                files under WS_WAKE_UNIT_DIR); the session's client must listen on WS_WAKE_URL or
+                                --url (ws oc <slug> --port 4096); a server password comes from OPENCODE_SERVER_PASSWORD
+                                in the environment
+ws wake list | ws wake cancel <id> | ws wake failed [--clear]   pending wakes; a recurring one shows its spec,
+                                next run and end date; cancel disables its timer and deletes both unit files;
+                                undelivered ones stay in runs/<slug>/wake.failed, and cold start names them until cleared
+ws bg run <name> [--wake <session>] [--watch <regex>]... -- <command...>
+                                run a command detached in the project's runs directory, writing
+                                runs/<slug>/bg/<name>.{pid,log,exit}; returns at once; --wake sends "bg <name>
+                                exited <code>; log <path>" into that OpenCode session when it ends; each --watch
+                                reports the first log line matching its extended regex once, through --wake as
+                                "bg <name> matched '<regex>': <line>" or to runs/<slug>/bg/<name>.matches
+ws bg watch <name> <regex> [--wake <session>]   add a watch to a command already running
+ws bg list | ws bg log <name> [--tail N] | ws bg wait <name> [--timeout S] | ws bg stop <name>
+                                background commands: what runs or its exit code and each watch pattern as pending
+                                or matched, its log, a repeatable wait that returns the command's exit code (its
+                                own timeout is 124, an ended command with no exit code recorded is 125), and a
+                                stop of the whole process group
+ws ask <name> "<question>" [--dir <path>] [--model <provider/model>] [--budget <usd>] [--wake <session>]
+                                one read-only OpenCode research job in the background: the review's read-only
+                                config, a conclusion of at most 300 words with file:line for every claim, written
+                                to runs/<slug>/ask/<name>.md with model, cost, minutes and exit; returns at once
+ws ask list | ws ask show <name>   what is running or done with its cost, and the saved answer
 ws web <name>                   the web sources a run asked for (builders have no web access) and what was done with each
 ws web <name> approve <n|all> [--url <url>]   fetch each approved URL (curl, http(s) only, at most WS_WEB_MAX_MB) into
                                 the worktree's .ws-evidence/given/web/ with a sidecar; a search is answered with --url
@@ -58,39 +96,37 @@ ws web <name> resume [dispatch flags]   write a resume task naming the files, th
 ws precheck <name>              the checklist rules a script can check (ws review runs it first)
 ws audit [days]                 what builders keep doing by hand, from the run logs (default 30 days)
 ws bench add <name>...          add merged runs to the project's replay corpus (plans/<slug>/bench/)
-ws bench run <slug> --arm L=<git-ref|dir>[,agent=claude|opencode][,model=M] --arm L2=... [--review none|claude]
-         [--trials N] [--parallel P] [--dry-run] [tasks...]
+ws bench run <slug> --arm L=<git-ref|dir>[,agent=claude|opencode][,model=M][,temp=T][,top_p=P][,effort=E] --arm L2=...
+         [--review none|claude] [--trials N] [--parallel P] [--dry-run] [tasks...]
                                 replay corpus tasks from their base commit under each arm of builder instructions
-                                (and agent and model), blind-review (unless --review none) and test each run, record
-                                it (runs/<slug>/bench/runs.tsv); resumable
+                                (agent, model, sampling and effort/variant), blind-review (unless --review none) and test each run,
+                                record it (runs/<slug>/bench/runs.tsv); resumable
 ws bench review <slug> [--arm L] [--limit N] [--dry-run] [runs...]
                                 review runs an earlier pass left unjudged, from the replay.patch each kept, under its
                                 opaque name; writes the verdict and blocking count back (resumable); a patch that
                                 does not apply is recorded unreviewable with the reason
-ws bench report [--baseline L|recorded] [--runs DIR] <slug>...   quality first, then cost, per arm (agent, model) and task;
+ws bench report [--baseline L|recorded] [--runs DIR] <slug>...   quality first, then cost, per arm (agent, model,
+                                temperature, top_p, effort) and task;
                                 flags a quality drop; recorded = the corpus tasks' first runs as recorded, not replayed;
                                 --runs reads another runs/ directory (a linked worktree has none of its own)
 ws stop <name>                  stop a running builder
 ws serve <name|main> [port]     start the project's preview server from a worktree (or the main checkout)
 ws autostart [on|off|status]    keep the live app (WS_LIVE_PROJECTS) and, with WS_BENCH_AUTOSTART=1, the bench running across crashes and reboots (systemd user units)
-ws alerts [on|off|status|test]  the break reminder and the attention indicator: install the Claude hooks, the OpenCode
-                                plugin and ws-break.timer (on), remove exactly those (off), show each piece (status),
-                                or raise one sample pop-up and log line (test); the config is
-                                ~/.config/crafting-guild/alerts.conf (sample: docs/alerts.conf.sample)
 ws tutor [claude args]          open the tutor tab: a Claude session in the course repo (WS_TUTOR_PROJECT), reading every project, writing only its own
 ws serve stop [name|main]       stop it;  ws serve list
 ws release [--dry-run] [--notes T] [--no-asset]   publish main as a release of the public repo (remote 'public'):
                                 audit, one commit with main's tree, tag vX.Y.Z, clean-clone build, GitHub release
 ws site [--dry-run]             copy the project's SITE_SYNC files into its SITE_PROJECT, check they match,
                                 run the site's tests, commit, push, wait until live
-ws doctor [--parity]            check this machine and the selected project; --parity runs one structured-output probe per agent
+ws doctor [--parity]            check this machine and the selected project; --parity runs one structured-output probe per agent, and OpenCode's web fetch, web search, browser, skill list and skill call
 ws claude [--budget USD] [--schema file] [--dir path] [--allow tool] [--raw] <prompt-file|->
                                 run one Claude Code job from this session (read-only by default; no worktree)
 ws email-audit [--project slug | --repo path]... [--all] [--range R]   find personal addresses in git identity,
                                 commit metadata, reflogs and tracked files; exits 1 on a finding
 ws opencode-perms [--dry-run] [--config <file>]   write the orchestrator's OpenCode config (orchestrator.json,
                                 loaded with OPENCODE_CONFIG; refuses the global opencode.json): registered project
-                                paths allowed outside this folder, destructive shell commands ask first
+                                paths allowed outside this folder, destructive shell commands ask first,
+                                WS_MEMORY_DIR readable with the edit tools denied on it, the pinned browser MCP
 ws rollback [--dry-run] [vX.Y.Z]   put the published files back to a public release, as a new commit
 ws version                      print the workspace version (see CHANGELOG.md)
 USAGE
@@ -161,7 +197,11 @@ case "$cmd" in
       bak="$conf_file.bak-$(date -u +%Y%m%dT%H%M%SZ)"; cp "$conf_file" "$bak"; echo "backed up the existing conf to projects/$(basename "$bak")"
     fi
     printf '%s\n' "$conf" > "$conf_file"
-    commit_new_file "$conf_file" "projects: register $slug"
+    if [ "${WS_TOOL_COMMITS:-on}" != off ] && git -C "$WS" rev-parse --git-dir >/dev/null 2>&1 && git_identity_missing "$WS"; then
+      note "git has no user identity; set it with: $(git_identity_fix); projects/$slug.conf was written and left uncommitted: commit it after setting the identity"
+    else
+      commit_new_file "$conf_file" "projects: register $slug"
+    fi
     mkdir -p "$WS/plans/$slug" "$WS/runs/$slug"
     for e in .worktrees .ws-evidence; do grep -qx "$e" "$excl" 2>/dev/null || echo "$e" >> "$excl"; done
     echo "registered $slug: $path (branch $branch; tests: ${tests:-none})"
@@ -182,6 +222,9 @@ case "$cmd" in
     fi ;;
   status) "$WS/scripts/cold-start.sh" "$@" ${proj:+"$proj"} ;;
   brief) "$WS/scripts/brief.sh" "$@" ;;
+  allowance)
+    [ -n "$WS_ALLOWANCE_DB" ] || die "the allowance meter is off: WS_ALLOWANCE_DB is empty"
+    allowance_py report "$@" ;;
   dispatch) "$WS/scripts/dispatch.sh" ${proj:+--project "$proj"} "$@" ;;
   review) "$WS/scripts/review.sh" ${proj:+--project "$proj"} "$@" ;;
   review-compare) "$WS/scripts/review-compare.sh" ${proj:+--project "$proj"} "$@" ;;
@@ -189,8 +232,12 @@ case "$cmd" in
   orchestrator-record) "$WS/scripts/orchestrator-record.sh" ${proj:+--project "$proj"} "$@" ;;
   merge) "$WS/scripts/merge.sh" ${proj:+--project "$proj"} "$@" ;;
   hold) "$WS/scripts/hold.sh" ${proj:+--project "$proj"} "$@" ;;
+  archive-inflight) "$WS/scripts/archive-inflight.sh" ${proj:+--project "$proj"} "$@" ;;
   look) "$WS/scripts/look.sh" ${proj:+--project "$proj"} "$@" ;;
   stop-note) "$WS/scripts/stop-note.sh" ${proj:+--project "$proj"} "$@" ;;
+  wake) "$WS/scripts/wake.sh" ${proj:+--project "$proj"} "$@" ;;
+  bg) "$WS/scripts/bg.sh" ${proj:+--project "$proj"} "$@" ;;
+  ask) bash "$WS/scripts/ask.sh" ${proj:+--project "$proj"} "$@" ;;
   release) "$WS/scripts/release.sh" ${proj:+--project "$proj"} "$@" ;;
   site) "$WS/scripts/site.sh" ${proj:+--project "$proj"} "$@" ;;
   autostart)
@@ -207,7 +254,6 @@ case "$cmd" in
       status) systemctl --user list-units --all --no-pager 'ws-live@*' 'ws-bench.service' 'ws-brief.timer' ;;
       *) die "usage: ws autostart [on|off|status]" ;;
     esac ;;
-  alerts) "$WS/scripts/alerts.sh" "$@" ;;
   doctor) "$WS/scripts/doctor.sh" ${proj:+--project "$proj"} "$@" ;;
   claude) "$WS/scripts/claude.sh" ${proj:+--project "$proj"} "$@" ;;
   email-audit) "$WS/scripts/email-audit.sh" ${proj:+--project "$proj"} "$@" ;;
@@ -241,7 +287,7 @@ case "$cmd" in
     # The chain runs detached in its own systemd scope (as builders do), so closing the session that started it
     # stops only this wait, not the chain. Run `ws chain-wait` from a new session to wait on it again.
     load_project "$proj"; q=$(ws_path "${1:?ws chain <queue-file>}"); [ -f "$q" ] || die "no queue file $q"
-    if [ -f "$RUNS/chain.pid" ] && kill -0 "$(cat "$RUNS/chain.pid")" 2>/dev/null; then die "a chain is already running for $SLUG (pid $(cat "$RUNS/chain.pid")); wait on it with: ws chain-wait"; fi
+    if pid_file_alive "$RUNS/chain.pid"; then die "a chain is already running for $SLUG (pid $(cat "$RUNS/chain.pid")); wait on it with: ws chain-wait"; fi
     rm -f "$RUNS/chain.status"
     sc=(); systemd-run --user --scope --quiet true >/dev/null 2>&1 && sc=(systemd-run --user --scope --quiet --unit "ws-$SLUG-chain-$(date -u +%Y%m%dT%H%M%SZ)" --description "ws chain $SLUG")
     ( "${sc[@]}" setsid "$WS/scripts/chain.sh" --project "$SLUG" "$q" ) < /dev/null >> "$RUNS/chain.log" 2>&1 &
@@ -249,11 +295,14 @@ case "$cmd" in
     echo "chain started for $SLUG on $q (log runs/$SLUG/chain.log)"
     exec "$WS/bin/ws" --project "$SLUG" chain-wait ;;
   chain-wait)
-    # Block until the chain stops; print its status and the log's milestones. Exit 0 done, 4 gate, 1 stopped.
+    # Block until the chain stops; print its status and the log's milestones. Exit 0 done, 4 gate, 1 stopped, and
+    # 5 when the status still says running or waiting but the pid file is gone: that chain died without recording it.
     load_project "$proj"
-    while [ -f "$RUNS/chain.pid" ] && kill -0 "$(cat "$RUNS/chain.pid")" 2>/dev/null; do sleep 15; done
+    while pid_file_alive "$RUNS/chain.pid"; do sleep "${WS_CHAIN_POLL:-15}"; done
     grep -E "review at|merged \(|STOP|fix round|carried|chain (start|done)" "$RUNS/chain.log" 2>/dev/null | tail -20
-    st=$(cat "$RUNS/chain.status" 2>/dev/null || echo "no status"); echo "status: $st"
+    st=$(cat "$RUNS/chain.status" 2>/dev/null || echo "no status")
+    dead=$(chain_dead_line "$RUNS"); [ -z "$dead" ] || { echo "$dead"; exit 5; }
+    echo "status: $st"
     case "$st" in done*) exit 0 ;; *gated*|*held:*) exit 4 ;; *) exit 1 ;; esac ;;
   web) "$WS/scripts/web.sh" ${proj:+--project "$proj"} "$@" ;;
   precheck) "$WS/scripts/precheck.sh" ${proj:+--project "$proj"} "$@" ;;
@@ -262,7 +311,16 @@ case "$cmd" in
   audit) load_project "$proj"; python3 "$WS/scripts/audit.py" "$SLUG" "$PROJECT_PATH" "$TEST_CMD" "$RUNS" "$WS/plans/$SLUG" "${1:-30}" ;;
   wait)
     name="${1:?ws wait <name> [minutes]}"; mins="${2:-150}"; load_project "$proj"
-    for _ in $(seq 1 $((mins*6))); do
+    # WS_WAIT_POLL changes how often the result is read, not how long the wait may take: the iteration count keeps
+    # the same minutes of wall clock as the 10-second default. A value that is not a positive number warns and
+    # falls back to 10; minutes 0 still makes one check with no sleep.
+    poll="${WS_WAIT_POLL:-10}"
+    if ! LC_NUMERIC=C awk -v p="$poll" 'BEGIN { exit !(p ~ /^[0-9]+([.][0-9]+)?$/ && p + 0 > 0) }'; then
+      echo "WS_WAIT_POLL '$poll' is not a positive number; polling every 10 seconds" >&2
+      poll=10
+    fi
+    tries=$(awk -v m="$mins" -v p="$poll" 'BEGIN { n = int(m * 60 / p); if (n < 1) n = 1; print n }')
+    for _ in $(seq 1 "$tries"); do
       # A saved FAIL from an older result check is checked again, so a fixed check unblocks a stopped chain.
       if [ -f "$RUNS/$name.result.txt" ] && [ ! -f "$RUNS/$name.pid" ] && [ -f "$RUNS/$name.jsonl" ] \
         && [ "$WS/scripts/check-result.sh" -nt "$RUNS/$name.result.txt" ] && grep -q '^FAIL' "$RUNS/$name.result.txt"; then
@@ -273,12 +331,12 @@ case "$cmd" in
       if [ -f "$RUNS/$name.result.txt" ] && [ ! -f "$RUNS/$name.pid" ]; then cat "$RUNS/$name.result.txt"; grep -q '^FAIL\|^NO RESULT\|^TIMEOUT\|^LIMIT' "$RUNS/$name.result.txt" && exit 1 || exit 0; fi
       [ -f "$RUNS/$name.pid" ] || [ -f "$RUNS/$name.jsonl" ] || die "no run named $name"
       # A run whose wrapper died with it (the usage limit can take both) never writes its result: write it here.
-      if [ -f "$RUNS/$name.pid" ] && ! kill -0 "$(cat "$RUNS/$name.pid")" 2>/dev/null; then
+      if [ -f "$RUNS/$name.pid" ] && ! pid_file_alive "$RUNS/$name.pid"; then
         since=$(sed -n 's/^since=//p' "$RUNS/$name.task.txt" 2>/dev/null)
         "$WS/scripts/check-result.sh" --project "$SLUG" ${since:+--since "$since"} "$name" > "$RUNS/$name.result.txt" 2>&1 || true
         rm -f "$RUNS/$name.pid"; continue
       fi
-      sleep 10
+      sleep "$poll"
     done; echo "still running after $mins minutes"; exit 3 ;;
   tail)
     name="${1:?ws tail <name>}"; load_project "$proj"
@@ -301,13 +359,14 @@ case "$cmd" in
     # shellcheck disable=SC2045  # newest first; run names have no spaces
     for f in $(ls -t "$RUNS"/*.result.txt "$RUNS"/*.pid 2>/dev/null); do
       n=$(basename "$f"); n="${n%.result.txt}"; n="${n%.pid}"
-      case "$f" in *.pid) kill -0 "$(cat "$f")" 2>/dev/null && echo "  $n: RUNNING (pid $(cat "$f"))" ;; *) echo "  $n: $(head -n1 "$f" | cut -c1-100)  [$(tail -n1 "$f" | cut -c1-60)]" ;; esac
+      case "$n" in serve-*) continue ;; esac
+      case "$f" in *.pid) pid_file_alive "$f" && echo "  $n: RUNNING (pid $(cut -d' ' -f1 "$f"))" ;; *) echo "  $n: $(head -n1 "$f" | cut -c1-100)  [$(tail -n1 "$f" | cut -c1-60)]" ;; esac
     done ;;
   serve)
     load_project "$proj"; [ -n "$PREVIEW_CMD" ] || die "no PREVIEW_CMD in projects/$SLUG.conf"
     sub="${1:-}"
     case "$sub" in
-      list) for sf in "$RUNS"/serve-*.pid; do [ -f "$sf" ] || continue; sp=$(cut -d' ' -f1 "$sf"); kill -0 "$sp" 2>/dev/null && echo "$(basename "$sf" .pid | sed s/^serve-//) on :$(cut -d' ' -f2 "$sf") (pid $sp)"; done ;;
+      list) for sf in "$RUNS"/serve-*.pid; do [ -f "$sf" ] || continue; sp=$(cut -d' ' -f1 "$sf"); pid_file_alive "$sf" && echo "$(basename "$sf" .pid | sed s/^serve-//) on :$(cut -d' ' -f2 "$sf") (pid $sp)"; done ;;
       stop) what="${2:-main}"; sf="$RUNS/serve-$what.pid"; [ -f "$sf" ] || die "nothing serving for $what"; sp=$(cut -d' ' -f1 "$sf")
             # the server runs in its own process group (setsid below), so npx's grandchildren go too
             kill -TERM -- "-$sp" 2>/dev/null; pkill -TERM -P "$sp" 2>/dev/null; kill -TERM "$sp" 2>/dev/null; sleep 1
@@ -315,7 +374,7 @@ case "$cmd" in
       "") die "usage: ws serve <worktree-name|main> [port] | ws serve stop [name] | ws serve list" ;;
       *) what="$sub"; port="${2:-}"
          if [ "$what" = main ]; then dir="$PROJECT_PATH"; [ -z "$port" ] && port="$WS_PREVIEW_PORT_MAIN"; else dir="$(worktree_dir "$what")"; [ -d "$dir" ] || die "no worktree $what"; [ -z "$port" ] && port="$WS_PREVIEW_PORT"; fi
-         sf="$RUNS/serve-$what.pid"; [ -f "$sf" ] && kill -0 "$(cut -d' ' -f1 "$sf")" 2>/dev/null && die "$what is already serving (ws serve stop $what)"
+         sf="$RUNS/serve-$what.pid"; pid_file_alive "$sf" && die "$what is already serving (ws serve stop $what)"
          cmd="${PREVIEW_CMD//\{port\}/$port}"
          # A preview runs under WS_SERVE_MEM like a builder under WS_BUILDER_MEM: past it, only the preview
          # is killed. An uncapped Expo preview starts a Metro worker per core (~700 MB each), and two of them on a
@@ -324,6 +383,7 @@ case "$cmd" in
            cap=(systemd-run --user --scope --quiet -p "MemoryMax=$WS_SERVE_MEM" -p MemorySwapMax=0 --unit "ws-$SLUG-serve-$what-$(date -u +%Y%m%dT%H%M%SZ)" --description "ws serve $SLUG/$what")
          ( cd "$dir" && exec "${cap[@]}" setsid bash -c "$cmd" ) > "$RUNS/serve-$what.log" 2>&1 &
          echo "$! $port" > "$sf"; sleep 2
+         # $! is the preview process just started here, not a pid read from a file.
          if kill -0 "$!" 2>/dev/null; then echo "serving $what at http://127.0.0.1:$port/ (memory cap: ${WS_SERVE_MEM:-none}; log: runs/$SLUG/serve-$what.log; stop: ws serve stop $what)"
            [ -n "${WS_BROWSER_CMD:-}" ] && echo "open it: $WS_BROWSER_CMD http://127.0.0.1:$port/"; true
          else rm -f "$sf"; tail -n 20 "$RUNS/serve-$what.log"; die "server exited"; fi ;;

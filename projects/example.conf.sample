@@ -8,6 +8,9 @@ TEST_CMD="npm test"   # run from the repo root; empty = no test gate
 EXTRA_TOOLS=("Bash(node *)" "Bash(npm test*)" "Bash(npx *)")
 # Command that serves the app for a preview; {port} is replaced. Used by: ws serve <worktree|main> <port>
 PREVIEW_CMD="npx serve -l {port} dist"
+# Optional: a command cold start runs in the project, with a 20 s timeout, and prints only when it says
+# something. Keep it short and read-only: it runs at every session start.
+# COLD_START_CMD="bash scripts/status.sh --brief"
 # Optional: a command that runs in the main checkout after every successful merge, detached. It gets
 # WS_MERGED_SHA, WS_MERGED_NAME and WS_PROJECT; its log and ok/failed line go to runs/<slug>/.
 # POST_MERGE_CMD="make site"
@@ -27,6 +30,9 @@ PREVIEW_CMD="npx serve -l {port} dist"
 # Files ws teeth treats as tests (shell globs on the path); leave it out for the default, which covers
 # *.test.*, *.spec.*, test/, tests/, __tests__/, test_*.py, *_test.py and *_test.go.
 # TEST_GLOBS=("*.test.*" "*.spec.*" "tests/*" "test_*.py")
+# ws orchestrator-record: config globs (space separated) it counts as docs and config, not code, beside *.md,
+# docs/*, .gitignore and .editorconfig.
+# RECORD_CONFIG_PATHS="config/*.yml scripts/*.cfg"
 # ws release: only these paths go public; `source=dest` publishes a file under another name.
 # RELEASE_PATHS=("src" "package.json" "README.md" "LICENSE" "CHANGELOG.public.md=CHANGELOG.md")
 # ws site, in the project that publishes: the site project and what goes where (see scripts/site.sh).

@@ -11,6 +11,8 @@ WS_DEFAULT_TIMEOUT="120m"       # wall-clock cap for a builder run (timeout(1) f
 WS_LIGHT_TIMEOUT="45m"          # cap for a task marked 'Track: light'
 WS_BUILDER_MEM="4G"             # memory cap for a builder and everything it runs (systemd MemoryMax); empty = no cap
 WS_SERVE_MEM="3G"               # memory cap for a `ws serve` preview and everything it starts; empty = no cap
+WS_WAKE_URL="${WS_WAKE_URL:-http://127.0.0.1:4096}"   # the OpenCode server ws wake sends to: ws oc <slug> --port 4096
+WS_WAKE_TIMEOUT="${WS_WAKE_TIMEOUT:-900}"             # seconds ws wake waits for the session's first event before it records a failure
 WS_PREVIEW_PORT="8801"          # ws serve <worktree> without a port
 WS_PREVIEW_PORT_MAIN="8800"     # ws serve main without a port
 WS_TUTOR_PROJECT="${WS_TUTOR_PROJECT-}"   # ws tutor: the course project the tutor tab opens
@@ -20,27 +22,48 @@ WS_BENCH_AUTOSTART_CMD="${WS_BENCH_AUTOSTART_CMD-}"   # the bench command file w
 WS_BROWSER_CMD="firefox --new-tab"   # ws serve prints "open it: <this> <url>"; empty = print nothing
 WS_SUITE_WARN_S="300"           # ws merge warns when the project's suite takes longer than this many seconds
 WS_CHAIN_FIX_ROUNDS="1"          # ws chain: automatic fix rounds per step before it stops for the orchestrator
+# A usage limit's reset can be days away. A wait longer than WS_LIMIT_PROBE_AFTER seconds wakes every
+# WS_LIMIT_PROBE_EVERY seconds and makes one cheap probe call through the same agent and model; the first success
+# resumes at once, so a limit that ended (an upgrade, a new pool) does not stall the bench or the chain for days.
+WS_LIMIT_PROBE_AFTER="${WS_LIMIT_PROBE_AFTER:-21600}"  # seconds: a wait longer than this probes instead of sleeping to the reset
+WS_LIMIT_PROBE_EVERY="${WS_LIMIT_PROBE_EVERY:-3600}"   # seconds between probe calls
+WS_LIMIT_PROBE_BUDGET="${WS_LIMIT_PROBE_BUDGET:-0.05}" # dollars one probe call may spend
+WS_LIMIT_PROBE_TIMEOUT="${WS_LIMIT_PROBE_TIMEOUT:-120}" # seconds one probe call may take
+WS_LIMIT_POLL="${WS_LIMIT_POLL:-60}"                   # seconds a usage-limit wait sleeps between clock checks
 WS_MODEL="opus"                   # builder model alias ("sonnet", "opus", ...); empty = Claude Code's default
 WS_REVIEW_MODEL="fable"         # reviewer model alias; empty = default
 WS_REVIEW_MODEL_LIGHT="opus"    # reviewer for a branch whose task is marked `Track: light`; empty = WS_REVIEW_MODEL
 WS_REVIEW_AGENT="${WS_REVIEW_AGENT:-claude}"  # what runs a review: "claude" or "opencode" (scripts/opencode-review.sh); ws review --agent overrides
-WS_EFFORT=""                    # builder effort (low|medium|high|xhigh|max); empty = default
+WS_EFFORT=""                    # builder effort: Claude's low|medium|high|xhigh|max, or an OpenCode model variant
+                                # (`opencode models <provider> --verbose`); empty = default. Applies to both agents:
+                                # a model without that variant refuses the dispatch rather than dropping the setting.
 WS_AGENT="${WS_AGENT:-claude}"  # what runs a builder: "claude" (claude -p) or "opencode" (scripts/opencode-builder.sh); ws dispatch --agent overrides
 # OpenCode builder shell commands run in scripts/ws-sandbox-shell.sh (bubblewrap: home masked, no network) when
 # this is "bwrap"; empty (off) leaves the generated OpenCode config as it was. Claude builders are out of scope.
 WS_SANDBOX="${WS_SANDBOX-}"
 WS_OPENCODE_MODEL="opencode-go/deepseek-v4.1-flash"   # builder model for --agent opencode (provider/model); --model overrides
-WS_MIN_OPENCODE="1.19.1"        # oldest OpenCode whose SDK/plugin API the launchers use: the server's json_schema output and experimental.* hooks
+WS_MIN_OPENCODE="1.19.1"        # oldest OpenCode whose SDK/plugin API the launchers use: the parity probe's server json_schema output and the plugins' hooks
+WS_ASK_MODEL="${WS_ASK_MODEL-}"   # provider/model for ws ask research jobs; empty = the builder model (WS_OPENCODE_MODEL), resolved in scripts/ask.sh
+WS_ASK_BUDGET="${WS_ASK_BUDGET:-0.50}"              # dollars, for one ws ask research job
 # OpenCode model IDs and the names OpenCode's Go page gives them in its privacy table, which zdr-check reads: a model
 # not listed here is refused, since its retention cannot be checked.
+WS_BROWSER_MCP_VERSION="0.0.84"   # @playwright/mcp, exact: npx would otherwise fetch whatever is newest into the orchestrator session
 WS_OPENCODE_MODEL_NAMES=("opencode-go/deepseek-v4.1-flash=DeepSeek V4.1 Flash")
 WS_REVIEW_SHADOW="${WS_REVIEW_SHADOW-}"   # empty = off; "opencode" also reviews every deciding review on OpenCode and records the pair
 WS_ORCHESTRATOR_OPENCODE="${WS_ORCHESTRATOR_OPENCODE-}"   # slugs (space-separated) an OpenCode session owns; ws orchestrator-record counts the rest as Claude's, and with this empty prints the owner as not recorded
 WS_REVIEW_SHADOW_MODEL="${WS_REVIEW_SHADOW_MODEL:-$WS_OPENCODE_MODEL}"   # provider/model for a shadow review
 WS_REVIEW_SHADOW_BUDGET="${WS_REVIEW_SHADOW_BUDGET:-$WS_REVIEW_BUDGET}"   # dollars, for one shadow review
 WS_REVIEW_MEM="${WS_REVIEW_MEM:-3G}"   # memory cap for a shadow review and everything it starts (systemd MemoryMax); empty = none
-WS_WEB_MAX_MB="${WS_WEB_MAX_MB:-20}"   # ws web refuses a file larger than this many MB (the environment may set it for one call)
+# OpenCode Go limits, one per model and window: <provider/model>=<5h>,<7d>,<30d> in dollars, space-separated. From
+# opencode.ai/docs/go: 20%, 50% and 100% of a model's monthly dollars (Flash $100, Pro $15). ws allowance reads them.
+WS_ALLOWANCE_LIMITS="${WS_ALLOWANCE_LIMITS-opencode-go/deepseek-v4.1-flash=20,50,100 opencode-go/deepseek-v4-pro=3,7.5,15}"
+WS_ALLOWANCE_HOLD="${WS_ALLOWANCE_HOLD-80}"   # percent of the summed window total past which ws bench run waits, ws review-compare stops and shadow reviews are skipped; chains, dispatches and sessions only warn
+WS_ALLOWANCE_STARTS="${WS_ALLOWANCE_STARTS-}"   # <5h-epoch>,<7d-epoch>,<30d-epoch> from the Go Console; empty = rolling windows
+WS_ALLOWANCE_DB="${WS_ALLOWANCE_DB-$HOME/.local/share/opencode/opencode.db}"   # OpenCode's database, read-only; empty = the meter is off and nothing is held
+WS_WEB_MAX_MB="${WS_WEB_MAX_MB:-20}"  # ws web refuses a file larger than this many MB (the environment may set it for one call)
 WS_LESSONS_CAP="40"            # cold-start warns when a lessons/ file (shared or .local.md) passes this many lines
+WS_MEMORY_DIR="${WS_MEMORY_DIR-}"   # absolute path of a memory directory (MEMORY.md plus one file per memory) an OpenCode orchestrator loads; set it in config.local.sh; empty = no memory
+WS_MEMORY_CAP="${WS_MEMORY_CAP-24000}"   # characters of the memory index and bodies in a session's system text, not counting the header and notes; what does not fit is dropped and named there
 # A line in a plan that says a decision waits on the operator (an ERE; empty lists none). config.local.sh may
 # override it, and the environment may for one call.
 WS_WAITING_RE="${WS_WAITING_RE-[Ww]aiting on (the operator|you)}"

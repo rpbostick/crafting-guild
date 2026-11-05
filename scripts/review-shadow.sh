@@ -65,6 +65,7 @@ run_shadow() {
     case "$entry" in *-shadow-*) ;; *) continue ;; esac
     pid="${entry##*-shadow-}"
     case "$pid" in ''|*[!0-9]*) continue ;; esac
+    # The pid comes from the shadow worktree's name, not a pid file, so there is no file mtime to bound a reused pid.
     kill -0 "$pid" 2>/dev/null || git -C "$PROJECT_PATH" worktree remove --force "$entry" 2>/dev/null
   done
   claude_verdict="$claude_verdict_arg"

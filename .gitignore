@@ -6,5 +6,3 @@ __pycache__/
 reports/brief.md
 reports/brief.prev.md
 reports/.brief.lock
-# ws alerts on links the OpenCode attention plugin here: a machine install, not source.
-.opencode/plugins/attention.js

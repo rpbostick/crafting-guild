@@ -3,7 +3,7 @@
 # builder.md and the builder lessons come from, and which agent and model build), several trials each, each run
 # graded on its tests, its done-when and a blind review (or none, --review none), with its cost beside them.
 # Usage: bench.sh [--project slug] add <name>...
-#        bench.sh run <slug> --arm <label>=<git-ref|dir>[,agent=A][,model=M] --arm ... [--review none|claude]
+#        bench.sh run <slug> --arm <label>=<git-ref|dir>[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E] --arm ... [--review none|claude]
 #                     [--trials N] [--parallel P] [--dry-run] [tasks...]
 #        bench.sh report [--baseline <label>|recorded] [--runs DIR] <slug>...
 # --baseline recorded compares with the corpus tasks' first runs as recorded at the time, without replaying them.
@@ -141,10 +141,52 @@ wait_for_hours() {
     until in_bench_hours "$(bench_hour)"; do sleep "${WS_BENCH_POLL:-60}"; done
   elif [ -n "$bench_last_start" ] && ! in_bench_hours "$(bench_hour)"; then
     wake=$((now + now - bench_last_start))
-    echo "bench: outside the bench hours ($WS_BENCH_HOURS): half pace, next replay at $(date -d "@$wake" '+%H:%M')"
+    echo "bench: outside the bench hours ($WS_BENCH_HOURS): half pace, next replay at $(wake_time "$wake")"
     while [ "$(date +%s)" -lt "$wake" ] && ! in_bench_hours "$(bench_hour)"; do sleep "${WS_BENCH_POLL:-60}"; done
   fi
   bench_last_start=$(date +%s)
+}
+
+# The Go model a replay's flags would spend, empty for a Claude run. The last of a repeated flag wins, as in dispatch.
+replay_model() { # <dispatch flags...>
+  local agent="$WS_AGENT" model=""
+  while [ $# -gt 0 ]; do
+    case "$1" in --agent) agent="${2:-}"; shift ;; --model) model="${2:-}"; shift ;; esac
+    shift
+  done
+  [ "$agent" != opencode ] || echo "${model:-$WS_OPENCODE_MODEL}"
+}
+# Past the allowance hold no replay starts: the bench waits for the spend to age out, so the allowance stays for
+# builders and orchestrators. A meter that fails stops the bench, since nothing then says when to go on.
+wait_for_allowance() { # <provider/model, or empty>
+  local rc said=""
+  [ -n "$1" ] || return 0
+  while :; do
+    rc=0; allowance_check "$1" || rc=$?
+    case "$rc" in
+      0) [ -z "$said" ] || echo "bench: $1 is under the allowance hold again"; return 0 ;;
+      1) [ -n "$said" ] || echo "bench: waiting: $ALLOWANCE_REASON"; said=1 ;;
+      *) echo "bench: stopped: $ALLOWANCE_REASON"; return 1 ;;
+    esac
+    sleep "${WS_BENCH_POLL:-60}"
+  done
+}
+
+# run_one's flags for its current task and arm, in fl (the array run_one declares). An arm that names its agent or
+# model replaces the first run's --model: a Claude model ID means nothing to OpenCode. Sampling and effort are
+# appended, so the arm's setting wins over one the corpus recorded.
+run_flags() {
+  local -a kept=(); local k
+  set -f; eval "fl=( $(corpus_field "$task" flags) )"; set +f
+  if [ -n "${ARM_AGENT[$arm]}${ARM_MODEL[$arm]}" ]; then
+    for ((k = 0; k < ${#fl[@]}; k++)); do if [ "${fl[$k]}" = --model ]; then k=$((k + 1)); else kept+=("${fl[$k]}"); fi; done
+    fl=("${kept[@]}")
+    [ -n "${ARM_AGENT[$arm]}" ] && fl+=(--agent "${ARM_AGENT[$arm]}")
+    [ -n "${ARM_MODEL[$arm]}" ] && fl+=(--model "${ARM_MODEL[$arm]}")
+  fi
+  [ -n "${ARM_TEMP[$arm]:-}" ] && fl+=(--temperature "${ARM_TEMP[$arm]}")
+  [ -n "${ARM_TOP_P[$arm]:-}" ] && fl+=(--top-p "${ARM_TOP_P[$arm]}")
+  [ -n "${ARM_EFFORT[$arm]:-}" ] && fl+=(--effort "${ARM_EFFORT[$arm]}")
 }
 
 # Dispatch run_one's $run from the base commit, discarding any earlier attempt's worktree, branch and result.
@@ -154,16 +196,30 @@ start_run() {
   rm -f "$RUNS/$run.result.txt"
   wait_for_hours
   wait_for_merges
-  set -f; eval "fl=( $(corpus_field "$task" flags) )"; set +f
-  # An arm that names its agent or model replaces the first run's --model: a Claude model ID means nothing to OpenCode.
-  if [ -n "${ARM_AGENT[$arm]}${ARM_MODEL[$arm]}" ]; then
-    local -a kept=(); local k; for ((k = 0; k < ${#fl[@]}; k++)); do if [ "${fl[$k]}" = --model ]; then k=$((k + 1)); else kept+=("${fl[$k]}"); fi; done
-    fl=("${kept[@]}")
-    [ -n "${ARM_AGENT[$arm]}" ] && fl+=(--agent "${ARM_AGENT[$arm]}")
-    [ -n "${ARM_MODEL[$arm]}" ] && fl+=(--model "${ARM_MODEL[$arm]}")
-  fi
+  run_flags
+  wait_for_allowance "$(replay_model "${fl[@]}")" || return 1
   "$WS/scripts/dispatch.sh" --project "$SLUG" "${fl[@]}" --budget "$budget" --base "$base" --instructions "$dir" "$run" "$WS/plans/$SLUG/bench/$task.md" >> "$log" 2>&1 \
     || { echo "bench: dispatch of $run failed; see runs/$SLUG/bench/logs/$run.log"; return 1; }
+}
+
+# A saved LIMIT result older than this boot (or an hour) may describe a limit that has since ended: replay the run
+# from its base. Returns 0 when it replayed, 1 when the result is fresh, 2 when the replay could not start.
+replay_if_limit_stale() { # <run>
+  limit_result_stale "$RUNS/$1.result.txt" || return 1
+  echo "bench: $1's saved usage limit was written before this boot or over an hour ago; replaying it from the base"
+  start_run || return 2
+}
+
+# A resumed run whose worktree and result exist. A stale usage-limit result is replayed from the base; otherwise the
+# run finished before the bench stopped and is graded.
+resume_run() { # <run>
+  local rc=0
+  replay_if_limit_stale "$1" || rc=$?
+  case "$rc" in
+    0) ;;
+    1) echo "bench: $1 finished before the bench stopped; grading it" ;;
+    *) return 1 ;;
+  esac
 }
 
 # run_one's $run: move its worktree's evidence to the bench's, and remove its worktree and branch.
@@ -179,7 +235,7 @@ drop_replay() {
 # One replay: dispatch under the opaque name, wait, fail it if it committed nothing, review (blind: the reviewer sees
 # the run name only), test the tip in the worktree, record, then remove the worktree and branch and keep the evidence.
 run_one() { # <task> <arm> <trial>
-  local task="$1" arm="$2" trial="$3" got run state wt log base budget mins dir tests rc ep wake review teeth="" limits=0; local -a fl
+  local task="$1" arm="$2" trial="$3" got run state wt log base budget mins dir tests rc ep wake review teeth="" limits=0 agent model stale_rc; local -a fl
   base=$(corpus_field "$task" base); budget=$(corpus_field "$task" budget); dir="$BENCH/arms/$arm"
   got=$(python3 "$PY" runs-get "$TSV" "$task" "$arm" "$trial"); run="${got%%$'\t'*}"; state="${got#*$'\t'}"
   [ "$state" = "done" ] && return 0
@@ -189,8 +245,8 @@ run_one() { # <task> <arm> <trial>
   fi
   wt="$(worktree_dir "$run")"; log="$BENCH/logs/$run.log"; mkdir -p "$BENCH/logs"
   echo "bench: $run is $task, arm $arm, trial $trial (log runs/$SLUG/bench/logs/$run.log)"
-  if [ -f "$RUNS/$run.pid" ] && kill -0 "$(cat "$RUNS/$run.pid")" 2>/dev/null; then echo "bench: $run is still running; waiting for it"
-  elif [ -d "$wt" ] && [ -f "$RUNS/$run.result.txt" ]; then echo "bench: $run finished before the bench stopped; grading it"
+  if pid_file_alive "$RUNS/$run.pid"; then echo "bench: $run is still running; waiting for it"
+  elif [ -d "$wt" ] && [ -f "$RUNS/$run.result.txt" ]; then resume_run "$run"
   else
     # An interrupted start: begin again from the base commit.
     start_run || return 1
@@ -199,12 +255,16 @@ run_one() { # <task> <arm> <trial>
   while :; do
     "$WS/bin/ws" --project "$SLUG" wait "$run" "$mins" >> "$log" 2>&1; rc=$?
     grep -q '^LIMIT' "$RUNS/$run.result.txt" 2>/dev/null || break
+    # A stale result describes a limit that may already be gone: replay it from the base instead of waiting.
+    stale_rc=0; replay_if_limit_stale "$run" || stale_rc=$?
+    case "$stale_rc" in 0) continue ;; 1) ;; *) return 1 ;; esac
     # A run stopped by the usage limit measures nothing: wait for the reset, then replay it from the base commit.
     ep=$(sed -n 's/^reset_epoch=//p' "$RUNS/$run.result.txt")
     case "$ep" in ''|*[!0-9]*) echo "bench: $run hit the usage limit, reset time unknown; run the bench again after the reset"; return 1 ;; esac
     limits=$((limits + 1)); [ "$limits" -le 3 ] || { echo "bench: $run hit the usage limit 3 times; run the bench again later"; return 1; }
-    wake=$((ep + 120)); echo "bench: $run hit the usage limit; replaying it from the base at $(date -d "@$wake" '+%H:%M')"
-    while [ "$(date +%s)" -lt "$wake" ]; do sleep "${WS_BENCH_POLL:-60}"; done
+    wake=$((ep + 120)); echo "bench: $run hit the usage limit; replaying it from the base at $(wake_time "$wake")"
+    run_flags; read -r agent model <<< "$(dispatch_agent_model "${fl[@]}")"
+    wait_for_limit_reset "$ep" "$agent" "$model" "$log"
     start_run || return 1
   done
   [ "$rc" -eq 3 ] && { echo "bench: $run still running after $mins minutes; run the bench again to resume"; return 1; }
@@ -238,42 +298,62 @@ run_one() { # <task> <arm> <trial>
 }
 
 # An arm's instructions as a directory dispatch --instructions reads. A git ref is written out from the workspace at
-# the commit arms.tsv holds for it; a directory is used as it is. Trailing ,agent=<claude|opencode> and ,model=<id>
-# choose the builder; without them the arm runs as dispatch decides (Claude unless WS_AGENT says otherwise).
-# arms.tsv: label, spec, resolved ref, agent, model; a row from before arms had an agent has three fields and is read
-# as agent claude with the default model.
-resolve_arm() { # <label=spec[,agent=A][,model=M]> <dry> -> sets ARM_DIR, ARM_AGENT, ARM_MODEL [label], prints a description
-  local label="${1%%=*}" spec="${1#*=}" dry="$2" kept sha f agent="" model="" key was
-  [ "$label" != "$1" ] && [ -n "$label" ] && [ -n "$spec" ] || die "an arm is <label>=<git-ref|dir>[,agent=A][,model=M], not '$1'"
+# the commit arms.tsv holds for it; a directory is used as it is. Trailing ,agent=<claude|opencode>, ,model=<id>,
+# ,temp=<T>, ,top_p=<P> and ,effort=<E> choose the builder, its sampling and its model variant; without them the arm
+# runs as dispatch decides (Claude unless WS_AGENT says otherwise). arms.tsv: label, spec, resolved ref, agent, model,
+# temp, top_p, effort; a row from before arms had an agent has three fields and is read as agent claude with the
+# default model and no sampling, one from before effort as having none.
+resolve_arm() { # <label=spec[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E]> <dry> -> sets ARM_DIR, ARM_AGENT, ARM_MODEL, ARM_TEMP, ARM_TOP_P, ARM_EFFORT [label], prints a description
+  local label="${1%%=*}" spec="${1#*=}" dry="$2" kept sha f agent="" model="" temperature="" top_p="" effort="" key was want kept_temp kept_top kept_effort
+  [ "$label" != "$1" ] && [ -n "$label" ] && [ -n "$spec" ] || die "an arm is <label>=<git-ref|dir>[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E], not '$1'"
   case "$label" in *[!A-Za-z0-9._-]*) die "bad arm label '$label'" ;; recorded) die "the arm label 'recorded' is the recorded baseline (report --baseline recorded); use another" ;; esac
-  while [[ "$spec" =~ ^(.+),(agent|model)=([^,]*)$ ]]; do
+  while [[ "$spec" =~ ^(.+),(agent|model|temp|top_p|effort)=([^,]*)$ ]]; do
     spec="${BASH_REMATCH[1]}"; key="${BASH_REMATCH[2]}"
     [ -n "${BASH_REMATCH[3]}" ] || die "arm $label: $key= is empty"
-    if [ "$key" = agent ]; then [ -z "$agent" ] || die "arm $label: agent= given twice"; agent="${BASH_REMATCH[3]}"
-    else [ -z "$model" ] || die "arm $label: model= given twice"; model="${BASH_REMATCH[3]}"; fi
+    case "$key" in
+      agent) [ -z "$agent" ] || die "arm $label: agent= given twice"; agent="${BASH_REMATCH[3]}" ;;
+      model) [ -z "$model" ] || die "arm $label: model= given twice"; model="${BASH_REMATCH[3]}" ;;
+      temp) [ -z "$temperature" ] || die "arm $label: temp= given twice"; temperature="${BASH_REMATCH[3]}" ;;
+      top_p) [ -z "$top_p" ] || die "arm $label: top_p= given twice"; top_p="${BASH_REMATCH[3]}" ;;
+      effort) [ -z "$effort" ] || die "arm $label: effort= given twice"; effort="${BASH_REMATCH[3]}" ;;
+    esac
   done
+  [ -z "$temperature" ] || sampling_temperature "arm $label: temp=" "$temperature"
+  [ -z "$top_p" ] || sampling_top_p "arm $label: top_p=" "$top_p"
   case "${agent:-claude}" in claude|opencode) ;; *) die "arm $label: unknown agent '$agent' (claude or opencode)" ;; esac
-  ARM_AGENT[$label]="$agent"; ARM_MODEL[$label]="$model"
+  ARM_AGENT[$label]="$agent"; ARM_MODEL[$label]="$model"; ARM_TEMP[$label]="$temperature"; ARM_TOP_P[$label]="$top_p"; ARM_EFFORT[$label]="$effort"
   kept=$(awk -F'\t' -v l="$label" '$1==l' "$BENCH/arms.tsv" 2>/dev/null)
   if [ -n "$kept" ]; then
     was="$(cut -f2 <<< "$kept") agent=$(cut -f4 -s <<< "$kept") model=$(cut -f5 -s <<< "$kept")"
-    [ "$was" = "$spec agent=$agent model=$model" ] || die "arm $label was $was in earlier runs, not $spec agent=$agent model=$model; use another label"
+    want="$spec agent=$agent model=$model"
+    kept_temp=$(cut -f6 -s <<< "$kept"); kept_top=$(cut -f7 -s <<< "$kept"); kept_effort=$(cut -f8 -s <<< "$kept")
+    # Sampling and effort join the comparison only when either side sets them, so a row from before they existed
+    # still reads the same arm.
+    if [ -n "$temperature$top_p$kept_temp$kept_top" ]; then
+      was+=" temp=$kept_temp top_p=$kept_top"
+      want+=" temp=$temperature top_p=$top_p"
+    fi
+    if [ -n "$effort$kept_effort" ]; then
+      was+=" effort=$kept_effort"
+      want+=" effort=$effort"
+    fi
+    [ "$was" = "$want" ] || die "arm $label was $was in earlier runs, not $want; use another label"
   fi
   if [ -d "$spec" ]; then
     [ -f "$spec/agents/builder.md" ] || [ -f "$spec/lessons/builder.md" ] || die "arm $label: $spec has neither agents/builder.md nor lessons/builder.md"
-    ARM_DIR[$label]="$(cd "$spec" && pwd)"; echo "arm $label: directory ${ARM_DIR[$label]}${agent:+, agent $agent}${model:+, model $model}"
+    ARM_DIR[$label]="$(cd "$spec" && pwd)"; echo "arm $label: directory ${ARM_DIR[$label]}${agent:+, agent $agent}${model:+, model $model}${temperature:+, temp $temperature}${top_p:+, top_p $top_p}${effort:+, effort $effort}"
     $dry && return 0
     # Dispatch reads a copy under arms/, taken at the first run: later edits to the directory do not reach a resumed bench.
     [ -n "$kept" ] && [ -d "$BENCH/arms/$label" ] && return 0
-    [ -n "$kept" ] || printf '%s\t%s\t%s\t%s\t%s\n' "$label" "$spec" "${ARM_DIR[$label]}" "$agent" "$model" >> "$BENCH/arms.tsv"
+    [ -n "$kept" ] || printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$label" "$spec" "${ARM_DIR[$label]}" "$agent" "$model" "$temperature" "$top_p" "$effort" >> "$BENCH/arms.tsv"
     rm -rf "$BENCH/arms/$label"; mkdir -p "$BENCH/arms"; cp -r "${ARM_DIR[$label]}" "$BENCH/arms/$label"
     return 0
   fi
   if [ -n "$kept" ]; then sha=$(cut -f3 <<< "$kept"); else sha=$(git -C "$WS" rev-parse --verify -q "$spec^{commit}") || die "arm $label: $spec is neither a directory nor a workspace git ref"; fi
-  echo "arm $label: workspace $spec at $(git -C "$WS" rev-parse --short "$sha")${agent:+, agent $agent}${model:+, model $model}"
+  echo "arm $label: workspace $spec at $(git -C "$WS" rev-parse --short "$sha")${agent:+, agent $agent}${model:+, model $model}${temperature:+, temp $temperature}${top_p:+, top_p $top_p}${effort:+, effort $effort}"
   $dry && return 0
   [ -n "$kept" ] && [ -d "$BENCH/arms/$label" ] && return 0
-  [ -n "$kept" ] || printf '%s\t%s\t%s\t%s\t%s\n' "$label" "$spec" "$sha" "$agent" "$model" >> "$BENCH/arms.tsv"
+  [ -n "$kept" ] || printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$label" "$spec" "$sha" "$agent" "$model" "$temperature" "$top_p" "$effort" >> "$BENCH/arms.tsv"
   rm -rf "$BENCH/arms/$label"; mkdir -p "$BENCH/arms/$label/agents" "$BENCH/arms/$label/lessons"
   git -C "$WS" show "$sha:agents/builder.md" > "$BENCH/arms/$label/agents/builder.md" || die "arm $label: no agents/builder.md at $sha"
   while IFS= read -r f; do
@@ -283,7 +363,7 @@ resolve_arm() { # <label=spec[,agent=A][,model=M]> <dry> -> sets ARM_DIR, ARM_AG
 }
 
 bench_run() {
-  local slug="${1:-}"; [ -n "$slug" ] && [ "${slug#-}" = "$slug" ] || die "usage: ws bench run <slug> --arm <label>=<git-ref|dir>[,agent=A][,model=M] --arm ... [--review none|claude] [--trials N] [--parallel P] [--dry-run] [tasks...]"
+  local slug="${1:-}"; [ -n "$slug" ] && [ "${slug#-}" = "$slug" ] || die "usage: ws bench run <slug> --arm <label>=<git-ref|dir>[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E] --arm ... [--review none|claude] [--trials N] [--parallel P] [--dry-run] [tasks...]"
   shift
   local trials=1 par=1 dry=false a t tr row total=0 already=0 failed=0 label; local -a arms=() tasks=() rows=()
   REVIEW=claude
@@ -295,14 +375,14 @@ bench_run() {
   # review.sh reviews through Claude only; another agent as reviewer is refused rather than quietly reviewed by Claude.
   case "$REVIEW" in none|claude) ;; *) die "--review takes none or claude, not '$REVIEW' (review.sh has no other agent)" ;; esac
   # One arm is enough to compare with the recorded first runs (report --baseline recorded).
-  [ ${#arms[@]} -ge 1 ] || die "give at least one arm: --arm <label>=<git-ref|dir>[,agent=A][,model=M]"
+  [ ${#arms[@]} -ge 1 ] || die "give at least one arm: --arm <label>=<git-ref|dir>[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E]"
   load_project "$slug"
   CORPUS="$WS/plans/$SLUG/bench/corpus.tsv"; BENCH="$RUNS/bench"; TSV="$BENCH/runs.tsv"
   [ -f "$CORPUS" ] || die "no corpus for $SLUG (ws --project $SLUG bench add <name>)"
   [ ${#tasks[@]} -gt 0 ] || mapfile -t tasks < <(awk -F'\t' 'NR>1{print $1}' "$CORPUS")
   for t in "${tasks[@]}"; do [ -n "$(corpus_field "$t" base)" ] || die "$t is not in plans/$SLUG/bench/corpus.tsv"; done
   $dry || mkdir -p "$BENCH"
-  declare -gA ARM_DIR=() ARM_AGENT=() ARM_MODEL=()
+  declare -gA ARM_DIR=() ARM_AGENT=() ARM_MODEL=() ARM_TEMP=() ARM_TOP_P=() ARM_EFFORT=()
   local -a labels=()
   for a in "${arms[@]}"; do resolve_arm "$a" "$dry" || exit 1; labels+=("${a%%=*}"); done
   [ "$(printf '%s\n' "${labels[@]}" | sort -u | wc -l)" -eq ${#labels[@]} ] || die "two arms share a label"
@@ -316,11 +396,11 @@ bench_run() {
       IFS=$'\t' read -r t label tr <<< "$row"
       got=$(python3 "$PY" runs-get "$TSV" "$t" "$label" "$tr")
       [ "${got#*$'\t'}" = "done" ] && { echo "done already: ${got%%$'\t'*} $t arm $label trial $tr"; continue; }
-      echo "would dispatch ${got:+${got%%$'\t'*}}${got:-bench-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')} task $t arm $label trial $tr base $(corpus_field "$t" base) budget \$$(corpus_field "$t" budget) timeout $(timeout_for "$t")m agent ${ARM_AGENT[$label]:-default} model ${ARM_MODEL[$label]:-default} review $REVIEW"
+      echo "would dispatch ${got:+${got%%$'\t'*}}${got:-bench-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')} task $t arm $label trial $tr base $(corpus_field "$t" base) budget \$$(corpus_field "$t" budget) timeout $(timeout_for "$t")m agent ${ARM_AGENT[$label]:-default} model ${ARM_MODEL[$label]:-default}${ARM_TEMP[$label]:+ temp ${ARM_TEMP[$label]}}${ARM_TOP_P[$label]:+ top_p ${ARM_TOP_P[$label]}}${ARM_EFFORT[$label]:+ effort ${ARM_EFFORT[$label]}} review $REVIEW"
     done
     return 0
   fi
-  if [ -f "$BENCH/run.pid" ] && kill -0 "$(cat "$BENCH/run.pid")" 2>/dev/null; then die "a bench is already running for $SLUG (pid $(cat "$BENCH/run.pid"))"; fi
+  if pid_file_alive "$BENCH/run.pid"; then die "a bench is already running for $SLUG (pid $(cat "$BENCH/run.pid"))"; fi
   echo $$ > "$BENCH/run.pid"; trap 'rm -f "$BENCH/run.pid"' EXIT
   for row in "${rows[@]}"; do IFS=$'\t' read -r t label tr <<< "$row"; [ "$(python3 "$PY" runs-get "$TSV" "$t" "$label" "$tr" | cut -f2)" = "done" ] && already=$((already + 1)); done
   echo "bench: $already of $total runs already done; $((total - already)) to run, $par at a time"
@@ -464,5 +544,5 @@ case "$sub" in
   run) bench_run "$@" ;;
   review) bench_review "$@" ;;
   report) bench_report "$@" ;;
-  *) die "usage: ws bench add <name>... | ws bench run <slug> --arm L=<ref|dir>[,agent=A][,model=M] --arm ... [--review none|claude] [--trials N] [--parallel P] [--dry-run] [tasks...] | ws bench review <slug> [--arm L] [--limit N] [--dry-run] [runs...] | ws bench report [--baseline L|recorded] [--runs DIR] <slug>..." ;;
+  *) die "usage: ws bench add <name>... | ws bench run <slug> --arm L=<ref|dir>[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E] --arm ... [--review none|claude] [--trials N] [--parallel P] [--dry-run] [tasks...] | ws bench review <slug> [--arm L] [--limit N] [--dry-run] [runs...] | ws bench report [--baseline L|recorded] [--runs DIR] <slug>..." ;;
 esac

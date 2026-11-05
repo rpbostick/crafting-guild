@@ -4,7 +4,7 @@ WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # The settings config.sh lets the environment override (written there as ${VAR-default}): a value set in the
 # environment wins over config.sh and config.local.sh alike, so a test can run with the bench hours off or on
 # the agent it expects.
-ws_env=$(declare -p WS_BENCH_HOURS WS_BENCH_OUTSIDE WS_MERGE_TEST_TIMEOUT WS_AGENT WS_REVIEW_SHADOW WS_WAITING_RE WS_ORCHESTRATOR_OPENCODE 2>/dev/null | sed 's/^declare -[a-z-]*/declare -gx/' || true)
+ws_env=$(declare -p WS_BENCH_HOURS WS_BENCH_OUTSIDE WS_MERGE_TEST_TIMEOUT WS_AGENT WS_REVIEW_SHADOW WS_ASK_MODEL WS_ASK_BUDGET WS_WAITING_RE WS_ORCHESTRATOR_OPENCODE WS_MEMORY_DIR WS_MEMORY_CAP WS_ALLOWANCE_LIMITS WS_ALLOWANCE_HOLD WS_ALLOWANCE_STARTS WS_ALLOWANCE_DB 2>/dev/null | sed 's/^declare -[a-z-]*/declare -gx/' || true)
 # shellcheck source=../config.sh
 . "$WS/config.sh"
 # Private overrides (your own names for WS_ATTRIBUTION_RE, a different browser): kept out of a published copy.
@@ -18,7 +18,193 @@ ws_path() { if [ -e "$1" ]; then echo "$1"; elif [ -e "$WS/$1" ]; then echo "$WS
 WS_LESSONS_DIR="${WS_LESSONS_DIR:-$WS/lessons}"
 die() { echo "ws: $*" >&2; exit 1; }
 note() { echo "ws: $*" >&2; }
+# Sampling settings reach OpenCode's build agent as plain decimals: temperature 0-2, top_p over 0 but at most 1.
+# The setting's own name is in each error, since a bad number came from that flag or arm key.
+sampling_decimal() { # <name> <value>
+  case "$2" in ''|*[!0-9.]*|.*|*.|*.*.*) die "$1 takes a plain decimal, not '$2'" ;; esac
+}
+sampling_temperature() { # <name> <value>
+  sampling_decimal "$1" "$2"
+  LC_ALL=C awk -v v="$2" 'BEGIN { exit !(v >= 0 && v <= 2) }' || die "$1 takes a value from 0 to 2, not '$2'"
+}
+sampling_top_p() { # <name> <value>
+  sampling_decimal "$1" "$2"
+  LC_ALL=C awk -v v="$2" 'BEGIN { exit !(v > 0 && v <= 1) }' || die "$1 takes a value over 0 and at most 1, not '$2'"
+}
+# A pid file is alive only when its first field names a live process, not a thread of one, that started no later
+# than the file was last written. A file from before the boot names a different process now, so it is never alive.
+# A preview's file holds "<pid> <port>", so the first field is the pid.
+# Deliberate: a file's mtime carries whole seconds, so a process that started within the same second as the
+# write gets one second of slack; without it a live pid file written in that second would read as dead.
+pid_file_alive() { # <file>
+  local file="$1" pid stat rest btime mtime hz start
+  local -a fields
+  [ -f "$file" ] || return 1
+  pid=$(cut -d' ' -f1 "$file" 2>/dev/null) || return 1
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ -r "/proc/$pid/status" ] || return 1
+  # Tgid differs from Pid for a thread id: a signal check succeeds on it, but it is not a process.
+  [ "$(sed -n 's/^Tgid:[[:space:]]*//p' "/proc/$pid/status" 2>/dev/null)" = "$pid" ] || return 1
+  stat=$(cat "/proc/$pid/stat" 2>/dev/null) || return 1
+  # The comm field (field 2) may hold spaces and parentheses; fields after it start after the last ") ".
+  rest=${stat##*') '}
+  read -r -a fields <<< "$rest"
+  start=${fields[19]:-}
+  case "$start" in ''|*[!0-9]*) return 1 ;; esac
+  btime=$(sed -n 's/^btime[[:space:]]*//p' /proc/stat 2>/dev/null)
+  case "$btime" in ''|*[!0-9]*) return 1 ;; esac
+  mtime=$(stat -c %Y "$file" 2>/dev/null) || return 1
+  [ "$mtime" -ge "$btime" ] || return 1
+  hz=$(getconf CLK_TCK 2>/dev/null)
+  case "$hz" in ''|*[!0-9]*) hz=100 ;; esac
+  [ "$start" -le $(( (mtime - btime + 1) * hz )) ]
+}
+# WS_MEMORY_DIR without a trailing slash. Empty is valid and means no memory; a relative path has no fixed meaning
+# across the sessions and permission rules that use it, so it exits 1.
+memory_dir() {
+  case "$WS_MEMORY_DIR" in
+    ''|/*) printf '%s' "${WS_MEMORY_DIR%/}" ;;
+    *) die "WS_MEMORY_DIR='$WS_MEMORY_DIR' is not an absolute path (config.sh)" ;;
+  esac
+}
+# OpenCode's `mcp` key holding the orchestrator's browser. One definition, so what ws doctor --parity opens is what the
+# session gets. Deliberate: --isolated keeps no profile on disk, the origin list keeps a session on local previews, and
+# --output-dir keeps the server's page logs out of the working directory, which is this repository. The folder is per
+# user: a shared /tmp path let one user's or session's browser read and overwrite another's page logs. An optional
+# output folder lets the parity probe use a path no other session can hold.
+browser_mcp_json() { # [output-dir]
+  local out="${1:-${XDG_RUNTIME_DIR:-/tmp/ws-$(id -u)}/ws-playwright-mcp}"
+  jq -nc --arg pkg "@playwright/mcp@$WS_BROWSER_MCP_VERSION" --arg out "$out" '{playwright: {type: "local", enabled: true,
+    command: ["npx", "-y", $pkg, "--headless", "--isolated", "--output-dir", $out, "--allowed-origins", "http://127.0.0.1:*;http://localhost:*"]}}'
+}
+allowance_py() { # <report|check|past> [flags]
+  local sub="$1"; shift
+  python3 -I "$WS/scripts/allowance.py" "$sub" --db "$WS_ALLOWANCE_DB" --hold "$WS_ALLOWANCE_HOLD" --limits "$WS_ALLOWANCE_LIMITS" --starts "$WS_ALLOWANCE_STARTS" "$@"
+}
+# Whether held work may spend <model>. 0: it may (a model outside Go, the meter off, or under the hold; a model the
+# meter cannot measure is noted and goes on, since a provider limit still stops it). 1: the shared pool is past the
+# hold, whichever model the job uses. 2: the meter failed, which is not read as no spend. ALLOWANCE_REASON says why.
+allowance_check() { # <provider/model>
+  local rc=0; ALLOWANCE_REASON=""
+  [ -n "$WS_ALLOWANCE_DB" ] || return 0
+  ALLOWANCE_REASON=$(allowance_py check --model "$1" 2>&1) || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    3) return 1 ;;
+    4) note "$ALLOWANCE_REASON"; ALLOWANCE_REASON=""; return 0 ;;
+    *) return 2 ;;
+  esac
+}
+# Work the allowance is for is never held; it is told instead.
+allowance_warn() { # <provider/model>
+  allowance_check "$1" || note "warning, this work is not held: $ALLOWANCE_REASON"
+}
+# The lines ws brief and cold start print: the pool past the hold, or a meter that failed.
+allowance_lines() {
+  [ -n "$WS_ALLOWANCE_DB" ] || return 0
+  allowance_py past 2>&1 || true
+}
 now_local() { if [ -n "${WS_TZ:-}" ]; then TZ="$WS_TZ" date "+%Y-%m-%d %H:%M %Z"; else date "+%Y-%m-%d %H:%M %Z"; fi; }
+# date(1) in the workspace's zone: WS_TZ when set, else this machine's local time (an empty TZ would mean UTC).
+ws_date() { if [ -n "${WS_TZ:-}" ]; then TZ="$WS_TZ" date "$@"; else date "$@"; fi; }
+# A wake time for a log line: the hour and minute, with the date first when it is not today, so a usage-limit reset
+# weeks away does not read like one later today.
+wake_time() { # <epoch>
+  local day
+  day=$(ws_date -d "@$1" +%F)
+  if [ "$day" = "$(ws_date +%F)" ]; then ws_date -d "@$1" '+%H:%M'
+  else ws_date -d "@$1" '+%F %H:%M'; fi
+}
+# The current boot's epoch from /proc/stat, or empty when it cannot be read.
+boot_epoch() { sed -n 's/^btime[[:space:]]*//p' /proc/stat 2>/dev/null; }
+# Whether a saved LIMIT result can no longer be trusted: it was written before this boot, or over an hour ago. A usage
+# limit that was real when the result was written can end with an upgrade or a restart, and waiting on its reset then
+# stalls the job for days. A result file's mtime is when the run wrote it.
+limit_result_stale() { # <result-file> [now]
+  local file="$1" now="${2:-$(date +%s)}" mt boot
+  [ -f "$file" ] || return 1
+  grep -q '^LIMIT' "$file" 2>/dev/null || return 1
+  # Deliberate: a result whose mtime cannot be read counts as stale, so a damaged file can never stall a job for
+  # days on a reset it cannot date.
+  mt=$(stat -c %Y "$file" 2>/dev/null) || return 0
+  case "$now" in ''|*[!0-9]*) now=$(date +%s) ;; esac
+  boot=$(boot_epoch); case "$boot" in ''|*[!0-9]*) boot=0 ;; esac
+  [ "$mt" -lt "$boot" ] && return 0
+  [ "$((now - mt))" -gt 3600 ]
+}
+# A usage-limit line on the console and, when given, in its log.
+limit_note() { # <message> [log]
+  local line; line="$(now_local)  usage limit: $1"
+  printf '%s\n' "$line"
+  [ -z "${2:-}" ] || printf '%s\n' "$line" >> "$2"
+}
+# One cheap call through the agent and model a wait is for: a one-line prompt with a tiny budget, so a wait of days
+# finds out hourly whether the limit has ended. Prints "succeeded" or "failed: <reason>" and returns 0 or 1.
+usage_limit_probe() { # <agent> <model>
+  local agent="$1" model="$2" budget="${WS_LIMIT_PROBE_BUDGET:-0.05}" secs="${WS_LIMIT_PROBE_TIMEOUT:-120}" out rc
+  case "$agent" in
+    claude)
+      local -a probe_cmd=(claude -p "Reply with the single word ready." --output-format json --max-budget-usd "$budget" --permission-prompts none)
+      [ -n "$model" ] && probe_cmd+=(--model "$model")
+      out=$(timeout "$secs" "${probe_cmd[@]}" 2>&1); rc=$? ;;
+    opencode)
+      [ -n "$model" ] || model="$WS_OPENCODE_MODEL"
+      out=$(timeout "$secs" opencode run --format json --model "$model" "Reply with the single word ready." < /dev/null 2>&1); rc=$? ;;
+    *)
+      echo "failed: unknown agent '$agent'"; return 1 ;;
+  esac
+  if [ "$rc" -eq 0 ] && ! printf '%s' "$out" | grep -qiE 'usage limit|rate limit|quota|too many requests|"is_error": *true'; then
+    echo "succeeded"; return 0
+  fi
+  printf 'failed (exit %s): %s\n' "$rc" "$(printf '%s\n' "$out" | tail -1 | cut -c1-200)"
+  return 1
+}
+# Wait out a usage limit: sleep to <reset-epoch> + 120 s. A wait longer than WS_LIMIT_PROBE_AFTER seconds wakes every
+# WS_LIMIT_PROBE_EVERY seconds and probes the agent (usage_limit_probe); the first success resumes at once, since a
+# limit can end with an upgrade or a new pool. Every probe's result goes to <log> when one is given.
+wait_for_limit_reset() { # <reset-epoch> <agent> <model> [log]
+  local ep="$1" agent="$2" model="$3" log="${4:-}" wake every="${WS_LIMIT_PROBE_EVERY:-3600}" probe
+  wake=$((ep + 120))
+  if [ "$((wake - $(date +%s)))" -le "${WS_LIMIT_PROBE_AFTER:-21600}" ]; then
+    while [ "$(date +%s)" -lt "$wake" ]; do sleep "${WS_LIMIT_POLL:-60}"; done
+    return 0
+  fi
+  limit_note "the reset is at $(wake_time "$wake"); probing $agent/$model every ${every}s until it works" "$log"
+  while [ "$(date +%s)" -lt "$wake" ]; do
+    sleep "$every"
+    if probe=$(usage_limit_probe "$agent" "$model" 2>&1); then
+      limit_note "probe $agent/$model $probe; resuming now" "$log"
+      return 0
+    fi
+    limit_note "probe $agent/$model $probe; still waiting for the reset at $(wake_time "$wake")" "$log"
+  done
+  return 0
+}
+# The agent and model a dispatch with these flags would use, as dispatch reads them: the last --agent or --model wins,
+# and an OpenCode run without --model uses WS_OPENCODE_MODEL. Prints one tab-separated line.
+dispatch_agent_model() { # <dispatch flags...>
+  local agent="$WS_AGENT" model="" flag=false
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --agent) agent="${2:-}"; shift ;;
+      --model) model="${2:-}"; flag=true; shift ;;
+    esac
+    shift
+  done
+  if [ "$agent" = opencode ] && ! $flag; then model="$WS_OPENCODE_MODEL"
+  elif [ -z "$model" ]; then model="$WS_MODEL"; fi
+  printf '%s\t%s\n' "$agent" "$model"
+}
+# The agent and model the review-limit probe asks through, as chain.sh chooses them: an OpenCode review uses the
+# OpenCode model; a Claude review uses the light-track model when the step's task is marked `Track: light` and
+# WS_REVIEW_MODEL_LIGHT is set, WS_REVIEW_MODEL otherwise. Prints one tab-separated line.
+review_probe_agent_model() { # <step>
+  local agent="${WS_REVIEW_AGENT:-claude}" model
+  if [ "$agent" = opencode ]; then model="$WS_OPENCODE_MODEL"
+  elif task_is_light "$1" && [ -n "${WS_REVIEW_MODEL_LIGHT:-}" ]; then model="$WS_REVIEW_MODEL_LIGHT"
+  else model="$WS_REVIEW_MODEL"; fi
+  printf '%s\t%s\n' "$agent" "$model"
+}
 # The stops in a chain log, oldest first, one per line as <time> TAB <step> TAB <reason>. The anchor leaves out a log
 # line that only quotes a stop. A tab in a reason becomes a space, so stop-notes.tsv can hold it unchanged.
 chain_stops() { # <chain.log>
@@ -27,6 +213,21 @@ chain_stops() { # <chain.log>
     when="${line%%  STOP at *}"; rest="${line#*  STOP at }"; reason="${rest#*: }"
     printf '%s\t%s\t%s\n' "$when" "${rest%%: *}" "${reason//$'\t'/ }"
   done < <(grep -aE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [^ ]+ [^ ]+  STOP at ' "$1")
+}
+# A chain status that says running or waiting with no live pid is a chain that died without recording it (a signal,
+# or a status an older chain left behind). Empty when the chain is live or the status says stopped, done or killed.
+# Deliberate: the queue comes from the log's chain start line; the status line has no room for it.
+chain_dead_line() { # <runs-dir>
+  local runs="$1" st q
+  st=$(head -n1 "$runs/chain.status" 2>/dev/null) || return 0
+  case "${st%% *}" in running|waiting) ;; *) return 0 ;; esac
+  pid_file_alive "$runs/chain.pid" && return 0
+  q=$(sed -n 's/.*  chain start: \(.*\) ([0-9][0-9]* steps, project [^)]*)$/\1/p' "$runs/chain.log" 2>/dev/null | tail -1)
+  if [ -n "$q" ]; then
+    printf 'chain: DEAD (status said %s; re-run ws chain %s)\n' "$st" "$q"
+  else
+    printf 'chain: DEAD (status said %s; re-run ws chain <queue>)\n' "$st"
+  fi
 }
 # Registered project slugs, sorted.
 project_slugs() { find "$WS/projects" -maxdepth 1 -name '*.conf' -printf '%f\n' 2>/dev/null | sed 's/\.conf$//' | sort; }
@@ -45,6 +246,12 @@ age_str() { # <epoch-seconds>
 }
 # Whether a plan has an In flight block, in either form: the bare heading, or one with a date in parentheses.
 has_inflight() { grep -qE '^\*\*In flight right now\*\*|^\*\*In flight right now \(' "$1"; }
+# How many In flight blocks a plan holds; 0 for a plan with none or a missing file.
+inflight_count() {
+  local n
+  n=$(grep -cE '^\*\*In flight right now\*\*|^\*\*In flight right now \(' "$1" 2>/dev/null) || n=0
+  printf '%s' "${n:-0}"
+}
 # One plan's In flight block: the heading's own text (the dated form carries its text on that line) and the
 # lines under it up to the next section, blank lines skipped. Each line is truncated like cold start does.
 inflight_block() { # <plan-file> [max-lines] [indent]
@@ -141,12 +348,50 @@ plan_waiting_lines() { # <plans-dir>
   if [ ${#dated[@]} -gt 0 ]; then printf '%s\n' "${dated[@]}" | sort; fi
   if [ ${#undated[@]} -gt 0 ]; then printf '%s\n' "${undated[@]}" | sort; fi
 }
+# A merge whose commit is on the main branch but whose tests or push never finished (a crash cut it off). It
+# prints one warning while the marker exists and no merge holds the lock; beside a held lock the merge is still
+# running, so it prints nothing. The marker holds the step name, the reviewed branch tip, the merge commit and
+# the stage (tests, or push once the tests passed). The marker is dropped here once the merge is finished by hand:
+# when the commit is no longer on the branch (undone) or is already on origin (pushed). A marker too damaged to name
+# its commit prints the file's path instead of disappearing silently. A caller that already holds the lock passes
+# `held` as the fourth argument: flock on a fresh descriptor conflicts with its own held descriptor, so the probe
+# would wrongly report another merge running.
+unfinished_merge_line() { # <runs-dir> [project-path] [project-branch] [held]
+  local runs="$1" path="${2:-}" branch="${3:-main}" lock_held="${4:-}" name tip merge_sha stage marker shown=""
+  [ -f "$runs/merge.unfinished" ] || return 0
+  if [ -z "$lock_held" ] && [ -e "$runs/merge.lock" ]; then flock -n "$runs/merge.lock" true 2>/dev/null || return 0; fi
+  marker="${runs#"$WS"/}/merge.unfinished"
+  read -r name tip merge_sha stage < "$runs/merge.unfinished" || true
+  if [ -z "$merge_sha" ]; then
+    printf 'UNFINISHED MERGE: the marker %s is damaged: it does not name the merge commit. Check %s by hand, finish or undo the merge, then remove the marker.\n' \
+      "$marker" "$branch"
+    return 0
+  fi
+  if [ -n "$path" ] && git -C "$path" rev-parse --verify --quiet "$branch" >/dev/null 2>&1; then
+    if ! git -C "$path" merge-base --is-ancestor "$merge_sha" "$branch" 2>/dev/null; then
+      rm -f "$runs/merge.unfinished"; return 0
+    fi
+    if git -C "$path" rev-parse --verify --quiet "origin/$branch" >/dev/null 2>&1 \
+      && git -C "$path" merge-base --is-ancestor "$merge_sha" "origin/$branch" 2>/dev/null; then
+      rm -f "$runs/merge.unfinished"; return 0
+    fi
+  fi
+  shown="${merge_sha:0:7}"
+  [ -z "$path" ] || shown=$(git -C "$path" rev-parse --short "$merge_sha" 2>/dev/null || printf '%s' "$shown")
+  if [ "$stage" = push ]; then
+    printf 'UNFINISHED MERGE: %s merged as %s and its tests passed, but the push did not finish (it failed or a crash cut the merge off). Push %s to origin, keep the evidence, remove the worktree, delete the branch and remove %s.\n' \
+      "$name" "$shown" "$branch" "$marker"
+  else
+    printf 'UNFINISHED MERGE: %s merged as %s but its tests did not finish (a crash cut the merge off). Run the project tests on %s, then push, keep the evidence, remove the worktree, delete the branch and remove %s; if the tests fail, undo the merge commit.\n' \
+      "$name" "$shown" "$branch" "$marker"
+  fi
+}
 # Items waiting on you in one project: a missing checkout, a stopped chain (a gate's reason names the
 # merge command), a finished run whose saved result is partial or missing and whose pid is gone, and a
 # decision written in the plans. A run or a stopped step is listed only while its agent branch is still open:
 # the result files outlive their branch.
 waiting_lines() { # <slug> <runs-dir> [project-path] [project-branch]
-  local slug="$1" runs="$2" path="${3:-}" branch="${4:-main}" f n pid st reason first step repo="" hf htip hcur shown_tip pline
+  local slug="$1" runs="$2" path="${3:-}" branch="${4:-main}" f n pid st reason first step repo="" hf htip hcur shown_tip pline ufline
   if [ -n "$path" ] && { [ -d "$path/.git" ] || [ -f "$path/.git" ]; }; then repo="$path"; fi
   if [ -n "$path" ] && [ -z "$repo" ]; then
     printf '%s: project path is not a git repo: %s\n' "$slug" "${path:-<empty>}"
@@ -164,6 +409,8 @@ waiting_lines() { # <slug> <runs-dir> [project-path] [project-branch]
       fi
     fi
   fi
+  ufline=$(unfinished_merge_line "$runs" "$repo" "$branch")
+  [ -z "$ufline" ] || printf '%s: %s\n' "$slug" "$ufline"
   # A hold waits on the operator until the branch moves past it (a fix is running). Without a repo to ask, it
   # stays listed: hiding waiting work on a misconfigured checkout is the failure this filter must never have.
   for hf in "$runs"/*.hold; do
@@ -182,9 +429,8 @@ waiting_lines() { # <slug> <runs-dir> [project-path] [project-branch]
     [ -f "$f" ] || continue
     first=$(head -n1 "$f")
     case "$first" in partial*|"NO RESULT"*) ;; *) continue ;; esac
-    n=$(basename "$f" .result.txt); pid=""
-    [ -f "$runs/$n.pid" ] && pid=$(cat "$runs/$n.pid")
-    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && continue
+    n=$(basename "$f" .result.txt)
+    pid_file_alive "$runs/$n.pid" && continue
     # A retried run's name carries a .YYYYMMDDTHHMMSSZ suffix; the step is the name the branch uses.
     step=$(printf '%s' "$n" | sed -E 's/\.[0-9]{8}T[0-9]{6}Z$//')
     agent_branch_open "$repo" "$branch" "$step" || continue
@@ -423,6 +669,14 @@ review_verdict_agrees() { # <verdict-a> <verdict-b>
   [ "$2" = error ] && return 1
   [ "$1" = "$2" ] && return 0
   [ "$1" != merge ] && [ "$2" != merge ]
+}
+# The fix a missing commit identity prints, so ws init and ws doctor name the same two keys.
+git_identity_fix() { printf '%s' 'git config --global user.name <name> && git config --global user.email <id>+<login>@users.noreply.github.com'; }
+# True when git cannot resolve both the author and the committer identity in <dir>, so a commit there fails with
+# git's own "identity unknown" error. git var is the same lookup a commit uses, so a local or environment
+# identity counts.
+git_identity_missing() { # <dir>
+  ! git -C "$1" var GIT_AUTHOR_IDENT >/dev/null 2>&1 || ! git -C "$1" var GIT_COMMITTER_IDENT >/dev/null 2>&1
 }
 # Commit one file a tool just wrote to the shared workspace, that path only: `git commit --only` takes the named
 # file's working-tree content and leaves another session's staged or modified files out of the commit. A workspace

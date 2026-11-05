@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Write the permission block of the orchestrator's own OpenCode config from projects/*.conf: an orchestrator
 # session started in this folder may read every registered project outside the working directory, and shell
-# commands run without prompting except the destructive ones, which ask first. Every other config key is kept.
+# commands run without prompting except the destructive ones, which ask first. It also adds the browser MCP
+# (browser_mcp_json), for this session alone. Every other config key is kept.
 # The file is loaded only by the orchestrator session, through OPENCODE_CONFIG. It is never the global
 # opencode.json: OpenCode merges that under the inline permissions a builder or review passes, so an "ask" rule
 # there would leave a headless run waiting on a prompt and without a shell.
@@ -34,6 +35,8 @@ for conf in "$WS"/projects/*.conf; do
   [ -f "$conf" ] || continue
   # shellcheck disable=SC1090  # every conf is a different file
   path=$( (PROJECT_PATH=""; . "$conf" >/dev/null 2>&1; printf '%s' "${PROJECT_PATH:-}") )
+  # Another process may remove a conf between the glob and this read: skip it rather than fail the whole rewrite.
+  [ -e "$conf" ] || continue
   [ -n "$path" ] || die "$conf has no PROJECT_PATH"
   path="${path%/}"
   [ -n "${seen[$path]:-}" ] && continue
@@ -48,6 +51,13 @@ for path in "${paths[@]}"; do
     external=$(jq -c --arg rule "$rule" '. + {($rule): "allow"}' <<< "$external") || die "could not build the external_directory rules"
   done
 done
+memdir=$(memory_dir) || exit 1
+edit_rules='{}'
+if [ -n "$memdir" ]; then
+  external=$(jq -c --arg rule "$memdir/**" '. + {($rule): "allow"}' <<< "$external") || die "could not build the external_directory rules"
+  # Deliberate: memory is read-only for this session; an allow in external_directory alone would also open it to edits.
+  edit_rules=$(jq -nc --arg rule "$memdir/**" '{($rule): "deny"}') || die "could not build the edit rules"
+fi
 external=$(jq -c '. + {"/tmp/**": "allow"}' <<< "$external") || die "could not build the external_directory rules"
 
 # A shell command is allowed by default; the destructive forms ask, and each rule comes after the catch-all.
@@ -59,8 +69,14 @@ for rule in 'git push --force*' 'git push -f*' 'git reset --hard*' 'git clean*' 
 done
 
 if [ -f "$config" ]; then base=$(cat "$config") || die "cannot read $config"; else base='{}'; fi
-out=$(printf '%s' "$base" | jq --argjson ext "$external" --argjson bash "$bash_rules" \
-  '.permission = ((.permission // {}) + {external_directory: $ext, bash: $bash})') \
+# An edit value that is a bare action becomes the catch-all of a rule object, so the deny can sit after it.
+browser_mcp=$(browser_mcp_json) || die "could not build the browser MCP entry"
+out=$(printf '%s' "$base" | jq --argjson ext "$external" --argjson bash "$bash_rules" --argjson edit "$edit_rules" --argjson browser "$browser_mcp" '
+  .mcp = ((.mcp // {}) + $browser)
+  | .permission = ((.permission // {}) + {external_directory: $ext, bash: $bash})
+  | if $edit == {} then . else
+      .permission.edit = ((.permission.edit // {} | if type == "string" then {"*": .} else . end) + $edit)
+    end') \
   || die "$config is not valid JSON; fix it by hand (JSONC comments are not supported here)"
 
 # The launch line pins the session to the selected project and loads the orchestrator config as OpenCode's custom
@@ -82,5 +98,6 @@ mkdir -p "$(dirname "$config")" || die "cannot create $(dirname "$config")"
 tmp=$(mktemp "${config}.tmp.XXXXXX") || die "cannot write beside $config"
 printf '%s\n' "$out" > "$tmp" && mv "$tmp" "$config" || { rm -f "$tmp"; die "could not write $config"; }
 echo "wrote $config: ${#paths[@]} project path(s) and /tmp allowed outside the folder; $asks shell rule(s) ask first"
+[ -z "$memdir" ] || echo "memory directory $memdir: read allowed, edits denied"
 echo "start the orchestrator session with:"
 launch_line

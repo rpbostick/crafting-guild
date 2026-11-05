@@ -165,6 +165,9 @@ if [ -n "${WS_REVIEW_SHADOW:-}" ] && [ "$agent" != "$WS_REVIEW_SHADOW" ] && [ -z
     note "shadow review skipped: scripts/review-shadow.sh is not executable"
   elif [ "${WS_REVIEW_SHADOW_MODEL#*/}" = "$WS_REVIEW_SHADOW_MODEL" ]; then
     note "shadow review skipped: WS_REVIEW_SHADOW_MODEL '$WS_REVIEW_SHADOW_MODEL' is not a provider/model ID"
+  elif ! allowance_check "$WS_REVIEW_SHADOW_MODEL"; then
+    note "shadow review skipped: $ALLOWANCE_REASON"
+    printf '%s  %s %s: %s\n' "$(now_local)" "$name" "$(short "$tip")" "$ALLOWANCE_REASON" >> "$RUNS/shadow-skipped.log"
   else
     shadow_dir="$RUNS/shadow"; mkdir -p "$shadow_dir"
     shadow_log="$shadow_dir/$name-$tip.log"

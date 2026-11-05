@@ -12,7 +12,11 @@ TEST_CMD="bash scripts/run-all-tests.sh"
 
 `TEST_CMD` runs from the repo root, in the worktree for builders and in the main checkout before a push. Leave it empty for a project with no tests; merges then push without a gate and say so.
 
+`RECORD_CONFIG_PATHS` (optional) is a space-separated list of shell globs for config files that `ws orchestrator-record` counts as docs and config rather than code, on top of `*.md`, `docs/*`, `.gitignore` and `.editorconfig`.
+
 `POST_MERGE_CMD` (optional) is a chore that follows every successful merge, such as rendering review sheets, restarting a server or rebuilding a site. `ws merge` starts it detached in the main checkout after the push (or the local merge when there is no remote), under the preview memory cap, with `WS_MERGED_SHA`, `WS_MERGED_NAME` and `WS_PROJECT` set. Its output goes to `runs/<slug>/post-merge-<name>.log`, its outcome to `runs/<slug>/post-merge.status`, and a failure raises a desktop notification and shows in cold start; it never changes the merge's exit code.
+
+`COLD_START_CMD` (optional) is a short, read-only command cold start runs in the project with a 20-second timeout; its output is printed only when it prints something. It is for a project-specific flag the orchestrator should see at every session start, such as a retention status line.
 
 `WORKTREE_ENV_FILE` (a path in the repo, e.g. `.env.local`) and `WORKTREE_ENV` (an array of `KEY=value` lines) give builders' test runs their environment, since builders cannot run `env VAR=... <cmd>`: `ws dispatch` writes the lines into that file in each new or reused worktree, for tools that read it (Vite's `loadEnv` reads `.env.local`). It refuses when git does not ignore the file in the worktree, so the values never reach a branch, and a file there with other content is copied under `.ws-evidence/` with a warning before it is replaced.
 
