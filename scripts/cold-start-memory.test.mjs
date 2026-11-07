@@ -2,11 +2,14 @@
 // passes, against a fixture memory directory and the real scripts/memory-settings.sh, so no model is involved.
 // Usage: node cold-start-memory.test.mjs <plugin.js> <memory-settings.sh> <temp-dir>
 import assert from "node:assert/strict";
-import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 delete process.env.WS_RUN_EVENTS;
+delete process.env.WS_PROJECT;
 const [pluginPath, settings, tempRoot] = process.argv.slice(2);
 const { ColdStartPlugin } = await import(pathToFileURL(pluginPath).href);
 
@@ -116,6 +119,32 @@ writeFileSync(noCap, `#!/usr/bin/env bash\necho "WS_MEMORY_DIR=${memoryDir}"\n`)
 process.env.WS_MEMORY_DIR = memoryDir;
 const uncapped = await ColdStartPlugin({ directory: work }, { script: coldStart, settings: noCap });
 assert.match((await systemText(uncapped, "ses_nocap"))[1], /Memory unavailable .*WS_MEMORY_CAP/);
+
+// The first request of a session records its id in runs/<slug>/session.id, once; a later session replaces it.
+const runs = join(work, "runs", "fixture-slug");
+mkdirSync(runs, { recursive: true });
+process.env.WS_MEMORY_DIR = "";
+process.env.WS_PROJECT = "fixture-slug";
+const recorder = await ColdStartPlugin({ directory: work }, { script: coldStart, settings });
+await systemText(recorder, "ses_rec1");
+assert.equal(readFileSync(join(runs, "session.id"), "utf8"), "ses_rec1\n", "the session id is recorded");
+writeFileSync(join(runs, "session.id"), "ses_overwritten\n");
+await systemText(recorder, "ses_rec1");
+assert.equal(readFileSync(join(runs, "session.id"), "utf8"), "ses_overwritten\n", "a later request does not write again");
+await systemText(recorder, "ses_rec2");
+assert.equal(readFileSync(join(runs, "session.id"), "utf8"), "ses_rec2\n", "a new session records its id");
+assert.deepEqual(readdirSync(runs), ["session.id"], "no temp file is left");
+
+// No WS_PROJECT, or no runs directory for it: nothing is written and the hook does not throw.
+process.env.WS_PROJECT = "";
+const unpinned = await load({ dir: "" });
+assert.match((await systemText(unpinned, "ses_nopin")).join("\n"), /BRIEF-RUN/, "the brief still arrives without WS_PROJECT");
+process.env.WS_PROJECT = "no-such-slug";
+const absent = await load({ dir: "" });
+assert.match((await systemText(absent, "ses_norun")).join("\n"), /BRIEF-RUN/, "the brief still arrives without a runs directory");
+assert.equal(existsSync(join(work, "runs", "no-such-slug")), false, "no runs directory is created");
+assert.equal(readFileSync(join(runs, "session.id"), "utf8"), "ses_rec2\n", "another project's id is untouched");
+delete process.env.WS_PROJECT;
 
 // A builder never loads it.
 process.env.WS_MEMORY_DIR = memoryDir;

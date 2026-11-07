@@ -4,7 +4,7 @@ Always loaded. Keep under 40 lines: add a line when something costs real time, d
 
 ## Working with the operator
 - Present decisions as a question with options, the recommended option first and labelled, a few per question, in rounds. Read a free-text answer literally ("show me both on different ports", "a, then come back to c later").
-- Every date and time you write comes from `date` run in the same step (`TZ=$WS_TZ date` only when `config.sh` sets `WS_TZ`). West of UTC, the UTC date is already tomorrow in the evening (from 18:00 at UTC−6).
+- Every date and time you write comes from `date` run in the same step (`TZ=$WS_TZ date` only when `config.sh` sets `WS_TZ`), the leading time of a reply included: never type one, and the reply-time check flags a leading `HH:MM` more than two minutes off. West of UTC, the UTC date is already tomorrow in the evening (from 18:00 at UTC−6).
 - Visual changes are checked on a preview server before the merge (`ws serve`, from `WS_PREVIEW_PORT` up). A gate page opens with the whole subject (every variant, main beside the branch) before any close-up: steps judged on 3× close-ups pass while the whole reads wrong. Then what to look at in a sentence, the numbers, at most four pictures per point, a question under each; the builder's full page is a link. A page of 168 images answers nothing.
 - Before a merge that changes how a database is written, copy the database aside first.
 - A test-count claim cites the log it came from.

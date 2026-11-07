@@ -427,11 +427,36 @@ def validate(value, schema, path="$"):
     return errs
 
 
+def denied_text(item):
+    """A denied call as the schema's string: its command, call, path or tool, with a reason appended when it has one."""
+    if not isinstance(item, dict):
+        return item
+    for key in ("command", "call", "path", "tool"):
+        if isinstance(item.get(key), str):
+            text = item[key]
+            reason = item.get("reason")
+            return f"{text}: {reason}" if isinstance(reason, str) and reason else text
+    return item
+
+
+def question_text(item):
+    """An open question as the schema's string, keeping a recommendation when the entry has one."""
+    if not isinstance(item, dict):
+        return item
+    if "question" in item and "recommendation" in item:
+        return f"{item['question']} (recommendation: {item['recommendation']})"
+    if "question" in item:
+        return str(item["question"])
+    return "; ".join(str(value) for value in item.values())
+
+
 def normalize(obj):
-    """Repair two shapes models write for an empty list: a boolean, and a namespaced duplicate.
+    """Repair the result shapes models write instead of the schema's, without guessing a value.
 
     A review's `blocking`/`suggestions` must be arrays. Some models write `"blocking": false` (or true plus a
     `blocking_findings` list) instead of `[]`; accept that rather than throwing away an otherwise valid review.
+    A builder result's `denied`, `open_questions`, `unknowns`, `tests` and `done_when` are coerced from the
+    object, string and list shapes models write; a shape not handled here still fails and goes to the repair turn.
     """
     if not isinstance(obj, dict):
         return obj
@@ -440,6 +465,28 @@ def normalize(obj):
         if isinstance(value, bool):
             other = obj.get(f"{key}_findings")
             obj[key] = other if value and isinstance(other, list) else []
+    if isinstance(obj.get("denied"), list):
+        obj["denied"] = [denied_text(item) for item in obj["denied"]]
+    if isinstance(obj.get("open_questions"), list):
+        obj["open_questions"] = [question_text(item) for item in obj["open_questions"]]
+    if isinstance(obj.get("unknowns"), str):
+        obj["unknowns"] = [obj["unknowns"]]
+    tests = obj.get("tests")
+    if isinstance(tests, list) and len(tests) == 1 and isinstance(tests[0], dict) \
+            and all(key in tests[0] for key in ("command", "passed", "failed", "log_path")):
+        obj["tests"] = tests[0]
+    if isinstance(obj.get("done_when"), list):
+        for item in obj["done_when"]:
+            if not isinstance(item, dict):
+                continue
+            basis = item.get("basis")
+            for word in ("observed", "inferred"):
+                prefix = f"{word}:"
+                if isinstance(basis, str) and basis.startswith(prefix):
+                    item["basis"] = word
+                    if not item.get("evidence"):
+                        item["evidence"] = basis[len(prefix):].strip()
+                    break
     return obj
 
 

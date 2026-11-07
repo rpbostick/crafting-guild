@@ -7,11 +7,15 @@ WS_MERGE_TEST_TIMEOUT="${WS_MERGE_TEST_TIMEOUT-1800}"  # seconds the merge gate'
 WS_DEFAULT_BUDGET="10"         # dollars, --max-budget-usd for a builder run
 WS_REVIEW_BUDGET="8"            # dollars, for a review run
 WS_CLAUDE_BUDGET="$WS_REVIEW_BUDGET"   # dollars, for one delegated Claude job (ws claude); --budget overrides
+# Dollars a day for Claude builders and ws claude jobs together, read from runs/*/claude-jobs.tsv; empty = no cap.
+# An installation sets it in config.local.sh; ws claude --spent prints today's total and the room left.
+WS_CLAUDE_DAY_CAP="${WS_CLAUDE_DAY_CAP-}"
 WS_DEFAULT_TIMEOUT="120m"       # wall-clock cap for a builder run (timeout(1) form)
 WS_LIGHT_TIMEOUT="45m"          # cap for a task marked 'Track: light'
 WS_BUILDER_MEM="4G"             # memory cap for a builder and everything it runs (systemd MemoryMax); empty = no cap
 WS_SERVE_MEM="3G"               # memory cap for a `ws serve` preview and everything it starts; empty = no cap
-WS_WAKE_URL="${WS_WAKE_URL:-http://127.0.0.1:4096}"   # the OpenCode server ws wake sends to: ws oc <slug> --port 4096
+WS_OC_PORT="${WS_OC_PORT:-4096}"                     # ws oc starts the session's server on the first free port from here up (runs/<slug>/oc.port)
+WS_WAKE_URL="${WS_WAKE_URL:-}"                        # the server ws wake sends to: --url, else this when set, else http://127.0.0.1:<runs/<slug>/oc.port>, else http://127.0.0.1:4096
 WS_WAKE_TIMEOUT="${WS_WAKE_TIMEOUT:-900}"             # seconds ws wake waits for the session's first event before it records a failure
 WS_PREVIEW_PORT="8801"          # ws serve <worktree> without a port
 WS_PREVIEW_PORT_MAIN="8800"     # ws serve main without a port
@@ -33,7 +37,7 @@ WS_LIMIT_POLL="${WS_LIMIT_POLL:-60}"                   # seconds a usage-limit w
 WS_MODEL="opus"                   # builder model alias ("sonnet", "opus", ...); empty = Claude Code's default
 WS_REVIEW_MODEL="fable"         # reviewer model alias; empty = default
 WS_REVIEW_MODEL_LIGHT="opus"    # reviewer for a branch whose task is marked `Track: light`; empty = WS_REVIEW_MODEL
-WS_REVIEW_AGENT="${WS_REVIEW_AGENT:-claude}"  # what runs a review: "claude" or "opencode" (scripts/opencode-review.sh); ws review --agent overrides
+WS_REVIEW_AGENT="${WS_REVIEW_AGENT:-}"  # what runs a review: empty = whichever client is installed (the changed files decide when both are: docs-only on opencode, anything else on claude); "claude" or "opencode" forces it; ws review --agent overrides
 WS_EFFORT=""                    # builder effort: Claude's low|medium|high|xhigh|max, or an OpenCode model variant
                                 # (`opencode models <provider> --verbose`); empty = default. Applies to both agents:
                                 # a model without that variant refuses the dispatch rather than dropping the setting.

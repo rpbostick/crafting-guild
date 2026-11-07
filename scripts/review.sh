@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One review per branch, before merge. Read-only reviewer, confined to the worktree; the diff goes on stdin to
-# Claude or in the prompt to OpenCode.
+# Claude or in the prompt to OpenCode. With WS_REVIEW_AGENT empty it runs on the only installed client, or picks by
+# the changed files when both are, so a single-client install needs no setting.
 # Usage: review.sh [--project slug] [--budget USD] [--model M|provider/model] [--agent claude|opencode]
 #                  [--print-prompt] <name>
 # --print-prompt prints the reviewer's whole prompt and stops before running the reviewer.
@@ -8,23 +9,16 @@
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 slug="" budget="$WS_REVIEW_BUDGET" model="$WS_REVIEW_MODEL" model_flag="" show_prompt=false
-agent="${WS_REVIEW_AGENT:-claude}" wt_override="" base_override="" out_base=""
+agent="${WS_REVIEW_AGENT:-}" agent_reason=""
+[ -n "$agent" ] && agent_reason="WS_REVIEW_AGENT"
+wt_override="" base_override="" out_base=""
 while [ $# -gt 0 ]; do case "$1" in
   --project) slug="$2"; shift 2 ;; --budget) budget="$2"; shift 2 ;; --model) model="$2"; model_flag=1; shift 2 ;;
-  --agent) agent="$2"; shift 2 ;; --worktree) wt_override="$2"; shift 2 ;; --base) base_override="$2"; shift 2 ;;
+  --agent) agent="$2"; agent_reason="--agent"; shift 2 ;; --worktree) wt_override="$2"; shift 2 ;; --base) base_override="$2"; shift 2 ;;
   --out) out_base="$2"; shift 2 ;; --print-prompt) show_prompt=true; shift ;; *) break ;; esac; done
 name="${1:?usage: review.sh [flags] <name>}"
-case "$agent" in claude|opencode) ;; *) die "unknown agent '$agent' (claude or opencode)" ;; esac
 case "${WS_REVIEW_SHADOW:-}" in ""|opencode) ;; *) die "WS_REVIEW_SHADOW is '${WS_REVIEW_SHADOW}'; set it to opencode or leave it empty" ;; esac
 load_project "$slug"; wt="${wt_override:-$(worktree_dir "$name")}"; br="$(branch_of "$name")"
-if [ "$agent" = opencode ]; then
-  # A review model for OpenCode is a provider/model ID, and has no light-track alias of its own.
-  [ -n "$model_flag" ] || model="$WS_OPENCODE_MODEL"
-  case "$model" in */*) ;; *) die "--agent opencode takes a provider/model ID for --model, not '$model'" ;; esac
-elif [ -z "$model_flag" ] && [ -n "${WS_REVIEW_MODEL_LIGHT:-}" ] && task_is_light "$name"; then
-  # A light-track branch reviews on the cheaper model unless --model says otherwise.
-  model="$WS_REVIEW_MODEL_LIGHT"; note "light track: reviewing on $model"
-fi
 [ -d "$wt" ] || die "no worktree for $name"
 [ "$(git -C "$wt" status --short -uno | wc -l)" -eq 0 ] || die "worktree has modified tracked files; commit or discard first"
 unt=$(git -C "$wt" status --short | grep -c "^??" || true); [ "$unt" -gt 0 ] && note "$unt untracked file(s) in the worktree are not part of the branch"
@@ -33,6 +27,27 @@ tip=$(git -C "$wt" rev-parse HEAD); base="${base_override:-$(git -C "$PROJECT_PA
 [ "$tip" != "$base" ] || die "branch $br has no commits beyond $PROJECT_BRANCH"
 stat=$(git -C "$PROJECT_PATH" diff --stat "$base" "$tip" | tail -40)
 files=$(git -C "$PROJECT_PATH" diff --name-only "$base" "$tip")
+if [ -z "$agent_reason" ]; then
+  agent=$(auto_review_agent "$files")
+  have_claude=""; have_opencode=""
+  client_installed claude && have_claude=1
+  client_installed opencode && have_opencode=1
+  if [ -n "$have_claude" ] && [ -z "$have_opencode" ]; then agent_reason="only claude is installed"
+  elif [ -n "$have_opencode" ] && [ -z "$have_claude" ]; then agent_reason="only opencode is installed"
+  elif [ "$agent" = opencode ]; then agent_reason="docs-only branch"
+  elif [ -z "$files" ]; then agent_reason="no changed files"
+  else agent_reason="branch changes files outside the docs paths"; fi
+fi
+case "$agent" in claude|opencode) ;; *) die "unknown agent '$agent' (claude or opencode)" ;; esac
+note "review agent: $agent ($agent_reason)"
+if [ "$agent" = opencode ]; then
+  # A review model for OpenCode is a provider/model ID, and has no light-track alias of its own.
+  [ -n "$model_flag" ] || model="$WS_OPENCODE_MODEL"
+  case "$model" in */*) ;; *) die "--agent opencode takes a provider/model ID for --model, not '$model'" ;; esac
+elif [ -z "$model_flag" ] && [ -n "${WS_REVIEW_MODEL_LIGHT:-}" ] && task_is_light "$name"; then
+  # A light-track branch reviews on the cheaper model unless --model says otherwise.
+  model="$WS_REVIEW_MODEL_LIGHT"; note "light track: reviewing on $model"
+fi
 diff=$(git -C "$PROJECT_PATH" diff "$base" "$tip" -- . ':(exclude)*.svg' ':(exclude)*.png' ':(exclude)*.lock' ':(exclude)*.min.js' ':(exclude)*.obj' ':(exclude)*.stl' ':(exclude)*.3mf' ':(exclude)*.glb' ':(exclude)*.gltf' ':(exclude)*.csv')
 bytes=${#diff}; capped=""
 if [ "$bytes" -gt 200000 ]; then diff="${diff:0:200000}"; capped="(diff truncated at 200 KB of $bytes; read the files for the rest)"; fi
@@ -46,6 +61,12 @@ pre_args=(--project "$SLUG"); [ -n "$wt_override" ] && pre_args+=(--worktree "$w
 pre=$("$WS/scripts/precheck.sh" "${pre_args[@]}" "$name" 2>&1)
 pre_file="$RUNS/$name.precheck.txt"; [ -n "$out_base" ] && pre_file="$out_base.precheck.txt"
 printf '%s\n' "$pre" > "$pre_file"
+# Test-quality candidates: a script can see a bare bound, a test with no assertion, a test that names no changed
+# path, a duplicate or a missing failing-before run; whether a test really exercises the change is the reviewer's.
+tq_args=(--project "$SLUG"); [ -n "$wt_override" ] && tq_args+=(--worktree "$wt_override"); [ -n "$base_override" ] && tq_args+=(--base "$base_override")
+tq=$("$WS/scripts/test-quality.sh" "${tq_args[@]}" "$name" 2>&1)
+tq_file="$RUNS/$name.test-quality.txt"; [ -n "$out_base" ] && tq_file="$out_base.test-quality.txt"
+printf '%s\n' "$tq" > "$tq_file"
 # ws teeth's verdict, only when it was run at this SHA: a toothless test is a blocking finding the reviewer must
 # judge (the model that wrote the test does not get the last word). A result for another SHA is stale and omitted.
 teeth_note=""
@@ -98,6 +119,8 @@ ${report:-(no structured report from the builder)}
 Mechanical precheck (scripts/precheck.sh, already run on this branch; take its ok lines as checked, judge each FLAG: a real defect is blocking under its rule, a false alarm is not a finding):
 $pre
 ${teeth_note:+$(printf '\n%s\n' "$teeth_note")}
+Test-quality check (scripts/test-quality.sh, already run on this branch; these are candidates, not verdicts. Judge each FLAG: a test that cannot fail is blocking under rule 2, one that names no changed path may still exercise it through an entrypoint, a false alarm is not a finding):
+$tq
 In the JSON, \`blocking\` and \`suggestions\` are always arrays: write \`[]\`, never \`false\` or \`true\`, and never a second key for the findings. \`rule\` is a number or a short string.
 
 The full diff is $diff_where $capped. Read any changed file in full with Read when you need context. Logs and renders the builder saved are under .ws-evidence/ in the worktree (untracked, so not in the diff); read them there."

@@ -6,6 +6,7 @@ Prints the findings, most repeated first, and writes <runs_dir>/audit.last (cold
 Each finding is something a script could do instead: turn the top one into the next tool fix or light task.
 """
 import collections, glob, os, re, subprocess, sys, time
+from denied import classify
 from transcript import events
 
 slug, path, test_cmd, runs_dir, plans_dir = sys.argv[1:6]
@@ -24,14 +25,15 @@ wsrun_added = int((subprocess.run(["git", "-C", ws, "log", "--diff-filter=A", "-
                                   capture_output=True, text=True).stdout.split() or ["0"])[-1])
 runs = [f for f in glob.glob(os.path.join(runs_dir, "*.jsonl")) if os.path.getmtime(f) >= since]
 cat = collections.Counter(); per_script = collections.defaultdict(set); probes_per_run = {}
-wrappers = collections.Counter(); wsrun_runs = 0; denied = collections.Counter(); minutes = 0.0
+wrappers = collections.Counter(); wsrun_runs = 0; denied_calls = []; minutes = 0.0
 for f in runs:
     name = os.path.basename(f)[:-6]; probes = 0; used_wsrun = False
     for e in events(f):
         if e.get("type") == "result":
             minutes += (e.get("duration_ms") or 0) / 60000
             for d in e.get("permission_denials") or []:
-                denied[((d.get("tool_input") or {}).get("command") or d.get("tool_name") or "?").split()[0][:30]] += 1
+                command = (d.get("tool_input") or {}).get("command") or d.get("tool_name") or "?"
+                denied_calls.append((name, command))
         if e.get("type") != "assistant": continue
         for c in e["message"].get("content", []):
             if c.get("type") != "tool_use" or c.get("name") != "Bash": continue
@@ -109,8 +111,18 @@ heavy = sorted(((v, k) for k, v in probes_per_run.items() if v >= 15), reverse=T
 if heavy:
     finding(f"{sum(v for v, _ in heavy)} one-off probes in {len(heavy)} runs ({', '.join(f'{k} {v}' for v, k in heavy[:4])}). "
             "Read those runs: a probe repeated across a run is a missing test helper or debug script.")
-if denied:
-    finding("denied commands (each one cost a turn): " + ", ".join(f"{k} x{v}" for k, v in denied.most_common(5)) + ". Grant them or name the right command in the task.")
+if denied_calls:
+    # Group by why the call was denied, not by its first word: `git -C`, a chain's ungranted part and a read
+    # outside the worktree all begin with a word the defaults grant.
+    by_class = collections.Counter()
+    examples = collections.defaultdict(collections.Counter)
+    for name, command in denied_calls:
+        name_class, _ = classify(command, name)
+        by_class[name_class] += 1
+        examples[name_class][command] += 1
+    groups = "; ".join(f"{name_class} x{count} (e.g. {examples[name_class].most_common(1)[0][0][:120]})"
+                       for name_class, count in by_class.most_common(4))
+    finding("denied commands by reason (each one cost a turn): " + groups + ". Grant them or name the right command in the task.")
 if len(fix_tasks) >= 3:
     finding(f"{len(fix_tasks)} fix-round task files. Read their findings for a class of defect a precheck rule or a test helper could catch.")
 if n == 0: print("nothing repeated enough to flag")

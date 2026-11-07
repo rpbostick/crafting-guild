@@ -4,7 +4,7 @@ WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # The settings config.sh lets the environment override (written there as ${VAR-default}): a value set in the
 # environment wins over config.sh and config.local.sh alike, so a test can run with the bench hours off or on
 # the agent it expects.
-ws_env=$(declare -p WS_BENCH_HOURS WS_BENCH_OUTSIDE WS_MERGE_TEST_TIMEOUT WS_AGENT WS_REVIEW_SHADOW WS_ASK_MODEL WS_ASK_BUDGET WS_WAITING_RE WS_ORCHESTRATOR_OPENCODE WS_MEMORY_DIR WS_MEMORY_CAP WS_ALLOWANCE_LIMITS WS_ALLOWANCE_HOLD WS_ALLOWANCE_STARTS WS_ALLOWANCE_DB 2>/dev/null | sed 's/^declare -[a-z-]*/declare -gx/' || true)
+ws_env=$(declare -p WS_BENCH_HOURS WS_BENCH_OUTSIDE WS_MERGE_TEST_TIMEOUT WS_AGENT WS_REVIEW_SHADOW WS_ASK_MODEL WS_ASK_BUDGET WS_WAITING_RE WS_ORCHESTRATOR_OPENCODE WS_MEMORY_DIR WS_MEMORY_CAP WS_ALLOWANCE_LIMITS WS_ALLOWANCE_HOLD WS_ALLOWANCE_STARTS WS_ALLOWANCE_DB WS_CLAUDE_DAY_CAP 2>/dev/null | sed 's/^declare -[a-z-]*/declare -gx/' || true)
 # shellcheck source=../config.sh
 . "$WS/config.sh"
 # Private overrides (your own names for WS_ATTRIBUTION_RE, a different browser): kept out of a published copy.
@@ -107,6 +107,56 @@ allowance_lines() {
 now_local() { if [ -n "${WS_TZ:-}" ]; then TZ="$WS_TZ" date "+%Y-%m-%d %H:%M %Z"; else date "+%Y-%m-%d %H:%M %Z"; fi; }
 # date(1) in the workspace's zone: WS_TZ when set, else this machine's local time (an empty TZ would mean UTC).
 ws_date() { if [ -n "${WS_TZ:-}" ]; then TZ="$WS_TZ" date "$@"; else date "$@"; fi; }
+# The local calendar date the Claude ledger and the cap use: the workspace's zone when WS_TZ is set.
+today_local() { ws_date +%F; }
+# The sum of today's cost in every runs/*/claude-jobs.tsv, in the workspace's zone. A row is
+# date<TAB>slug<TAB>name<TAB>kind<TAB>cost<TAB>status. A row whose cost is not a number is skipped and counted
+# on stderr, so a broken ledger never reads as cheap.
+claude_spend_today() {
+  local today files
+  today=$(today_local)
+  files=("$WS"/runs/*/claude-jobs.tsv)
+  if [ ! -e "${files[0]}" ]; then printf '0.0000\n'; return 0; fi
+  LC_ALL=C awk -F '\t' -v today="$today" '
+    $1 == today {
+      if ($5 ~ /^-?[0-9]+([.][0-9]+)?$/) sum += $5
+      else bad++
+    }
+    END {
+      printf "%.4f\n", sum + 0
+      if (bad) printf "ws: claude-jobs.tsv: skipped %d row(s) with a non-numeric cost\n", bad > "/dev/stderr"
+    }
+  ' "${files[@]}"
+}
+# WS_CLAUDE_DAY_CAP is a dollar amount; awk reads a non-numeric value as 0, which would refuse every run and make
+# --spent print a negative room left. Empty means no cap.
+claude_day_cap_setting() { # <value>
+  case "$1" in
+    '') return 0 ;;
+    *[!0-9.]*|.*|*.|*.*.*) die "WS_CLAUDE_DAY_CAP='$1' is not a number; set it to a dollar amount or leave it empty for no cap" ;;
+  esac
+}
+# Append one finished Claude run to the ledger: date, slug, name, kind, cost, status. The cost is the result's
+# total_cost_usd rounded to four decimals; a result with no numeric cost records the run's budget with status
+# unknown-cost, so a failure or a killed run is never read as free. A usage-limit reply (is_error with
+# api_error_status 429) spent nothing, so it records 0 with status usage-limit instead of a whole budget.
+claude_ledger_append() { # <slug> <name> <kind> <budget> <json>
+  local slug="$1" name="$2" kind="$3" budget="$4" json="$5" cost status dir
+  cost=$(printf '%s' "$json" | jq -r '.total_cost_usd // empty' 2>/dev/null || true)
+  case "$cost" in
+    ''|*[!0-9.eE+-]*)
+      if [ "$(printf '%s' "$json" | jq -r '.is_error // false' 2>/dev/null)" = true ] \
+        && [ "$(printf '%s' "$json" | jq -r '.api_error_status // empty' 2>/dev/null)" = 429 ]; then
+        cost=0; status=usage-limit
+      else
+        cost="$budget"; status=unknown-cost
+      fi ;;
+    *) status=ok ;;
+  esac
+  cost=$(LC_ALL=C awk -v c="$cost" 'BEGIN { printf "%.4f", c }')
+  dir="$WS/runs/$slug"; mkdir -p "$dir"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(today_local)" "$slug" "$(printf '%s' "$name" | tr '\t\n' '  ')" "$kind" "$cost" "$status" >> "$dir/claude-jobs.tsv"
+}
 # A wake time for a log line: the hour and minute, with the date first when it is not today, so a usage-limit reset
 # weeks away does not read like one later today.
 wake_time() { # <epoch>
@@ -195,13 +245,49 @@ dispatch_agent_model() { # <dispatch flags...>
   elif [ -z "$model" ]; then model="$WS_MODEL"; fi
   printf '%s\t%s\n' "$agent" "$model"
 }
-# The agent and model the review-limit probe asks through, as chain.sh chooses them: an OpenCode review uses the
-# OpenCode model; a Claude review uses the light-track model when the step's task is marked `Track: light` and
-# WS_REVIEW_MODEL_LIGHT is set, WS_REVIEW_MODEL otherwise. Prints one tab-separated line.
+# True when the named review client (claude or opencode) is on PATH. The one place the installed-client probe lives,
+# so the auto reviewer, its reason and the doctor role assignment cannot drift apart.
+client_installed() { # <claude|opencode>
+  command -v "$1" >/dev/null 2>&1
+}
+# An explicit --agent or WS_REVIEW_AGENT forces the reviewer. Otherwise it runs on the only installed client; with
+# both installed a branch that changes only documentation reviews on OpenCode, and one that changes anything else,
+# or nothing, on Claude. With neither installed it falls back to Claude.
+auto_review_agent() { # <changed files, one per line>
+  local path have_claude="" have_opencode=""
+  client_installed claude && have_claude=1
+  client_installed opencode && have_opencode=1
+  if [ -n "$have_claude" ] && [ -z "$have_opencode" ]; then printf '%s\n' claude; return 0; fi
+  if [ -n "$have_opencode" ] && [ -z "$have_claude" ]; then printf '%s\n' opencode; return 0; fi
+  if [ -z "$have_claude" ] && [ -z "$have_opencode" ]; then printf '%s\n' claude; return 0; fi
+  [ -n "$1" ] || { printf '%s\n' claude; return 0; }
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    case "$path" in
+      *.md|docs/*|plans/*|reports/*|lessons/*|agents/*) ;;
+      *) printf '%s\n' claude; return 0 ;;
+    esac
+  done <<< "$1"
+  printf '%s\n' opencode
+}
+# The agent and model the review-limit probe asks through, as review.sh chooses them: an explicit WS_REVIEW_AGENT
+# forces the agent; otherwise the installed client decides, or the step's changed files when both are installed, so
+# a docs-only step with both clients probes OpenCode. An OpenCode review uses the OpenCode model; a Claude review
+# uses the light-track model when the step's task is marked `Track: light` and WS_REVIEW_MODEL_LIGHT is set,
+# WS_REVIEW_MODEL otherwise. Prints one tab-separated line.
 review_probe_agent_model() { # <step>
-  local agent="${WS_REVIEW_AGENT:-claude}" model
+  local step="$1" agent="${WS_REVIEW_AGENT:-}" model wt br base tip changed=""
+  if [ -z "$agent" ]; then
+    wt=$(worktree_dir "$step"); br=$(branch_of "$step")
+    base=$(git -C "$PROJECT_PATH" merge-base "$PROJECT_BRANCH" "$br" 2>/dev/null) || base=""
+    tip=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || tip=""
+    if [ -n "$base" ] && [ -n "$tip" ]; then
+      changed=$(git -C "$PROJECT_PATH" diff --name-only "$base" "$tip" 2>/dev/null) || changed=""
+    fi
+    agent=$(auto_review_agent "$changed")
+  fi
   if [ "$agent" = opencode ]; then model="$WS_OPENCODE_MODEL"
-  elif task_is_light "$1" && [ -n "${WS_REVIEW_MODEL_LIGHT:-}" ]; then model="$WS_REVIEW_MODEL_LIGHT"
+  elif task_is_light "$step" && [ -n "${WS_REVIEW_MODEL_LIGHT:-}" ]; then model="$WS_REVIEW_MODEL_LIGHT"
   else model="$WS_REVIEW_MODEL"; fi
   printf '%s\t%s\n' "$agent" "$model"
 }
@@ -481,6 +567,28 @@ load_project() {
   RUNS="$WS/runs/$SLUG"; mkdir -p "$RUNS" "$WS/plans/$SLUG"
   WT_ROOT="$(worktree_root "$PROJECT_PATH")"
 }
+# "current" means the session the cold-start plugin recorded for this project (load_project first); any other value
+# is returned as given.
+wake_session() {
+  local session="$1" file="$RUNS/session.id"
+  if [ "$session" = current ]; then
+    [ -s "$file" ] || die "no recorded session id for $SLUG; start the session with ws oc $SLUG"
+    session=$(head -n 1 "$file")
+  fi
+  printf '%s\n' "$session"
+}
+# The server a wake goes to when no --url is given: WS_WAKE_URL when set, else the port ws oc recorded, else 4096.
+wake_url() {
+  local port=""
+  if [ -n "${WS_WAKE_URL:-}" ]; then printf '%s\n' "$WS_WAKE_URL"; return; fi
+  [ -f "$RUNS/oc.port" ] && port=$(head -n 1 "$RUNS/oc.port")
+  if [ -n "$port" ]; then
+    [[ $port =~ ^[0-9]+$ ]] || die "runs/$SLUG/oc.port holds no port: $port"
+    printf 'http://127.0.0.1:%s\n' "$port"
+  else
+    printf '%s\n' "http://127.0.0.1:4096"
+  fi
+}
 # Pathspecs exempt from the attribution check: intended credits, not attribution.
 attribution_exempt() {
   printf '%s\n' ':!LICENSE*' ':!**/LICENSE*' ':!package.json' ':!**/package.json' ':!package-lock.json' ':!**/package-lock.json' ':!**/THIRD_PARTY_LICENSES*'
@@ -511,6 +619,7 @@ worktree_dir() { worktree_of "$PROJECT_PATH" "$1"; }
 # REPLAY_REASON (empty on success) and REPLAY_EVIDENCE_COUNT. <label> names the run in the commit message.
 replay_worktree() { # <repo> <base> <wt> <branch> <patch> <evidence-dir> <log> <label>
   local repo="$1" base="$2" wt="$3" br="$4" patch="$5" evdir="$6" log="$7" label="$8"
+  local replay_date="2000-01-01T00:00:00 +0000"
   REPLAY_REASON="" REPLAY_EVIDENCE_COUNT=0
   git -C "$repo" worktree remove --force "$wt" 2>/dev/null
   git -C "$repo" branch -q -D "$br" 2>/dev/null
@@ -520,8 +629,11 @@ replay_worktree() { # <repo> <base> <wt> <branch> <patch> <evidence-dir> <log> <
     REPLAY_REASON="cannot check base $base out in $wt"
   elif ! git -C "$wt" apply --index "$patch" >> "$log" 2>&1; then REPLAY_REASON="replay.patch does not apply"
   elif git -C "$wt" diff --cached --quiet; then REPLAY_REASON="replay.patch applies but stages no change"
-  # --no-verify keeps a project hook from rewriting the tree: the review must see exactly the saved patch.
-  elif ! git -C "$wt" -c user.name=bench -c user.email=bench@invalid commit -q --no-verify -m "bench: replay $label from its saved patch" >> "$log" 2>&1; then
+  # A fixed commit date makes the replay reproducible: the reviewer prompt names the replay commit, so a wall-clock
+  # date would make the same base, patch and label a cache miss on every run. --no-verify keeps a project hook from
+  # rewriting the tree: the review must see exactly the saved patch.
+  elif ! GIT_AUTHOR_DATE="$replay_date" GIT_COMMITTER_DATE="$replay_date" \
+    git -C "$wt" -c user.name=bench -c user.email=bench@invalid commit -q --no-verify -m "bench: replay $label from its saved patch" >> "$log" 2>&1; then
     REPLAY_REASON="cannot commit the applied patch"
   fi
   if [ -n "$REPLAY_REASON" ]; then

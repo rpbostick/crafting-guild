@@ -12,6 +12,12 @@ You turn a goal into a plan of independent, worktree-sized steps, each with a do
 
 - Research before building: before writing steps that build something, search for existing open-source programs and libraries that already do it, or parts of it. Scale the search with the build: a few minutes for a small change; for a new tool or a substantial module, a research spike step first, comparing the candidates (fit, licence, maintenance, size). Every build task carries a `## Prior art` section: what to reuse (with its licence and how it is loaded), what was considered and why not, or that nothing fits. A task without it gets a warning at dispatch.
 
+## Done-when
+- An item must be satisfiable as written. Never ask for the project's full test command; the merge gate runs it. Name the test files the change covers.
+- When an item says a test failed before the change, name the cases that failed and say which cases are guards that already passed, so the builder does not claim a false before.
+- An evidence path names a file; a line or a line range may follow it, but the file must exist at the branch.
+- One item per line, each something a reviewer can check from the branch. "Works" or "correct" alone is not an item.
+
 ## Task template
 A step marked `Track: light` is small and low-risk; a visible change also gets `UI: yes`. A task file in this shape:
 ```

@@ -215,3 +215,23 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f "$log/opencode.args" ] && break; sleep 1;
 grep -q 'look at the chain' "$log/opencode.args" 2>/dev/null && grep -q 'status: stopped 12:00 step: reviewed; gated' "$log/opencode.args" \
   || fail "the chain wake: $(cat "$log/opencode.args" 2>/dev/null)"
 echo "ws wake --when-chain-stops waits for the chain and carries its status ok"
+
+# current: the session id the cold-start plugin recorded and the port ws oc recorded, so the session needs no flags.
+rm -f "$runs/session.id" "$runs/oc.port" "$log/opencode.args"
+out=$(ws wake current "no id yet" 2>&1) && fail "a wake to current passed with no recorded id"
+grep -q "no recorded session id for $slug; start the session with ws oc $slug" <<< "$out" || fail "the missing-id message: $out"
+out=$(ws bg run nocur --wake current -- true 2>&1) && fail "ws bg run --wake current passed with no recorded id"
+grep -q "no recorded session id for $slug" <<< "$out" || fail "the bg missing-id message: $out"
+echo "ses_cur123" > "$runs/session.id"; echo 47123 > "$runs/oc.port"
+out=$(WS_WAKE_URL='' ws wake --session current "to the recorded port" 2>&1) || fail "ws wake --session current: $out"
+expected=$(printf '%s\n' run --attach http://127.0.0.1:47123 --session ses_cur123 --format json -- "to the recorded port")
+[ "$(cat "$log/opencode.args" 2>/dev/null)" = "$expected" ] || fail "current delivery: $(cat "$log/opencode.args" 2>/dev/null)"
+out=$(ws wake current "set url wins" 2>&1) || fail "ws wake current with WS_WAKE_URL: $out"
+grep -qx 'http://127.0.0.1:1' "$log/opencode.args" || fail "a set WS_WAKE_URL lost to the recorded port: $(cat "$log/opencode.args")"
+rm -f "$log/opencode.args"
+out=$(WS_WAKE_URL='' ws bg run curbg --wake current -- true 2>&1) || fail "ws bg run --wake current: $out"
+ws bg wait curbg --timeout 20 >/dev/null 2>&1 || fail "bg curbg did not finish"
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f "$log/opencode.args" ] && break; sleep 1; done
+grep -qx 'ses_cur123' "$log/opencode.args" 2>/dev/null && grep -qx 'http://127.0.0.1:47123' "$log/opencode.args" \
+  || fail "bg --wake current: $(cat "$log/opencode.args" 2>/dev/null)"
+echo "ws wake current and ws bg run --wake current use the recorded id and port, and WS_WAKE_URL wins ok"

@@ -85,6 +85,15 @@ if [ -z "$tmo" ]; then if grep -qi 'track: *light' "$task"; then tmo="$WS_LIGHT_
 case "$tmo" in *[!0-9]*) ;; *) tmo="${tmo}m" ;; esac
 load_project "$slug"
 [ -z "$(git -C "$PROJECT_PATH" rev-parse --verify "$PROJECT_BRANCH" 2>/dev/null)" ] && die "no branch $PROJECT_BRANCH in $PROJECT_PATH"
+# Claude builders share ws claude's daily ledger, so the cap covers both. Refuse before a worktree is made; an
+# OpenCode builder spends no Claude money and writes no row.
+if [ "$agent" = claude ] && ! $dry; then
+  claude_day_cap_setting "${WS_CLAUDE_DAY_CAP:-}"
+  spent_today=$(claude_spend_today)
+  if [ -n "${WS_CLAUDE_DAY_CAP:-}" ] && LC_ALL=C awk -v s="$spent_today" -v b="$budget" -v c="$WS_CLAUDE_DAY_CAP" 'BEGIN { exit !(s + b > c) }'; then
+    die "Claude spend today \$$spent_today plus budget \$$budget would pass the \$$WS_CLAUDE_DAY_CAP day cap; see ws claude --spent"
+  fi
+fi
 start_point="$PROJECT_BRANCH"
 if [ -n "$from" ]; then start_point=$(git -C "$PROJECT_PATH" rev-parse --verify -q "$from^{commit}") || die "no commit $from in $PROJECT_PATH"; fi
 sheet="$WS/agents/builder.md"
@@ -192,10 +201,19 @@ TOOLS=(Read Grep Glob "Edit(./**)"
   "Bash(git restore *)" "Bash(git clean -f -- *)" "Bash(git ls-tree*)" "Bash(git check-ignore*)" "Bash(stat *)" "Bash(sha256sum *)" "Bash(file *)"
   "Bash(git rm *)" "Bash(git mv *)" "Bash(ls *)" "Bash(cat *)" "Bash(grep *)" "Bash(wc *)" "Bash(head *)" "Bash(tail *)"
   "Bash(mkdir *)" "Bash(cp *)" "Bash(chmod *)" "Bash(expr *)" "Bash(date *)" "Bash(diff *)" "Bash(bash -n *)" "Bash(git grep *)" "Bash(pwd)" "Bash(find *)" "Bash(sed *)" "Bash(which *)"
+  # Read-only probes builders still lost turns to: sort and test, the shell's true, a printed sqlite version, and
+  # the branch listing narrowed by --contains. test, true and the version and branch listings write nothing;
+  # sort writes a file with -o/--output and runs a program with --compress-program, so those are denied below.
+  "Bash(sort *)" "Bash(sort)" "Bash(test *)" "Bash(true)" "Bash(sqlite3 --version)"
+  "Bash(git branch --contains *)" "Bash(git branch -a --contains *)"
   # Read-only probes the audit found builders denied: command lookup, printed versions, jq, echo and a syntax
   # compile. The versions are listed, not `* --version`: that leading wildcard also runs a script ending in it.
   "Bash(command -v *)" "Bash(jq *)" "Bash(echo *)" "Bash(python3 -m py_compile *)"
-  "Bash(bash --version)" "Bash(opencode --version)" "Bash(node --version)" "Bash(python3 --version)" "Bash(npm --version)")
+  "Bash(bash --version)" "Bash(opencode --version)" "Bash(node --version)" "Bash(python3 --version)" "Bash(npm --version)"
+  # Read-only probes the denied-calls grouping still found: bare `env`, printenv, du and Firefox's version.
+  # Deliberate: the grants name the bare command or the exact option, so `env <command>` and `firefox <url>`
+  # stay outside them and a broad --allow cannot turn these into a way to run another command.
+  "Bash(env)" "Bash(printenv *)" "Bash(du *)" "Bash(firefox --version)")
 [ -z "$from" ] && TOOLS+=("Bash(git merge $PROJECT_BRANCH)" "Bash(git merge $PROJECT_BRANCH --no-edit)")
 [ -n "$TEST_CMD" ] && TOOLS+=("Bash($TEST_CMD)" "Bash($TEST_CMD *)")
 # Per-project extras from projects/<slug>.conf (EXTRA_TOOLS), then this dispatch's --allow flags.
@@ -245,6 +263,14 @@ fi
 DENY=("Bash(git push *)" "Bash(git -c *)" "Bash(git config *)" "Bash(git * --output*)" "Bash(git reset --hard *)" "Bash(git rebase *)"
   "Bash(git worktree add *)" "Bash(git worktree remove *)" "Bash(git worktree move *)" "Bash(git worktree prune*)" "Bash(git worktree repair*)" "Bash(git worktree lock *)" "Bash(git worktree unlock *)"
   "Bash(sed -i *)" "Bash(find * -delete*)" "Bash(find * -exec*)" "Bash(find * -execdir*)"
+  "Bash(find * -ok*)" "Bash(find * -okdir*)" "Bash(find * -fprint*)" "Bash(find * -fls*)"
+  # sort writes a file with -o/--output and runs a program with --compress-program. getopt_long accepts any
+  # unambiguous prefix of a long option, so --o, --co and --com also select them, and all are denied. A bundled
+  # short option carrying o (`sort -uo out`, `-no`, `-ro`) is not caught: a glob cannot say "an option word
+  # containing o", and the patterns that could (`sort -*o*`, `sort * -*o*`) also deny read-only forms such as
+  # `--numeric-sort` and `-k2,2o`. This is the same limit as the interpreter bundles noted below; every accepted
+  # spelling of sort's long writing and program options is caught.
+  "Bash(sort -o*)" "Bash(sort * -o*)" "Bash(sort *--output*)" "Bash(sort *--o*)" "Bash(sort *--com*)" "Bash(sort *--co*)"
   "Bash(bash -c*)" "Bash(sh -c*)" "Bash(dash -c*)" "Bash(zsh -c*)"
   "Bash(bash -*c *)" "Bash(sh -*c *)" "Bash(dash -*c *)" "Bash(zsh -*c *)"
   "Bash(*/bash -c*)" "Bash(*/sh -c*)" "Bash(*/dash -c*)" "Bash(*/zsh -c*)"
@@ -610,6 +636,10 @@ fi
   cd "$wt"
   WS_RUN_GRANTS="$RUN_GRANTS" WS_RUN_DENY="$RUN_DENY" "${cap[@]}" timeout --kill-after=30s "$tmo" "${cmd[@]}" < /dev/null > "$RUNS/$name.jsonl" 2>&1
   rc=$?
+  # One ledger row per Claude run that reached the client; a dispatch refused before it started writes none.
+  if [ "$agent" = claude ] && [ "$rc" -ne 127 ]; then
+    claude_ledger_append "$SLUG" "$name" builder "$budget" "$(result_json "$RUNS/$name.jsonl")"
+  fi
   "$WS/scripts/check-result.sh" --project "$SLUG" --since "$start_sha" "$name" > "$RUNS/$name.result.txt" 2>&1 || true
   [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] && sed -i "1i TIMEOUT after $tmo (exit $rc); partial work may be in $wt" "$RUNS/$name.result.txt"
   rm -f "$RUNS/$name.pid"

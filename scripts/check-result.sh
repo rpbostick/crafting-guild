@@ -93,8 +93,11 @@ if [ "$(printf '%s' "$so" | jq 'has("done_when")')" = true ]; then
     # First word of the evidence, without the punctuation of the sentence it opens (".ws-evidence/a.log: 192");
     # a bare file name ("a.log") is looked up in .ws-evidence/ too.
     path=${ev%% *}; path=${path//\`/}; while [[ "$path" == *[,:\;.\)] ]]; do path=${path%?}; done
-    # A cited line ("reports/a.md:345" or "a.md:12-20") names the file before the colon.
-    [[ "$path" =~ ^(.+):[0-9]+(-[0-9]+)?$ ]] && path=${BASH_REMATCH[1]}
+    # A cited line ("reports/a.md:345", "a.md:12-20", "a.md:11,13,16") names the file before the colon,
+    # unless the word already names a file: a real file called "x:1" stays itself.
+    if [ ! -e "$wt/$path" ] && [ ! -e "$wt/.ws-evidence/$path" ]; then
+      [[ "$path" =~ ^(.+):[0-9]+(-[0-9]+)?(,[0-9]+(-[0-9]+)?)*$ ]] && path=${BASH_REMATCH[1]}
+    fi
     if [[ "$path" == */* || "$path" == *.log || "$path" == *.png || "$path" == *.txt ]] && [[ "$path" != http* ]] && [ ! -e "$wt/$path" ] && [ ! -e "$wt/.ws-evidence/$path" ] && ! git -C "$wt" cat-file -e "${path}^{commit}" 2>/dev/null; then
       flag "$line: evidence $path is not in the worktree"
     else ok "$line"; fi

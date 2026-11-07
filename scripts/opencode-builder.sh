@@ -78,9 +78,11 @@ run() {
 
 opencode_prompt_args "$pf"
 run "${OPENCODE_PROMPT_ARGS[@]}"
-# A reply that is not a valid result gets one continue of the same session, unless the budget is spent.
+# A reply that is not a valid result gets one continue of the same session, unless the budget is spent. The marker
+# beside the log records that turn and its errors, so a repair-rate measurement counts repairs instead of guessing.
 if ! over && ! errs=$(python3 -I "$helper" check "$log" "$schema"); then
   if sid=$(python3 -I "$helper" session "$log"); then
+    printf '%s\t%s\n' "$(date '+%F %T %Z')" "${errs//$'\n'/; }" >> "${log}.repair"
     run --session "$sid" "Your last reply is not a valid JSON result. Errors:
 $errs
 Reply with only the JSON result."

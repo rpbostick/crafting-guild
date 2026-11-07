@@ -119,6 +119,22 @@ grep -qx -- 'ses_bgtest' "$log/opencode.args" || fail "wake session: $(cat "$log
 grep -qF "bg waker exited 7; log runs/$slug/bg/waker.log" "$log/opencode.args" || fail "wake message: $(cat "$log/opencode.args")"
 case_end "ws bg --wake sends the exit code and log path"
 
+# A relative command path is resolved against the caller's directory, not runs/<slug>/ where the command runs: the
+# orchestrator brief's `-- bin/ws wait <name>` from the workspace root exits 0 and wakes. An absolute path is the control.
+for form in relative absolute; do
+  case_start
+  rm -f "$log/opencode.args"
+  if [ "$form" = relative ]; then cmd=bin/ws; else cmd="$WS/bin/ws"; fi
+  out=$(cd "$WS" && ws bg run "path-$form" --wake ses_bgtest -- "$cmd" version 2>&1)
+  ws bg wait "path-$form" --timeout 20 >/dev/null 2>&1
+  x=$?
+  [ "$x" = 0 ] || fail "$form bin/ws version from the workspace root exited $x: $(cat "$runs/bg/path-$form.log" 2>/dev/null)"
+  grep -q '^Crafting Guild v' "$runs/bg/path-$form.log" 2>/dev/null || fail "$form log: $(cat "$runs/bg/path-$form.log" 2>/dev/null)"
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$log/opencode.args" ] && break; sleep 0.5; done
+  grep -qF "bg path-$form exited 0;" "$log/opencode.args" 2>/dev/null || fail "$form wake: $(cat "$log/opencode.args" 2>/dev/null)"
+  case_end "ws bg run -- bin/ws as a $form path from the workspace root exits 0 and wakes"
+done
+
 # A name that would escape the bg directory is refused.
 case_start
 out=$(ws bg run ../escape -- sleep 1 2>&1) && fail "accepted a name with a path"

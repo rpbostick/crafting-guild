@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const BRIEF_TIMEOUT_MS = 20_000;
@@ -149,6 +149,24 @@ export const ColdStartPlugin = async (input = {}, options = {}) => {
     }
   };
 
+  // `ws wake current` and `ws bg run --wake current` read runs/<slug>/session.id, since a session cannot otherwise
+  // name its own id. A missing project or runs directory skips it: the session must start whatever this does.
+  const recorded = new Set();
+  const recordSession = async (sessionID) => {
+    if (recorded.has(sessionID) || sessionID === "unknown") return;
+    recorded.add(sessionID);
+    const slug = process.env.WS_PROJECT;
+    if (!slug) return;
+    const dir = join(cwd, "runs", slug);
+    const temp = join(dir, `.session.id.${process.pid}`);
+    try {
+      await writeFile(temp, `${sessionID}\n`);
+      await rename(temp, join(dir, "session.id"));
+    } catch {
+      await rm(temp, { force: true }).catch(() => {});
+    }
+  };
+
   const contextFor = (sessionID) => {
     let context = contexts.get(sessionID);
     if (context === undefined) {
@@ -163,6 +181,7 @@ export const ColdStartPlugin = async (input = {}, options = {}) => {
     // appended on each request, because each request gets a fresh system prompt.
     "experimental.chat.system.transform": async (input, output) => {
       const sessionID = input?.sessionID || "unknown";
+      await recordSession(sessionID);
       try {
         if (Array.isArray(output?.system)) output.system.push(...(await contextFor(sessionID)));
       } catch (error) {

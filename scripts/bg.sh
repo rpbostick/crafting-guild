@@ -2,17 +2,18 @@
 # Background commands for an orchestrator whose shell tool has no background parameter: run one detached, then list,
 # read its log, wait for its exit code or stop its process group. A --watch pattern follows the log and reports the
 # first line that matches it, once, through the wake path or a matches file.
-# Usage: bg.sh [--project slug] run <name> [--wake <session>] [--watch <regex>]... -- <command...>
-#        bg.sh [--project slug] watch <name> <regex> [--wake <session>]
+# Usage: bg.sh [--project slug] run <name> [--wake <session|current>] [--watch <regex>]... -- <command...>
+#        bg.sh [--project slug] watch <name> <regex> [--wake <session|current>]
 #        bg.sh [--project slug] list | log <name> [--tail N] | wait <name> [--timeout S] | stop <name>
 # State: runs/<slug>/bg/<name>.{pid,log,exit,matches}; a watch's pattern and match in runs/<slug>/bg/<name>.watch/.
-# The command runs with runs/<slug>/ as its working directory.
+# The command runs with runs/<slug>/ as its working directory; a relative command path is resolved against the
+# caller's directory before that.
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 slug=""; if [ "${1:-}" = --project ]; then slug="${2:?--project needs a slug}"; shift 2; fi
 load_project "$slug"
 BG="$RUNS/bg"
-usage() { die "usage: ws bg run <name> [--wake <session>] [--watch <regex>]... -- <command...> | ws bg watch <name> <regex> [--wake <session>] | ws bg list | ws bg log <name> [--tail N] | ws bg wait <name> [--timeout S] | ws bg stop <name>"; }
+usage() { die "usage: ws bg run <name> [--wake <session|current>] [--watch <regex>]... -- <command...> | ws bg watch <name> <regex> [--wake <session|current>] | ws bg list | ws bg log <name> [--tail N] | ws bg wait <name> [--timeout S] | ws bg stop <name>"; }
 name_ok() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; }
 started_at() { stat -c %y "$1" 2>/dev/null | cut -c1-16; }
 number() { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
@@ -21,6 +22,8 @@ check_regex() { # <pattern>: a pattern grep -E refuses is an error, not a watche
   printf '\n' | grep -E -- "$1" >/dev/null 2>&1 || rc=$?
   [ "$rc" -ne 2 ] || die "invalid --watch pattern (grep -E): $1"
 }
+# --wake current is resolved here, when the command starts, so the wake reaches the session that started it.
+resolve_wake() { if [ -n "$1" ]; then wake_session "$1"; fi; }
 check_session() { [ -z "$1" ] || [[ $1 =~ ^ses_[A-Za-z0-9]+$ ]] || die "not a session id: $1 (OpenCode's look like ses_...)"; }
 watch_id() { printf '%s-%s' "$(date +%s%N)" "$$"; }
 one_line() { printf '%s' "$1" | tr '\n\r\t' '   '; }
@@ -39,7 +42,11 @@ run_bg() {
     esac
   done
   [ $# -gt 0 ] || die "no command after --"
+  # The command runs in runs/<slug>/, so a relative path in its first word (bin/ws) is resolved against the caller's
+  # directory first; a bare word is still looked up on PATH.
+  case "$1" in /*) ;; */*) set -- "$PWD/$1" "${@:2}" ;; esac
   name_ok "$name" || die "invalid bg name '$name' (letters, digits, dot, underscore and dash only)"
+  wake=$(resolve_wake "$wake") || exit 1
   check_session "$wake"
   for pat in ${watches[@]+"${watches[@]}"}; do check_regex "$pat"; done
   mkdir -p "$BG"
@@ -132,6 +139,7 @@ watch_add() {
   done
   [ -n "$name" ] && [ -n "$regex" ] || usage
   name_ok "$name" || die "invalid bg name '$name' (letters, digits, dot, underscore and dash only)"
+  wake=$(resolve_wake "$wake") || exit 1
   check_session "$wake"
   check_regex "$regex"
   [ -f "$BG/$name.pid" ] || die "no background command $name"

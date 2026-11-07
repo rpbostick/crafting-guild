@@ -2,12 +2,15 @@
 # One read-only OpenCode research job; scripts/ask.sh starts it detached through ws bg.
 # Usage: ask-run.sh --project <slug> --name <name> --model <provider/model> --budget <usd> --dir <path>
 #                   --config <opencode.json> --log <raw.jsonl> --prompt <prompt-file> --out <answer.md>
-#                   [--wake <session>]
+#                   [--session <id>] [--append] [--wake <session>]
 # Writes the agent's last text to <answer.md> under a header line (model, cost, minutes, exit), and with --wake
-# sends "ask <name> done: <answer.md>" through ws wake.
+# sends "ask <name> done: <answer.md>" through ws wake. --session resumes that OpenCode session; --append adds the
+# run under a "## Continue <local time>" heading instead of truncating the answer file. A first run saves the
+# session id in runs/<slug>/ask/<name>.session, which --session then reads.
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
-slug="" name="" model="" budget="" dir="" config="" log="" prompt="" out="" wake=""
+slug="" name="" model="" budget="" dir="" config="" log="" prompt="" out="" wake="" session=""
+append=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --project) slug="$2"; shift 2 ;;
@@ -19,6 +22,8 @@ while [ $# -gt 0 ]; do
     --log) log="$2"; shift 2 ;;
     --prompt) prompt="$2"; shift 2 ;;
     --out) out="$2"; shift 2 ;;
+    --session) session="$2"; shift 2 ;;
+    --append) append=true; shift ;;
     --wake) wake="$2"; shift 2 ;;
     -*) die "ask-run: unknown flag $1" ;;
     *) die "ask-run: unexpected argument $1" ;;
@@ -29,9 +34,28 @@ for v in name model budget dir config log prompt out; do [ -n "${!v}" ] || die "
 [ -d "$dir" ] || die "ask-run: no directory $dir"
 [ -f "$config" ] || die "ask-run: no OpenCode config $config"
 [ -f "$prompt" ] || die "ask-run: no prompt file $prompt"
+[ -z "$session" ] || [[ $session =~ ^ses_[A-Za-z0-9]+$ ]] || die "ask-run: --session is not a session id: $session"
 mkdir -p "$(dirname "$out")" "$(dirname "$log")"
 helper="$WS/scripts/opencode_run.py"
 schema="$WS/schema/result.json"
+
+# The answer file: a first run starts it with the header and text; --append adds the run under a heading, so the
+# earlier answer stays. An append with no file to append to would drop the context the run resumes.
+write_out() { # <header> <text>
+  if $append; then
+    [ -f "$out" ] || die "ask-run: --append needs an existing answer file $out"
+    {
+      printf '\n## Continue %s\n\n' "$(date '+%Y-%m-%d %H:%M')"
+      printf '%s\n\n' "$1"
+      [ -z "$2" ] || printf '%s\n' "$2"
+    } >> "$out" || die "ask-run: cannot write $out"
+  else
+    {
+      printf '%s\n\n' "$1"
+      [ -z "$2" ] || printf '%s\n' "$2"
+    } > "$out" || die "ask-run: cannot write $out"
+  fi
+}
 
 # Privacy guard, as for a builder and a review: the model's display name as OpenCode's Go page writes it, then the
 # page's verdict on it. A model not listed cannot be checked, so it is refused rather than run.
@@ -39,12 +63,12 @@ display=""
 for e in "${WS_OPENCODE_MODEL_NAMES[@]}"; do [ "${e%%=*}" = "$model" ] && display="${e#*=}"; done
 if [ -z "$display" ]; then
   reason="no display name for $model in WS_OPENCODE_MODEL_NAMES (config.sh), so zdr-check cannot read its privacy row"
-  printf 'model: %s  cost: $0  minutes: 0  exit: 1 (refused)\n\nrefused: %s\n' "$model" "$reason" > "$out"
+  write_out "model: $model  cost: \$0  minutes: 0  exit: 1 (refused)" "refused: $reason"
   echo "ask-run: refused: $reason"
   exit 1
 fi
 if ! zdr=$("$WS/scripts/zdr-check.sh" ${WS_ZDR_PAGE:+--page "$WS_ZDR_PAGE"} "$display" 2>&1); then
-  printf 'model: %s  cost: $0  minutes: 0  exit: 1 (refused)\n\nrefused: %s\n' "$model" "$zdr" > "$out"
+  write_out "model: $model  cost: \$0  minutes: 0  exit: 1 (refused)" "refused: $zdr"
   echo "ask-run: refused: $zdr"
   exit 1
 fi
@@ -65,9 +89,11 @@ pid=""
 trap '[ -n "$pid" ] && kill -- "-$pid" 2>/dev/null; exit 143' TERM INT
 : > "$log"
 opencode_prompt_args "$prompt"
+run_args=(run --pure --format json --model "$model")
+[ -z "$session" ] || run_args+=(--session "$session")
+run_args+=(--title "ws:$SLUG:ask:$name")
 # One OpenCode call with the budget watched across the whole log; stdin closed, or `opencode run` waits on it.
-setsid opencode run --pure --format json --model "$model" --title "ws:$SLUG:ask:$name" \
-  "${OPENCODE_PROMPT_ARGS[@]}" < /dev/null > "$log" 2>&1 &
+setsid opencode "${run_args[@]}" "${OPENCODE_PROMPT_ARGS[@]}" < /dev/null > "$log" 2>&1 &
 pid=$!
 python3 -I "$helper" watch "$log" "$budget" "$pid" & watcher=$!
 wait "$pid"
@@ -85,10 +111,16 @@ python3 -I "$helper" over "$log" "$budget" && over=true
 minutes=$(( duration_ms / 60000 ))
 header="model: $model  cost: \$$cost  minutes: $minutes  exit: $code"
 $over && header="$header (over budget \$$budget)"
-{
-  printf '%s\n\n' "$header"
-  [ -z "$text" ] || printf '%s\n' "$text"
-} > "$out" || die "ask-run: cannot write $out"
+write_out "$header" "$text"
+# A first run's log names the session a --continue run resumes. A refused run stops before OpenCode, so it has none.
+if [ -z "$session" ]; then
+  sid=$(python3 -I "$helper" session "$log" 2>/dev/null || true)
+  if [ -n "$sid" ]; then
+    printf '%s\n' "$sid" > "$(dirname "$out")/$name.session" || die "ask-run: cannot write $(dirname "$out")/$name.session"
+  elif [ "$code" = 0 ]; then
+    note "ask-run: the run's log carries no session id; --continue will ask for a first run"
+  fi
+fi
 if [ -n "$wake" ]; then
   # A failed wake is recorded by wake.sh in runs/<slug>/wake.failed; it must not change the saved answer.
   "$WS/bin/ws" --project "$SLUG" wake "$wake" "ask $name done: runs/$SLUG/ask/$name.md" >/dev/null 2>&1 || true

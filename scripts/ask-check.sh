@@ -55,7 +55,8 @@ if [ "$STANDIN_ASK_MODE" = over ]; then
   sleep 30
   exit 0
 fi
-jq -c --arg t "$text" 'if .type == "text" then .part.text = $t else . end' "$STANDIN_SAMPLE"
+jq -c --arg t "$text" --argjson c "${STANDIN_ASK_COST:-null}" \
+  'if .type == "text" then .part.text = $t elif (.type == "step_finish" and $c != null) then .part.cost = $c else . end' "$STANDIN_SAMPLE"
 EOF
 chmod +x "$bin/systemd-run" "$bin/opencode"
 page="$repo/go.html"
@@ -79,6 +80,8 @@ grep -qE '^model: opencode-go/deepseek-v4\.1-flash  cost: \$[0-9]+\.[0-9]+  minu
 grep -qF 'THE STAND-IN ANSWER: scripts/ask.sh:1 holds the entry point.' "$ans" || fail "answer text: $(cat "$ans" 2>/dev/null)"
 grep -q 'at most 300 words' "$log/opencode.args" || fail "the prompt does not ask for a conclusion of at most 300 words"
 grep -q 'What does scripts/ask.sh do?' "$log/opencode.args" || fail "the prompt does not carry the question"
+[ "$(cat "$runs/ask/q1.session" 2>/dev/null)" = ses_e99d730a3ffe8peuDXjq1sUi6W ] \
+  || fail "the first run saved no session id: $(cat "$runs/ask/q1.session" 2>/dev/null)"
 out=$("$WS/bin/ws" --project "$slug" ask list 2>&1)
 grep -qE '^q1  done  cost \$[0-9]+\.[0-9]+  runs/.*/ask/q1\.md$' <<< "$out" || fail "ask list: ${out:-}"
 showx=0
@@ -86,7 +89,43 @@ out=$("$WS/bin/ws" --project "$slug" ask show q1 2>&1) || showx=$?
 [ "$showx" = 0 ] || fail "ask show exited $showx: ${out:-}"
 grep -qF 'THE STAND-IN ANSWER: scripts/ask.sh:1 holds the entry point.' <<< "$out" || fail "ask show: ${out:-}"
 ! grep -q 'usage:' <<< "$out" || fail "ask show printed usage: ${out:-}"
-case_end "ws ask writes the stand-in's answer and header, and list/show read it"
+case_end "ws ask writes the stand-in's answer and header, list/show read it, and the first run saves the session"
+
+# --continue resumes that session and appends its answer under a Continue heading.
+case_start
+rm -f "$log/config.json" "$log/opencode.args"
+out=$(STANDIN_ASK_MODE=normal STANDIN_ASK_COST=0.2 "$WS/bin/ws" --project "$slug" ask q1 --continue "Which line is the entry point?" 2>&1)
+"$WS/bin/ws" --project "$slug" bg wait ask-q1 --timeout 60 >/dev/null 2>&1 || true
+ans="$runs/ask/q1.md"
+grep -q '^## Continue ' "$ans" || fail "no Continue heading: $(cat "$ans" 2>/dev/null)"
+grep -q 'Answer this follow-up in the context of your earlier answer' "$log/opencode.args" \
+  || fail "the continue prompt does not name the earlier answer: $(cat "$log/opencode.args" 2>/dev/null)"
+grep -qx -- '--session' "$log/opencode.args" || fail "the continue run passed no --session: $(cat "$log/opencode.args" 2>/dev/null)"
+grep -qx 'ses_e99d730a3ffe8peuDXjq1sUi6W' "$log/opencode.args" \
+  || fail "the continue run did not pass the saved session id: $(cat "$log/opencode.args" 2>/dev/null)"
+grep -q 'Which line is the entry point?' "$log/opencode.args" || fail "the continue prompt does not carry the question"
+out=$("$WS/bin/ws" --project "$slug" ask list 2>&1)
+grep -qE '^q1  done  cost \$0\.4  runs/.*/ask/q1\.md$' <<< "$out" || fail "ask list after continue: ${out:-}"
+showx=0
+showout=$("$WS/bin/ws" --project "$slug" ask show q1 2>&1) || showx=$?
+[ "$showx" = 0 ] || fail "ask show after continue exited $showx: ${showout:-}"
+grep -q '^## Continue ' <<< "$showout" || fail "ask show lost the continue section: ${showout:-}"
+[ "$(grep -cF 'THE STAND-IN ANSWER: scripts/ask.sh:1 holds the entry point.' <<< "$showout")" = 2 ] \
+  || fail "ask show did not print both answers: ${showout:-}"
+if [ -d "$WS/.ws-evidence" ]; then printf '%s\n' "$showout" > "$WS/.ws-evidence/ask-show.out" || true; fi
+case_end "--continue resumes the saved session, appends a Continue section, and list/show read it back"
+
+# --continue without a saved session fails with the first command to run and starts nothing.
+case_start
+rm -f "$log/opencode.args"
+sx=0
+out=$("$WS/bin/ws" --project "$slug" ask fresh --continue "A follow-up with no first run." 2>&1) || sx=$?
+[ "$sx" -ne 0 ] || fail "--continue without a session exited 0"
+grep -qF 'no session for fresh; run `ws ask fresh "<question>"` first' <<< "$out" \
+  || fail "no-session message: ${out:-}"
+[ ! -s "$log/opencode.args" ] || fail "a no-session --continue started opencode: $(cat "$log/opencode.args" 2>/dev/null)"
+[ ! -e "$runs/bg/ask-fresh.pid" ] || fail "a no-session --continue started a background job"
+case_end "--continue without a saved session exits non-zero with the message and starts nothing"
 
 # The config passed to the stand-in is the review's read-only one.
 case_start

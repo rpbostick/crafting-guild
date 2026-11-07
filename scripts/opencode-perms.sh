@@ -70,10 +70,13 @@ done
 
 if [ -f "$config" ]; then base=$(cat "$config") || die "cannot read $config"; else base='{}'; fi
 # An edit value that is a bare action becomes the catch-all of a rule object, so the deny can sit after it.
+# Deliberate: the task tool is denied. A subagent session passes through the same system-transform hook as the
+# orchestrator, so its id would overwrite runs/<slug>/session.id and `ws wake current` would reach the finished
+# child; `ws ask` does the subagent's research job instead.
 browser_mcp=$(browser_mcp_json) || die "could not build the browser MCP entry"
 out=$(printf '%s' "$base" | jq --argjson ext "$external" --argjson bash "$bash_rules" --argjson edit "$edit_rules" --argjson browser "$browser_mcp" '
   .mcp = ((.mcp // {}) + $browser)
-  | .permission = ((.permission // {}) + {external_directory: $ext, bash: $bash})
+  | .permission = ((.permission // {}) + {external_directory: $ext, bash: $bash, task: "deny"})
   | if $edit == {} then . else
       .permission.edit = ((.permission.edit // {} | if type == "string" then {"*": .} else . end) + $edit)
     end') \

@@ -39,8 +39,8 @@ current=$( . "$WS/scripts/lib.sh"; printf '%s' "$WS_BROWSER_MCP_VERSION" )
 # mismatch line is missing and when a matching pin is not silent.
 version_case() { # <pin> <warn|silent> <name>
   local pin="$1" mode="$2" name="$3" out rc=0 ok=1
-  jq -n --arg pin "$pin" '{mcp: {playwright: {type: "local", enabled: true, command: ["npx", "-y", $pin, "--headless"]}}}' \
-    > "$T/xdg/opencode/orchestrator.json"
+  jq -n --arg pin "$pin" '{mcp: {playwright: {type: "local", enabled: true, command: ["npx", "-y", $pin, "--headless"]}},
+    permission: {task: "deny"}}' > "$T/xdg/opencode/orchestrator.json"
   out=$(PATH="$T/bin:$PATH" XDG_CONFIG_HOME="$T/xdg" "$WS/scripts/doctor.sh" 2>&1) || rc=$?
   if ! grep -q -- '--- machine ---' <<< "$out"; then bad "$name" "doctor did not reach the machine checks (exit $rc)"; return; fi
   case "$mode" in
@@ -54,6 +54,27 @@ version_case() { # <pin> <warn|silent> <name>
 }
 version_case "@playwright/mcp@0.0.0-selftest" warn "a stale browser MCP pin warns"
 version_case "@playwright/mcp@$current" silent "a matching browser MCP pin is silent"
+
+# A config written before the task tool was denied keeps it open, because ws oc only regenerates a missing file.
+# doctor names it and ws opencode-perms writes the deny the launcher relies on.
+task_case() {
+  local out rc ok=1
+  jq -n '{permission: {task: "allow"}}' > "$T/xdg/opencode/orchestrator.json"
+  out=$(PATH="$T/bin:$PATH" XDG_CONFIG_HOME="$T/xdg" "$WS/scripts/doctor.sh" 2>&1) && rc=0 || rc=1
+  grep -qF 'orchestrator.json does not deny the task tool' <<< "$out" || ok=0
+  grep -qF 'fix: run ws opencode-perms' <<< "$out" || ok=0
+  if [ "$rc" != 1 ] || [ "$ok" != 1 ]; then
+    bad "orchestrator task guard" "exit $rc, wanted 1: $(printf '%s\n' "$out" | sed -n '1,40p')"; return
+  fi
+  XDG_CONFIG_HOME="$T/xdg" "$WS/bin/ws" opencode-perms >/dev/null 2>&1 \
+    || { bad "orchestrator task guard" "ws opencode-perms failed"; return; }
+  out=$(PATH="$T/bin:$PATH" XDG_CONFIG_HOME="$T/xdg" "$WS/scripts/doctor.sh" 2>&1) || true
+  if grep -qF 'orchestrator.json does not deny the task tool' <<< "$out"; then
+    bad "orchestrator task guard after ws opencode-perms" "$(printf '%s\n' "$out" | sed -n '1,40p')"; return
+  fi
+  echo "doctor requires the orchestrator config to deny the task tool ok"
+}
+task_case
 
 # The output folder belongs to one user: a shared /tmp path let one user's or session's page logs reach another.
 path_case() {

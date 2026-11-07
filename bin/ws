@@ -4,12 +4,13 @@ set -uo pipefail
 WS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 . "$WS/scripts/lib.sh"
 usage() {
-  cat <<USAGE
+  cat <<'USAGE'
 ws [--project <slug>] <command> ...   every command below takes the selected project (state/current) unless
                                        --project names another registered one
 ws <slug>                       open a Claude orchestrator session for a registered project
-ws oc <slug> [args]             open an OpenCode orchestrator session, pinned to the project (--print shows the
-                                command); the alias is ws opencode
+ws oc <slug> [args]             open an OpenCode orchestrator session, pinned to the project, listening on the
+                                first free port from WS_OC_PORT (recorded in runs/<slug>/oc.port; a --port given is
+                                kept); --print shows the command; the alias is ws opencode
 ws init <path> [--tests CMD] [--branch B] [--yes] [--dry-run] [--force]   register a project (and retire v1
                                 hooks if found); --dry-run shows the conf first, --force replaces an existing one after a backup
 ws list                         registered projects
@@ -31,10 +32,15 @@ ws tail <name>                  follow a run's log as readable lines
 ws runs [slug]                  runs and their results
 ws review [--agent claude|opencode] [flags] <name>   review the branch; prints the verdict and the SHA to merge
                                 --agent opencode runs the review on OpenCode (--model provider/model, WS_REVIEW_AGENT)
+                                auto routing uses whichever client is installed (the changed files decide when both
+                                are); an OpenCode-only install also sets WS_AGENT=opencode. Set WS_REVIEW_AGENT
+                                only to force a client
 ws review-compare [flags] <name>...   run an OpenCode review beside the Claude review on record and print verdicts,
                                 blocking counts and the findings OpenCode names within five lines
-ws review-compare --fix-first [--limit N] [name...]   use the commits Claude marked fix-first in the chain log and
-                                their automatic fix tasks; writes runs/<slug>/review-recall.tsv, keeps each review
+ws review-compare --fix-first [--dry-run] [--limit N] [name[@sha]...]   use the commits Claude marked fix-first in
+                                the chain log and their automatic fix tasks; name@sha keeps one review round,
+                                --dry-run prints the selected cases with no review; writes
+                                runs/<slug>/review-recall.tsv, keeps each review
 ws review-compare --bench <slug> [--arm L] [--limit N] [run...]   the same for fix-first bench runs, rebuilt from
                                 their base and replay.patch with their evidence restored
 ws review-shadow [--project slug|--all]   shadow reviews (WS_REVIEW_SHADOW=opencode): per project and in total, the
@@ -62,31 +68,32 @@ ws chain <queue-file>           run a queue of steps: dispatch, wait, review (on
                                 stops on a failure, a gate or a judgment call (run it under run_in_background)
 ws chain-wait                   wait on the project's running chain (from any session) and print where it stopped;
                                 exit 5 when a running/waiting status has no live chain (DEAD: re-run ws chain <queue>)
-ws wake <session> "<message>" [--at <time>|--when-chain-stops|--every <OnCalendar> [--until YYYY-MM-DD]] [--url <server>]
+ws wake <session|current> "<message>" [--at <time>|--when-chain-stops|--every <OnCalendar> [--until YYYY-MM-DD]] [--url <server>]
                                 send one message into an idle OpenCode session from a systemd timer: now, at a time,
                                 when the chain stops, or on a calendar spec repeating until a date (persistent unit
-                                files under WS_WAKE_UNIT_DIR); the session's client must listen on WS_WAKE_URL or
-                                --url (ws oc <slug> --port 4096); a server password comes from OPENCODE_SERVER_PASSWORD
+                                files under WS_WAKE_UNIT_DIR); current is the id in runs/<slug>/session.id; the
+                                server is --url, else WS_WAKE_URL, else the port ws oc recorded, else 4096; a server password comes from OPENCODE_SERVER_PASSWORD
                                 in the environment
 ws wake list | ws wake cancel <id> | ws wake failed [--clear]   pending wakes; a recurring one shows its spec,
                                 next run and end date; cancel disables its timer and deletes both unit files;
                                 undelivered ones stay in runs/<slug>/wake.failed, and cold start names them until cleared
-ws bg run <name> [--wake <session>] [--watch <regex>]... -- <command...>
+ws bg run <name> [--wake <session|current>] [--watch <regex>]... -- <command...>
                                 run a command detached in the project's runs directory, writing
                                 runs/<slug>/bg/<name>.{pid,log,exit}; returns at once; --wake sends "bg <name>
                                 exited <code>; log <path>" into that OpenCode session when it ends; each --watch
                                 reports the first log line matching its extended regex once, through --wake as
                                 "bg <name> matched '<regex>': <line>" or to runs/<slug>/bg/<name>.matches
-ws bg watch <name> <regex> [--wake <session>]   add a watch to a command already running
+ws bg watch <name> <regex> [--wake <session|current>]   add a watch to a command already running
 ws bg list | ws bg log <name> [--tail N] | ws bg wait <name> [--timeout S] | ws bg stop <name>
                                 background commands: what runs or its exit code and each watch pattern as pending
                                 or matched, its log, a repeatable wait that returns the command's exit code (its
                                 own timeout is 124, an ended command with no exit code recorded is 125), and a
                                 stop of the whole process group
-ws ask <name> "<question>" [--dir <path>] [--model <provider/model>] [--budget <usd>] [--wake <session>]
+ws ask <name> "<question>" [--continue] [--dir <path>] [--model <provider/model>] [--budget <usd>] [--wake <session>]
                                 one read-only OpenCode research job in the background: the review's read-only
                                 config, a conclusion of at most 300 words with file:line for every claim, written
-                                to runs/<slug>/ask/<name>.md with model, cost, minutes and exit; returns at once
+                                to runs/<slug>/ask/<name>.md with model, cost, minutes and exit; returns at once.
+                                --continue resumes that job's session and appends the follow-up's answer
 ws ask list | ws ask show <name>   what is running or done with its cost, and the saved answer
 ws web <name>                   the web sources a run asked for (builders have no web access) and what was done with each
 ws web <name> approve <n|all> [--url <url>]   fetch each approved URL (curl, http(s) only, at most WS_WEB_MAX_MB) into
@@ -119,8 +126,9 @@ ws release [--dry-run] [--notes T] [--no-asset]   publish main as a release of t
 ws site [--dry-run]             copy the project's SITE_SYNC files into its SITE_PROJECT, check they match,
                                 run the site's tests, commit, push, wait until live
 ws doctor [--parity]            check this machine and the selected project; --parity runs one structured-output probe per agent, and OpenCode's web fetch, web search, browser, skill list and skill call
-ws claude [--budget USD] [--schema file] [--dir path] [--allow tool] [--raw] <prompt-file|->
-                                run one Claude Code job from this session (read-only by default; no worktree)
+ws claude [--budget USD] [--schema file] [--dir path] [--allow tool] [--raw] [--spent] <prompt-file|->
+                                run one Claude Code job from this session (read-only by default; no worktree);
+                                --spent prints today's total, the cap and the room left, and starts no job
 ws email-audit [--project slug | --repo path]... [--all] [--range R]   find personal addresses in git identity,
                                 commit metadata, reflogs and tracked files; exits 1 on a finding
 ws opencode-perms [--dry-run] [--config <file>]   write the orchestrator's OpenCode config (orchestrator.json,
@@ -272,13 +280,31 @@ case "$cmd" in
     load_project "$slug"
     cfg="$HOME/.config/opencode/orchestrator.json"
     [ -f "$cfg" ] || "$WS/scripts/opencode-perms.sh" >/dev/null
-    print=false; args=()
-    for a in "$@"; do if [ "$a" = --print ]; then print=true; else args+=("$a"); fi; done
+    print=false; args=(); port=""; listen_given=false; prev=""
+    for a in "$@"; do
+      if [ "$a" = --print ]; then print=true; continue; fi
+      args+=("$a")
+      case "$a" in --port=*) port="${a#--port=}"; listen_given=true ;; --hostname|--hostname=*) listen_given=true ;; esac
+      [ "$prev" != --port ] || { port="$a"; listen_given=true; }
+      prev="$a"
+    done
+    # The TUI opens a server only when given --port; ws wake and ws bg --wake current send to the port recorded here.
+    if ! $listen_given; then
+      case "$WS_OC_PORT" in ''|*[!0-9]*) die "WS_OC_PORT must be a port number, not '$WS_OC_PORT' (config.sh or config.local.sh)" ;; esac
+      port="$WS_OC_PORT"
+      # A port that accepts a connection is taken; the first one that refuses it is free.
+      while (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; do
+        port=$((port + 1))
+        [ "$port" -lt $((WS_OC_PORT + 100)) ] || die "no free port in $WS_OC_PORT..$port for the OpenCode server (WS_OC_PORT)"
+      done
+      args=(--port "$port" --hostname 127.0.0.1 ${args[@]+"${args[@]}"})
+    fi
     if $print; then
       printf 'cd %s\nWS_PROJECT=%s OPENCODE_CONFIG=%s opencode' "$WS" "$slug" "$cfg"
       printf ' %s' "${args[@]+"${args[@]}"}"; echo; exit 0
     fi
     command -v opencode >/dev/null || die "opencode not found; install it, or start Claude with: ws <slug>"
+    if [ -n "$port" ]; then mkdir -p "$WS/runs/$slug"; echo "$port" > "$WS/runs/$slug/oc.port"; fi
     cd "$WS" && WS_PROJECT="$slug" OPENCODE_CONFIG="$cfg" exec opencode "${args[@]+"${args[@]}"}" ;;
   # exec: rolling the workspace back rewrites bin/ws too, and bash reads a running script from disk.
   rollback) exec "$WS/scripts/rollback.sh" ${proj:+--project "$proj"} "$@" ;;

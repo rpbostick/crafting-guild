@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Check that this machine and the selected project can run the loop, and say what to fix for each failure.
+# With WS_REVIEW_AGENT empty a review uses whichever client is installed (the changed files decide when both are):
+# a claude-only install passes as is; an OpenCode-only one also sets WS_AGENT=opencode. Set WS_REVIEW_AGENT only
+# to force a client.
 # Usage: doctor.sh [--project slug]. Changes nothing. Exits 1 when a required check fails.
 . "$(dirname "$0")/lib.sh"
 slug=""; parity=false
@@ -91,44 +94,78 @@ echo "--- machine ---"
 for c in git jq python3; do command -v "$c" >/dev/null && ok "$c" || fail "$c not found" "install $c"; done
 timeout --version 2>/dev/null | grep -q GNU && ok "GNU timeout" || fail "GNU timeout not found" "install coreutils (macOS: brew install coreutils, and put gtimeout on PATH as timeout)"
 min_claude="2.1.257"
-# Claude Code is a required check only while a configured role uses it. Builders and reviews default to it; the
-# orchestrator is chosen by the command (ws <slug> or ws oc <slug>), not a setting. Deliberate: a
-# WS_REVIEW_SHADOW of claude counts as a Claude role here though review.sh refuses that value, so doctor never
-# passes a setup whose own setting names a client it cannot run.
+# Claude Code is a required check only while a configured role uses it. Builders default to it, and with
+# WS_REVIEW_AGENT empty the reviewer runs on the only installed client, or on the changed files when both are. Only
+# an installed client is required for the review role then; with neither installed the fallback is Claude, so the
+# review role still fails. The orchestrator is chosen by the command (ws <slug> or ws oc <slug>), not a setting.
+# Deliberate: a WS_REVIEW_SHADOW of claude counts as a Claude role here though review.sh refuses that value, so
+# doctor never passes a setup whose own setting names a client it cannot run.
+have_claude=""; have_opencode=""
+client_installed claude && have_claude=1
+client_installed opencode && have_opencode=1
+auto_note=""; review_auto=""
+if [ -z "${WS_REVIEW_AGENT:-}" ]; then
+  review_auto=1
+  if [ -n "$have_claude" ] && [ -n "$have_opencode" ]; then
+    auto_note=" (auto: code branches on claude, docs-only on opencode)"
+  elif [ -n "$have_claude" ]; then
+    auto_note=" (auto: reviews use claude, the only client installed)"
+  elif [ -n "$have_opencode" ]; then
+    auto_note=" (auto: reviews use opencode, the only client installed)"
+  else
+    auto_note=" (auto: no review client is installed; reviews fall back to claude)"
+  fi
+fi
 claude_roles=""
 [ "${WS_AGENT:-claude}" = claude ] && claude_roles="WS_AGENT"
-[ "${WS_REVIEW_AGENT:-claude}" = claude ] && claude_roles="${claude_roles:+$claude_roles and }WS_REVIEW_AGENT"
+if [ -n "$review_auto" ]; then
+  # Only claude installed: the review role needs it. Only OpenCode installed: it does not. Neither installed: the
+  # fallback is claude, so the review role is required there and fails.
+  if [ -n "$have_claude" ] || [ -z "$have_opencode" ]; then
+    claude_roles="${claude_roles:+$claude_roles and }WS_REVIEW_AGENT"
+  fi
+elif [ "$WS_REVIEW_AGENT" = claude ]; then
+  claude_roles="${claude_roles:+$claude_roles and }WS_REVIEW_AGENT"
+fi
 [ "${WS_REVIEW_SHADOW:-}" = claude ] && claude_roles="${claude_roles:+$claude_roles and }WS_REVIEW_SHADOW"
 claude_need="an orchestrator in Claude Code, or --agent claude,"
 if command -v claude >/dev/null; then
   v=$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
   if [ -n "$v" ] && newer_or_equal "$v" "$min_claude"; then ok "claude $v"
-  elif [ -n "$claude_roles" ]; then fail "claude ${v:-?} is older than $min_claude, needed by $claude_roles" "update Claude Code (claude update), or set $claude_roles to opencode"
+  elif [ -n "$claude_roles" ]; then fail "claude ${v:-?} is older than $min_claude, needed by $claude_roles$auto_note" "update Claude Code (claude update), or set $claude_roles to opencode"
   else warn "claude ${v:-?} is older than $min_claude: $claude_need needs $min_claude or later" "optional: update Claude Code (claude update)"; fi
 elif [ -n "$claude_roles" ]; then
-  fail "claude not found (needed by $claude_roles)" "install Claude Code (https://code.claude.com), or set $claude_roles to opencode"
+  fail "claude not found (needed by $claude_roles$auto_note)" "install Claude Code (https://code.claude.com), or set $claude_roles to opencode"
 else
-  warn "claude not found: $claude_need needs it" "optional: install Claude Code (https://code.claude.com)"
+  warn "claude not found: $claude_need needs it$auto_note" "optional: install Claude Code (https://code.claude.com)"
 fi
 # A signed-in Claude is needed only by the roles above. The check is local and cheap (no model call).
 if command -v claude >/dev/null; then
   if timeout 15 claude auth status 2>/dev/null | jq -e '.loggedIn == true' >/dev/null 2>&1; then ok "claude is signed in"
-  elif [ -n "$claude_roles" ]; then fail "claude is not signed in (needed by $claude_roles)" "claude auth login"
+  elif [ -n "$claude_roles" ]; then fail "claude is not signed in (needed by $claude_roles$auto_note)" "claude auth login"
   else warn "claude is not signed in: $claude_need needs it" "optional: claude auth login"; fi
 fi
-# The builders' default agent is OpenCode in this installation; without it only Claude builders run.
+# The builders' default agent is OpenCode in this installation; without it only Claude builders run. With
+# WS_REVIEW_AGENT empty the review role needs OpenCode only when it is installed (both clients present, or it is
+# the only one).
 # The path relies on OpenCode's server json_schema output and experimental.* plugin hooks, so a version older
 # than WS_MIN_OPENCODE breaks it: FAIL while an agent is OpenCode, WARN otherwise.
 oc_agents=""
 [ "${WS_AGENT:-claude}" = opencode ] && oc_agents="WS_AGENT"
-[ "${WS_REVIEW_AGENT:-claude}" = opencode ] && oc_agents="${oc_agents:+$oc_agents and }WS_REVIEW_AGENT"
+if [ -n "$review_auto" ]; then
+  if [ -n "$have_opencode" ]; then
+    oc_agents="${oc_agents:+$oc_agents and }WS_REVIEW_AGENT"
+  fi
+elif [ "$WS_REVIEW_AGENT" = opencode ]; then
+  oc_agents="${oc_agents:+$oc_agents and }WS_REVIEW_AGENT"
+fi
 [ "${WS_REVIEW_SHADOW:-}" = opencode ] && oc_agents="${oc_agents:+$oc_agents and }WS_REVIEW_SHADOW"
 if command -v opencode >/dev/null; then
   ov=$(opencode --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
   min_oc="${WS_MIN_OPENCODE:-}"
   if [ -n "$min_oc" ] && { [ -z "$ov" ] || ! newer_or_equal "$ov" "$min_oc"; }; then
     if [ -n "$oc_agents" ]; then
-      fail "opencode ${ov:-?} is older than $min_oc, needed by $oc_agents (the server's json_schema output format and experimental.* plugin hooks)" "update OpenCode (npm install -g opencode-ai@latest), or set WS_AGENT/WS_REVIEW_AGENT to claude"
+      fail "opencode ${ov:-?} is older than $min_oc, needed by $oc_agents$auto_note (the server's json_schema output format and experimental.* plugin hooks)" "update OpenCode (npm install -g opencode-ai@latest), or set WS_AGENT/WS_REVIEW_AGENT to claude"
     else
       warn "opencode ${ov:-?} is older than $min_oc: an OpenCode builder or reviewer would lack the server's json_schema output format and experimental.* plugin hooks" "optional: update OpenCode (npm install -g opencode-ai@latest)"
     fi
@@ -139,11 +176,11 @@ if command -v opencode >/dev/null; then
     if [ -n "$latest_oc" ] && ! newer_or_equal "$ov" "$latest_oc"; then echo "note  opencode $latest_oc is available (installed $ov)"; fi
   fi
   if timeout 10 opencode auth list 2>/dev/null | grep -q '●'; then ok "opencode has a credential"
-  elif [ -n "$oc_agents" ]; then fail "opencode has no credential (needed by $oc_agents)" "opencode auth login"
+  elif [ -n "$oc_agents" ]; then fail "opencode has no credential (needed by $oc_agents$auto_note)" "opencode auth login"
   else warn "opencode has no credential: OpenCode builders cannot run" "optional: opencode auth login"; fi
 elif [ -n "$oc_agents" ]; then
-  fail "opencode not found (needed by $oc_agents)" "install OpenCode (https://opencode.ai), or stop using it for $oc_agents"
-else warn "opencode not found: only Claude builders can run" "optional: install OpenCode"; fi
+  fail "opencode not found (needed by $oc_agents$auto_note)" "install OpenCode (https://opencode.ai), or stop using it for $oc_agents"
+else warn "opencode not found: only Claude builders can run$auto_note" "optional: install OpenCode"; fi
 # The builder shell sandbox is opt-in, so off is no failure; once on, a missing, setuid or old bwrap fails every
 # shell command, so doctor fails before a dispatch rather than letting a builder stall on its first command. The
 # wrapper's message names the floor, which lives only there.
@@ -181,6 +218,12 @@ if [ -f "$oc_config" ]; then
   oc_pin=$(jq -r '.mcp.playwright.command[]? | select(startswith("@playwright/mcp@"))' "$oc_config" 2>/dev/null | head -1)
   if [ -n "$oc_pin" ] && [ "$oc_pin" != "@playwright/mcp@$WS_BROWSER_MCP_VERSION" ]; then
     warn "orchestrator.json pins $oc_pin, not @playwright/mcp@$WS_BROWSER_MCP_VERSION" "ws opencode-perms"
+  fi
+  # A subagent session runs the same system-transform hook as the orchestrator, so its id would overwrite
+  # runs/<slug>/session.id and ws wake current would reach the finished child; the config must deny the task tool.
+  # ws oc only regenerates a missing file, so a config written before that rule keeps the tool open until rewritten.
+  if [ "$(jq -r '.permission.task // ""' "$oc_config" 2>/dev/null)" != deny ]; then
+    fail "orchestrator.json does not deny the task tool (a subagent would overwrite runs/<slug>/session.id)" "run ws opencode-perms"
   fi
 fi
 

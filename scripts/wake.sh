@@ -2,7 +2,7 @@
 # Send one message into an OpenCode session later, from a systemd user timer: an idle session has nothing else that
 # wakes it (the shell tool of OpenCode 1.19.1 has no background notice). One-shots are transient; --every writes
 # persistent units so a recurring wake survives a reboot.
-# Usage: wake.sh [--project slug] <session> "<message>" [--at <time>|--when-chain-stops] [--every <OnCalendar>] [--until YYYY-MM-DD] [--url <server>]
+# Usage: wake.sh [--project slug] [--session] <session|current> "<message>" [--at <time>|--when-chain-stops] [--every <OnCalendar>] [--until YYYY-MM-DD] [--url <server>]
 #        wake.sh [--project slug] list | cancel <id> | failed [--clear] | status-lines | fire <id>
 # State: runs/<slug>/wake/<id>.job and .msg while pending, wake.log for what was sent, wake.failed for what was not.
 # A recurring wake writes persistent units under WS_WAKE_UNIT_DIR, since transient units do not survive a reboot.
@@ -15,7 +15,7 @@ slug=""; if [ "${1:-}" = --project ]; then slug="${2:?--project needs a slug}"; 
 load_project "$slug"
 WAKE_DIR="$RUNS/wake"; FAILED="$RUNS/wake.failed"; WAKE_LOG="$RUNS/wake.log"
 WAKE_UNIT_DIR="${WS_WAKE_UNIT_DIR:-$HOME/.config/systemd/user}"
-usage() { die "usage: ws wake <session> \"<message>\" [--at <time>|--when-chain-stops] [--every <OnCalendar>] [--until YYYY-MM-DD] [--url <server>] | ws wake list | ws wake cancel <id> | ws wake failed [--clear]"; }
+usage() { die "usage: ws wake [--session] <session|current> \"<message>\" [--at <time>|--when-chain-stops] [--every <OnCalendar>] [--until YYYY-MM-DD] [--url <server>] | ws wake list | ws wake cancel <id> | ws wake failed [--clear]"; }
 unit_of() { echo "ws-wake-$SLUG-$1"; }
 one_line() { printf '%s' "$1" | tr '\n\r\t' '   '; }
 local_date() { if [ -n "${WS_TZ:-}" ]; then TZ="$WS_TZ" date "$@"; else date "$@"; fi; }
@@ -71,8 +71,11 @@ EOF
 }
 
 schedule() {
-  local session="${1:-}" message="${2:-}" at="" chain=false every="" until="" url="$WS_WAKE_URL" when="now" epoch id unit calendar pass="" var
+  # --session and --wake name the session as a flag, the spelling ws bg run uses.
+  case "${1:-}" in --session|--wake) shift ;; esac
+  local session="${1:-}" message="${2:-}" at="" chain=false every="" until="" url="" when="now" epoch id unit calendar pass="" var
   [ $# -ge 2 ] || usage
+  session=$(wake_session "$session") || exit 1
   shift 2
   while [ $# -gt 0 ]; do case "$1" in
     --at) at="${2:?--at needs a time}"; shift 2 ;;
@@ -82,6 +85,7 @@ schedule() {
     --url) url="${2:?--url needs a server}"; shift 2 ;;
     *) die "unknown flag $1" ;;
   esac; done
+  if [ -z "$url" ]; then url=$(wake_url) || exit 1; fi
   [[ $session =~ ^ses_[A-Za-z0-9]+$ ]] || die "not a session id: $session (OpenCode's look like ses_...)"
   [ -n "$message" ] || die "the message is empty"
   [[ $url =~ ^https?:// ]] || die "not an http(s) server: $url"

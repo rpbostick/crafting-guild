@@ -5,7 +5,7 @@ Appended to every builder prompt. Keep under 25 lines.
 - One command per Bash call; compound commands are denied and cost a turn.
 - Install a package only when the task names it, in the worktree; `node_modules` is otherwise the main checkout's symlink, and a worktree with its own install loses `file:../<sibling>` links, so the app no longer builds there.
 - Symlinked directories: Read and Glob work, `ls` does not.
-- An absolute path must start with your worktree root, not the main checkout and not another repo.
+- An absolute path must start with your worktree root, not the main checkout, a sibling repo or `~`; do not read the workspace's `bin/ws-run`, run it as your prompt shows: `cat $HOME/<project>/package.json` is denied even under `cat *`. Read the same relative path in your worktree; a file that exists only in the main checkout or a sibling repo cannot be read here, so say what you needed in the result.
 - Run test files in the foreground, not in the background; a background run can end your turn before the result exists. The full suite is the merge's job; run it yourself only when the task asks for its count, and then with `--runInBand` (parallel jest workers are killed at the memory cap).
 - An assumption fixed in one place usually lives in others: a value computed from a raw number that assumes a shared SVG viewBox starts at 0,0 recurred four times in one codebase. When you fix one instance of an assumption, grep for the others before committing.
 - Run the checks you cite through `ws-run`; it records each exit status for you.
@@ -15,3 +15,4 @@ Appended to every builder prompt. Keep under 25 lines.
 - An evidence page for a visible change opens with the whole subject (every variant it touches, main beside the branch) before any close-up: a close-up shows a measure improving while the whole reads wrong.
 - Run git from the worktree root with a pathspec (`git log -- sub/dir`, `git check-ignore sub/file`), not `git -C <dir>`: it is not granted, since a prefix rule cannot keep the path inside the worktree.
 - Files outside the worktree (a sibling checkout, a disassembly) are read with the Read and Grep tools; Bash `grep`, `ls` and `cat` on paths outside the worktree are denied, each costing a turn. Write a file from git with `git show <ref>:<path>` and the Write tool, not `--output`.
+- For each sentence you add or change in a README, doc, comment or result that says what the code does ("only when", "every", "asks again when"), name the code line that does it and the test that shows it in `.ws-evidence/claims.md`. If no test shows it, add one or narrow the sentence to what the code does.

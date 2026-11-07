@@ -68,6 +68,25 @@ homes=$(home_path_leaks "$PROJECT_PATH" "$base" "$tip" | cut -c1-120 | head -3)
 [ -n "$secrets" ] && flag 18 "possible secrets in added lines: $(echo "$secrets" | paste -sd'|')" || ok 18 "no secret patterns in added lines"
 [ -n "$homes" ] && flag 18 "home paths or the username in added lines: $(echo "$homes" | paste -sd'|')"
 
+# Rule 18, security: a branch that changes the dispatch deny list still denies the code-execution spellings the
+# fix rounds found missing. DENY is a literal array; only the interpreter denies are generated from
+# interp_combos. The corpus is fixed: each entry is a spelling a broad grant would otherwise run, and each was a
+# blocking finding until the deny list named it. Only checked when the branch touches the list.
+if printf '%s\n' "$changed" | grep -qE 'scripts/dispatch\.sh$'; then
+  # A block ends at a line that is only `)` or ends in `")`, so a comment line ending in `)` cannot truncate it.
+  deny_src=$(awk '/^DENY=\(/{f=1} f{print} f&&(/^\)[[:space:]]*$/||/"\)[[:space:]]*$/){exit}' "$wt/scripts/dispatch.sh" 2>/dev/null || true)
+  combo_src=$(awk '/^declare -A interp_combos=\(/{f=1} f{print} f&&(/^\)[[:space:]]*$/||/"\)[[:space:]]*$/){exit}' "$wt/scripts/dispatch.sh" 2>/dev/null || true)
+  deny_gaps=""
+  for pat in 'Bash(bash -*c *)' 'Bash(*/bash -*c *)' 'Bash(eval*)' \
+             'Bash(sort *--o*)' 'Bash(sort *--com*)' 'Bash(sort *--co*)'; do
+    grep -qF -- "$pat" <<< "$deny_src" || deny_gaps+=" $pat"
+  done
+  for combo in Buc IEc anle lape; do
+    grep -qw -- "$combo" <<< "$combo_src" || deny_gaps+=" interp_combos:$combo"
+  done
+  [ -n "$deny_gaps" ] && flag 18 "security: scripts/dispatch.sh no longer denies:${deny_gaps}" || ok 18 "the dispatch deny list keeps the code-execution spellings"
+fi
+
 # Rule 19: attribution (the merge refuses it; say so before the review, not after).
 if [ -n "${WS_ATTRIBUTION_RE:-}" ]; then
   attrib=$(printf '%s\n' "$added" | grep -iE "$WS_ATTRIBUTION_RE" | cut -c1-120 | head -3)
