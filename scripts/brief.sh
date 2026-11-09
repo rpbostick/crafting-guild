@@ -48,6 +48,16 @@ while IFS= read -r slug; do
         "$slug" "$n" "$(( ($(date +%s) - started) / 60 ))" "$pid" "$(( $(date +%s) - last ))" >> "$tmp/running"
       mark
     done
+    # A ws bg job is a detached command, not a builder, and its log is the only place its progress shows.
+    for bpf in "$runs"/bg/*.pid; do
+      [ -f "$bpf" ] || continue
+      n=$(basename "$bpf" .pid)
+      pid_file_alive "$bpf" || continue
+      [ -f "$runs/bg/$n.exit" ] && continue
+      printf '%s: bg %s (%s, log runs/%s/bg/%s.log)\n' \
+        "$slug" "$n" "$(bg_elapsed "$(stat -c %Y "$bpf")")" "$slug" "$n" >> "$tmp/running"
+      mark
+    done
     if pid_file_alive "$runs/chain.pid"; then
       st=$(head -n1 "$runs/chain.status" 2>/dev/null || true)
       printf '%s: chain running (pid %s): %s\n' "$slug" "$(cat "$runs/chain.pid")" "${st:-status unknown}" >> "$tmp/running"

@@ -3,20 +3,32 @@
 # Claude or in the prompt to OpenCode. With WS_REVIEW_AGENT empty it runs on the only installed client, or picks by
 # the changed files when both are, so a single-client install needs no setting.
 # Usage: review.sh [--project slug] [--budget USD] [--model M|provider/model] [--agent claude|opencode]
-#                  [--print-prompt] <name>
+#                  [--passes N] [--print-prompt] <name>
 # --print-prompt prints the reviewer's whole prompt and stops before running the reviewer.
+# --passes N (1-3, default WS_REVIEW_PASSES) runs N independent reviews and writes their union: every pass's blocking
+# findings and suggestions, deduped by file and a line within 5 for the same fault (blocking) or by line alone
+# (suggestions), a suggestion dropped when a blocking finding names the same fault, and the strictest verdict. Each
+# pass keeps its own files beside the record (<record>.pass<i>.json and its .raw). Every record carries `passes`: 1
+# for a one-pass review,
+# so a reader can tell its count apart from a review written before the field existed. A review written beside a record
+# (--out) runs one pass unless --passes says otherwise, so a shadow or a comparison stays one review per arm.
 # --worktree, --base and --out are used by review-compare: review another checkout and write beside the record.
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 slug="" budget="$WS_REVIEW_BUDGET" model="$WS_REVIEW_MODEL" model_flag="" show_prompt=false
 agent="${WS_REVIEW_AGENT:-}" agent_reason=""
 [ -n "$agent" ] && agent_reason="WS_REVIEW_AGENT"
-wt_override="" base_override="" out_base=""
+wt_override="" base_override="" out_base="" passes="" passes_flag=""
 while [ $# -gt 0 ]; do case "$1" in
+  --passes) passes="$2"; passes_flag=1; shift 2 ;;
   --project) slug="$2"; shift 2 ;; --budget) budget="$2"; shift 2 ;; --model) model="$2"; model_flag=1; shift 2 ;;
   --agent) agent="$2"; agent_reason="--agent"; shift 2 ;; --worktree) wt_override="$2"; shift 2 ;; --base) base_override="$2"; shift 2 ;;
   --out) out_base="$2"; shift 2 ;; --print-prompt) show_prompt=true; shift ;; *) break ;; esac; done
 name="${1:?usage: review.sh [flags] <name>}"
+if [ -z "$passes_flag" ]; then
+  if [ -n "$out_base" ]; then passes=1; else passes="${WS_REVIEW_PASSES:-1}"; fi
+fi
+case "$passes" in 1|2|3) ;; *) die "--passes and WS_REVIEW_PASSES take 1, 2 or 3, not '$passes'" ;; esac
 case "${WS_REVIEW_SHADOW:-}" in ""|opencode) ;; *) die "WS_REVIEW_SHADOW is '${WS_REVIEW_SHADOW}'; set it to opencode or leave it empty" ;; esac
 load_project "$slug"; wt="${wt_override:-$(worktree_dir "$name")}"; br="$(branch_of "$name")"
 [ -d "$wt" ] || die "no worktree for $name"
@@ -61,6 +73,13 @@ pre_args=(--project "$SLUG"); [ -n "$wt_override" ] && pre_args+=(--worktree "$w
 pre=$("$WS/scripts/precheck.sh" "${pre_args[@]}" "$name" 2>&1)
 pre_file="$RUNS/$name.precheck.txt"; [ -n "$out_base" ] && pre_file="$out_base.precheck.txt"
 printf '%s\n' "$pre" > "$pre_file"
+# Claim sentences in added prose and comments: a script can see a sentence that says what the code does ("only",
+# "every", "always", "never", "all", "must", "cannot", "regardless", "except"); whether the code keeps it is the
+# reviewer's. It prints none when the diff adds no such sentence.
+cl_args=(--project "$SLUG"); [ -n "$wt_override" ] && cl_args+=(--worktree "$wt_override"); [ -n "$base_override" ] && cl_args+=(--base "$base_override")
+claims=$("$WS/scripts/claims.sh" "${cl_args[@]}" "$name" 2>&1)
+claims_file="$RUNS/$name.claims.txt"; [ -n "$out_base" ] && claims_file="$out_base.claims.txt"
+printf '%s\n' "$claims" > "$claims_file"
 # Test-quality candidates: a script can see a bare bound, a test with no assertion, a test that names no changed
 # path, a duplicate or a missing failing-before run; whether a test really exercises the change is the reviewer's.
 tq_args=(--project "$SLUG"); [ -n "$wt_override" ] && tq_args+=(--worktree "$wt_override"); [ -n "$base_override" ] && tq_args+=(--base "$base_override")
@@ -119,54 +138,81 @@ ${report:-(no structured report from the builder)}
 Mechanical precheck (scripts/precheck.sh, already run on this branch; take its ok lines as checked, judge each FLAG: a real defect is blocking under its rule, a false alarm is not a finding):
 $pre
 ${teeth_note:+$(printf '\n%s\n' "$teeth_note")}
+Claims in the diff (scripts/claims.sh, already run on this branch; candidates, not verdicts; check each against the code that does it and treat a sentence the code does not keep as a false claim):
+$claims
 Test-quality check (scripts/test-quality.sh, already run on this branch; these are candidates, not verdicts. Judge each FLAG: a test that cannot fail is blocking under rule 2, one that names no changed path may still exercise it through an entrypoint, a false alarm is not a finding):
 $tq
-In the JSON, \`blocking\` and \`suggestions\` are always arrays: write \`[]\`, never \`false\` or \`true\`, and never a second key for the findings. \`rule\` is a number or a short string.
+In the JSON, \`blocking\` and \`suggestions\` are always arrays: write \`[]\`, never \`false\` or \`true\`, and never a second key for the findings; \`rule\` is a number or a short string. Each \`blocking\` item is \`{\"file\", \"line\", \"rule\", \"why\"}\` and each \`suggestions\` item is \`{\"file\", \"line\", \"why\"}\`: \`why\` carries the finding text, never \`finding\`, \`message\` or \`reason\`, and \`file\` and \`line\` are required.
 
 The full diff is $diff_where $capped. Read any changed file in full with Read when you need context. Logs and renders the builder saved are under .ws-evidence/ in the worktree (untracked, so not in the diff); read them there."
 if $show_prompt; then printf '%s\n' "$prompt"; exit 0; fi
 out="$RUNS/$name.review.json"; errf="$RUNS/$name.review.err"; mdf="$RUNS/$name.review.md"
 if [ -n "$out_base" ]; then out="$out_base.json"; errf="$out_base.err"; mdf="$out_base.md"; fi
-if [ "$agent" = opencode ]; then
-  oc_config="$RUNS/$name.opencode-review.json"
-  oc_prompt="$RUNS/$name.review-prompt.txt"
-  # Beside a record (a shadow, review-compare) key both by the out base: another review of the same name can run
-  # at the same time.
-  if [ -n "$out_base" ]; then oc_config="$out_base.opencode-review.json"; oc_prompt="$out_base.review-prompt.txt"; fi
-  python3 -I "$WS/scripts/opencode_run.py" config --read-only > "$oc_config" || die "could not build the OpenCode review config"
-  printf '%s\n\n# The diff\n%s\n' "$prompt" "$diff" > "$oc_prompt"
-  cmd=("$WS/scripts/opencode-review.sh" --model "$model" --budget "$budget" --config "$oc_config"
-    --log "$out.raw" --name "ws:$SLUG:review:$name" "$oc_prompt")
-  ( cd "$wt" && timeout --kill-after=30s 30m "${cmd[@]}" ) < /dev/null > "$out.raw" 2>"$errf" || true
-  result_line=$(grep '"type":"result"' "$out.raw" | tail -1)
-  so=$(printf '%s' "$result_line" | jq -c '.structured_output // empty' 2>/dev/null)
-else
-  cmd=(claude -p "$prompt" --restricted --permission-prompts none --json-schema "$(cat "$WS/schema/review.json")"
-    --max-budget-usd "$budget" --output-format json --name "ws:$SLUG:review:$name")
-  [ -n "$model" ] && cmd+=(--model "$model")
-  ( cd "$wt" && printf '%s\n' "$diff" | timeout --kill-after=30s 30m "${cmd[@]}" ) > "$out.raw" 2>"$errf" || true
-  so=$(jq -c '.structured_output // empty' "$out.raw" 2>/dev/null)
-  # A model at its usage limit: review once more on the light-track model rather than stop the review (or a chain).
-  fallback="${WS_REVIEW_MODEL_LIGHT:-}"
-  if [ -z "$so" ] && [ -n "$fallback" ] && [ "$fallback" != "$model" ] && jq -r '.result // empty' "$out.raw" 2>/dev/null | grep -qiE "reached your .*limit|usage limit"; then
-    note "$model is at its usage limit; reviewing on $fallback"
-    if [ -n "$model" ]; then cmd[${#cmd[@]}-1]="$fallback"; else cmd+=(--model "$fallback"); fi  # --model is added last
-    ( cd "$wt" && printf '%s\n' "$diff" | timeout --kill-after=30s 30m "${cmd[@]}" ) > "$out.raw" 2>"$errf" || true
-    so=$(jq -c '.structured_output // empty' "$out.raw" 2>/dev/null)
-  fi
-fi
-if [ -z "$so" ] || [ "$so" = "null" ]; then
+oc_config="$RUNS/$name.opencode-review.json"
+oc_prompt="$RUNS/$name.review-prompt.txt"
+# Beside a record (a shadow, review-compare) key both by the out base: another review of the same name can run
+# at the same time.
+if [ -n "$out_base" ]; then oc_config="$out_base.opencode-review.json"; oc_prompt="$out_base.review-prompt.txt"; fi
+# One review on the chosen agent, logged to <raw> and <err>. Sets so (the structured review), result_line (OpenCode's
+# result event) and pass_cost; returns 2 after printing why when the run gave no review.
+run_pass() { # <raw> <err> <opencode config> <opencode prompt>
+  local raw="$1" err="$2" cfg="$3" pf="$4" fallback
+  local -a cmd
+  result_line=""
   if [ "$agent" = opencode ]; then
-    echo "review failed: $(printf '%s' "$result_line" | jq -r '.result // .subtype // "no output"' 2>/dev/null | head -c 300)"
+    python3 -I "$WS/scripts/opencode_run.py" config --read-only > "$cfg" || die "could not build the OpenCode review config"
+    printf '%s\n\n# The diff\n%s\n' "$prompt" "$diff" > "$pf"
+    cmd=("$WS/scripts/opencode-review.sh" --model "$model" --budget "$budget" --config "$cfg"
+      --log "$raw" --name "ws:$SLUG:review:$name" "$pf")
+    ( cd "$wt" && timeout --kill-after=30s 30m "${cmd[@]}" ) < /dev/null > "$raw" 2>"$err" || true
+    result_line=$(grep '"type":"result"' "$raw" | tail -1)
+    so=$(printf '%s' "$result_line" | jq -c '.structured_output // empty' 2>/dev/null)
   else
-    echo "review failed: $(jq -r '.result // .subtype // "no output"' "$out.raw" 2>/dev/null | head -c 300)"
+    cmd=(claude -p "$prompt" --restricted --permission-prompts none --json-schema "$(cat "$WS/schema/review.json")"
+      --max-budget-usd "$budget" --output-format json --name "ws:$SLUG:review:$name")
+    [ -n "$model" ] && cmd+=(--model "$model")
+    ( cd "$wt" && printf '%s\n' "$diff" | timeout --kill-after=30s 30m "${cmd[@]}" ) > "$raw" 2>"$err" || true
+    so=$(jq -c '.structured_output // empty' "$raw" 2>/dev/null)
+    # A model at its usage limit: review once more on the light-track model rather than stop the review (or a chain).
+    fallback="${WS_REVIEW_MODEL_LIGHT:-}"
+    if [ -z "$so" ] && [ -n "$fallback" ] && [ "$fallback" != "$model" ] && jq -r '.result // empty' "$raw" 2>/dev/null | grep -qiE "reached your .*limit|usage limit"; then
+      note "$model is at its usage limit; reviewing on $fallback"
+      if [ -n "$model" ]; then cmd[${#cmd[@]}-1]="$fallback"; else cmd+=(--model "$fallback"); fi  # --model is added last
+      ( cd "$wt" && printf '%s\n' "$diff" | timeout --kill-after=30s 30m "${cmd[@]}" ) > "$raw" 2>"$err" || true
+      so=$(jq -c '.structured_output // empty' "$raw" 2>/dev/null)
+    fi
   fi
-  tail -n 5 "$errf"; exit 2
+  if [ -z "$so" ] || [ "$so" = "null" ]; then
+    if [ "$agent" = opencode ]; then
+      echo "review failed: $(printf '%s' "$result_line" | jq -r '.result // .subtype // "no output"' 2>/dev/null | head -c 300)"
+    else
+      echo "review failed: $(jq -r '.result // .subtype // "no output"' "$raw" 2>/dev/null | head -c 300)"
+    fi
+    tail -n 5 "$err"; return 2
+  fi
+  if [ "$agent" = opencode ]; then pass_cost=$(printf '%s' "$result_line" | jq -r '.total_cost_usd // "?"' 2>/dev/null); else pass_cost=$(jq -r '.total_cost_usd // "?"' "$raw" 2>/dev/null); fi
+}
+if [ "$passes" -eq 1 ]; then
+  run_pass "$out.raw" "$errf" "$oc_config" "$oc_prompt" || exit 2
+  cost="$pass_cost"
+else
+  [ "$agent" = claude ] && note "$passes passes on claude: this review costs $passes Claude reviews"
+  union_args=()
+  for i in $(seq 1 "$passes"); do
+    pass_out="${out%.json}.pass$i.json"
+    run_pass "$pass_out.raw" "${errf%.err}.pass$i.err" "${oc_config%.json}.pass$i.json" "${oc_prompt%.txt}.pass$i.txt" \
+      || { echo "pass $i of $passes failed; no union written"; exit 2; }
+    jq -n --arg sha "$tip" --arg when "$(now_local)" --argjson r "$so" '{reviewed_sha:$sha, when:$when} + $r' > "$pass_out"
+    union_args+=("$pass_out" "$pass_cost")
+    note "pass $i of $passes: $(jq -r '.verdict' "$pass_out"), $(jq '.blocking | length' "$pass_out") blocking"
+  done
+  so=$(python3 -I "$WS/scripts/review_match.py" union "${union_args[@]}") || die "could not union the $passes review passes"
+  cost=$(jq -r '.total_cost_usd' <<< "$so")
 fi
 [ ! -f "$out" ] || keep_review_round "$out" "$mdf"
-jq -n --arg sha "$tip" --arg when "$(now_local)" --argjson r "$so" '{reviewed_sha:$sha, when:$when} + $r' > "$out"
+jq -n --arg sha "$tip" --arg when "$(now_local)" --argjson passes "$passes" --argjson r "$so" \
+  '$r + {reviewed_sha:$sha, when:$when, passes:$passes}' > "$out"
 verdict=$(jq -r '.verdict' "$out")
-if [ "$agent" = opencode ]; then cost=$(printf '%s' "$result_line" | jq -r '.total_cost_usd // "?"' 2>/dev/null); else cost=$(jq -r '.total_cost_usd // "?"' "$out.raw" 2>/dev/null); fi
 {
   echo "# Review of $br at $(short "$tip") ($(now_local))"; echo; echo "**Verdict: $verdict.** $(jq -r '.summary' "$out")"; echo
   echo "## Blocking"; jq -r '.blocking[] | "- \(.file):\(.line) (rule \(.rule)): \(.why)"' "$out"; [ "$(jq '.blocking|length' "$out")" -eq 0 ] && echo "- none"

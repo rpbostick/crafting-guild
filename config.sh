@@ -6,6 +6,10 @@ WS_BENCH_OUTSIDE="${WS_BENCH_OUTSIDE-half}"        # outside WS_BENCH_HOURS: "ha
 WS_MERGE_TEST_TIMEOUT="${WS_MERGE_TEST_TIMEOUT-1800}"  # seconds the merge gate's test run (and merge.sh --test-only) may take before it is killed and the merge undone; a runner that never exits after its tests would otherwise hold the merge lock
 WS_DEFAULT_BUDGET="10"         # dollars, --max-budget-usd for a builder run
 WS_REVIEW_BUDGET="8"            # dollars, for a review run
+# Independent reviews per branch (1-3), their blocking findings unioned and the strictest verdict kept; ws review
+# --passes overrides. An OpenCode-only install sets 2 in config.local.sh, so every script review runs two OpenCode
+# passes and their blocking findings are unioned. Each pass costs a whole review, so on Claude the cost multiplies.
+WS_REVIEW_PASSES="${WS_REVIEW_PASSES-1}"
 WS_CLAUDE_BUDGET="$WS_REVIEW_BUDGET"   # dollars, for one delegated Claude job (ws claude); --budget overrides
 # Dollars a day for Claude builders and ws claude jobs together, read from runs/*/claude-jobs.tsv; empty = no cap.
 # An installation sets it in config.local.sh; ws claude --spent prints today's total and the room left.
@@ -37,11 +41,11 @@ WS_LIMIT_POLL="${WS_LIMIT_POLL:-60}"                   # seconds a usage-limit w
 WS_MODEL="opus"                   # builder model alias ("sonnet", "opus", ...); empty = Claude Code's default
 WS_REVIEW_MODEL="fable"         # reviewer model alias; empty = default
 WS_REVIEW_MODEL_LIGHT="opus"    # reviewer for a branch whose task is marked `Track: light`; empty = WS_REVIEW_MODEL
-WS_REVIEW_AGENT="${WS_REVIEW_AGENT:-}"  # what runs a review: empty = whichever client is installed (the changed files decide when both are: docs-only on opencode, anything else on claude); "claude" or "opencode" forces it; ws review --agent overrides
+WS_REVIEW_AGENT="${WS_REVIEW_AGENT:-}"  # what runs a review: empty = whichever client is installed (with only opencode installed every review runs there, no Claude CLI needed; the changed files decide when both are: docs-only on opencode, anything else on claude); "claude" or "opencode" forces it; ws review --agent overrides
 WS_EFFORT=""                    # builder effort: Claude's low|medium|high|xhigh|max, or an OpenCode model variant
                                 # (`opencode models <provider> --verbose`); empty = default. Applies to both agents:
                                 # a model without that variant refuses the dispatch rather than dropping the setting.
-WS_AGENT="${WS_AGENT:-claude}"  # what runs a builder: "claude" (claude -p) or "opencode" (scripts/opencode-builder.sh); ws dispatch --agent overrides
+WS_AGENT="${WS_AGENT:-claude}"  # what runs a builder: "claude" (claude -p, needs the Claude CLI) or "opencode" (scripts/opencode-builder.sh); an OpenCode-only install sets opencode; ws dispatch --agent overrides
 # OpenCode builder shell commands run in scripts/ws-sandbox-shell.sh (bubblewrap: home masked, no network) when
 # this is "bwrap"; empty (off) leaves the generated OpenCode config as it was. Claude builders are out of scope.
 WS_SANDBOX="${WS_SANDBOX-}"

@@ -2,6 +2,17 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.8.2
+
+- `WS_REVIEW_PASSES` and `ws review --passes N` run N independent reviews of the same branch and write one union: blocking findings deduped by fault and by line within 5, the strictest verdict when the passes disagree, the cost summed, and `passes` in the record.
+- `ws verify [--project slug] [--since YYYY-MM-DD] [--passes N]` checks every merge and exits non-zero on one with no review at the merged SHA, no test run, a `--no-review`, a `--no-look` without its reason, or a script-change review with fewer passes than required.
+- An OpenCode-only install works without Claude: with `WS_REVIEW_AGENT` empty and only OpenCode on PATH, `ws doctor` passes and every review runs on OpenCode; the README, `config.sh` and the help say so.
+- Reviews get a claims input: `scripts/claims.sh` lists the added sentences that say what the code does ("only when", "every", "never", ...), for the reviewer to check against the code.
+- The review prompt names the schema's exact item keys (`file`, `line`, `rule`, `why`; never `finding`), and a skipped repair continue prints a note instead of failing silently.
+- A repair continue is marked: `<log>.repair` records the timestamp and validation errors when a builder result needs the retry, so the repair rate is exact.
+- Cold start and `ws brief` list live `ws bg` jobs with their elapsed time and log path.
+- The selftest guards its shared scratch project `$T`: a helper that leaves a stray tracked path under it fails the suite instead of reaching a later case's `git add -A`.
+
 ## 2.8.1
 
 - `ws oc` starts the session's server on the first free port from `WS_OC_PORT` (4096) and records it in `runs/<slug>/oc.port`, and the cold-start plugin records the session id in `runs/<slug>/session.id`, so `ws wake current "<message>"` and `ws bg run <name> --wake current -- <command>` need no flags; `WS_WAKE_URL` is now empty by default and still wins when set. An OpenCode orchestrator runs a long wait or chain this way and ends its turn instead of holding it in a foreground wait.

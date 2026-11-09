@@ -3,6 +3,7 @@
 
 Usage: review_match.py count <claude-json> <review-file>
        review_match.py report <runs-dir> <workspace>
+       review_match.py union <pass-review> <cost> [<pass-review> <cost>...]
 
 Named means the same file and either a line within EXACT (the rule review-shadow.tsv was written under) or a line
 within WINDOW and the same fault by word match. The first arm keeps the older count as a floor. Word matching adds no
@@ -54,6 +55,53 @@ def named(finding, other, window):
 
 def count(claude, blocking, window=WINDOW):
     return sum(1 for finding in claude if any(named(finding, other, window) for other in blocking))
+
+
+STRICTNESS = ("merge", "fix-first", "do-not-merge")
+
+
+def duplicates(finding, others, by_fault=False):
+    """Whether `finding` names a file of one of `others` with a line within EXACT, and, when by_fault, the same fault.
+    Two different blocking faults three lines apart are separate work, so a later one must survive the union."""
+    return any(finding.get("file") == other.get("file")
+               and abs(finding["line"] - other["line"]) <= EXACT
+               and (not by_fault or same_fault(finding.get("why"), other.get("why")))
+               for other in others)
+
+
+def dedupe(findings, by_fault=False):
+    """First occurrence wins; a later finding is the same one when `duplicates` holds. Blocking findings are deduped
+    by fault as well as by line: two passes word the same fault differently, and two different faults 3 lines apart
+    must both reach the fix task. Suggestions keep the line rule alone."""
+    kept = []
+    for finding in findings:
+        if not duplicates(finding, kept, by_fault):
+            kept.append(finding)
+    return kept
+
+
+def union(reviews, costs):
+    """One review from several passes at the same SHA: the blocking findings and the suggestions of every pass, each
+    deduped, the strictest verdict, a summary naming each pass's verdict, and the summed cost. A suggestion that
+    repeats a blocking finding's fault within EXACT lines is dropped: the fix task carries the blocking entry. A
+    verdict outside the schema fails loud rather than ranking as the mildest."""
+    for review in reviews:
+        if review.get("verdict") not in STRICTNESS:
+            raise ValueError("verdict %r is not one of %s" % (review.get("verdict"), ", ".join(STRICTNESS)))
+    verdict = max((review["verdict"] for review in reviews), key=STRICTNESS.index)
+    summary = "%d passes (%s). " % (len(reviews), "; ".join(
+        "pass %d: %s" % (number, review["verdict"]) for number, review in enumerate(reviews, 1)))
+    summary += " ".join("Pass %d: %s" % (number, review.get("summary", "")) for number, review in enumerate(reviews, 1))
+    blocking = dedupe([item for review in reviews for item in review.get("blocking") or []], by_fault=True)
+    suggestions = dedupe([item for review in reviews for item in review.get("suggestions") or []])
+    return {
+        "verdict": verdict,
+        "summary": summary,
+        "blocking": blocking,
+        "suggestions": [item for item in suggestions if not duplicates(item, blocking, by_fault=True)],
+        "passes": len(reviews),
+        "total_cost_usd": round(sum(costs), 6),
+    }
 
 
 def read_text(path):
@@ -216,6 +264,20 @@ def main():
         print(count(json.loads(sys.argv[2]), record.get("blocking") or []))
     elif len(sys.argv) == 4 and sys.argv[1] == "report":
         report(sys.argv[2], sys.argv[3])
+    elif len(sys.argv) >= 4 and sys.argv[1] == "union" and len(sys.argv) % 2 == 0:
+        # Pairs of <pass review file> <cost>; a missing or unreadable pass fails the union.
+        pairs = list(zip(sys.argv[2::2], sys.argv[3::2]))
+        reviews = []
+        for path, _ in pairs:
+            record = load(path, {})
+            if record is None:
+                sys.exit("review_match.py: cannot read " + path)
+            reviews.append(record)
+        try:
+            merged = union(reviews, [float(cost) for _, cost in pairs])
+        except ValueError as error:
+            sys.exit("review_match.py: " + str(error))
+        print(json.dumps(merged))
     else:
         sys.exit(__doc__)
 

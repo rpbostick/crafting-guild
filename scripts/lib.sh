@@ -330,6 +330,13 @@ age_str() { # <epoch-seconds>
   elif [ "$d" -lt 86400 ]; then echo "$((d / 3600)) h"
   else echo "$((d / 86400)) d"; fi
 }
+# A background command's run time in the builder line's style: "N min", or "N h N min" past an hour.
+bg_elapsed() { # <epoch-seconds>
+  local d=$(( $(date +%s) - ${1:-0} ))
+  [ "$d" -lt 0 ] && d=0
+  if [ "$d" -lt 3600 ]; then echo "$((d / 60)) min"
+  else echo "$((d / 3600)) h $(( (d % 3600) / 60 )) min"; fi
+}
 # Whether a plan has an In flight block, in either form: the bare heading, or one with a date in parentheses.
 has_inflight() { grep -qE '^\*\*In flight right now\*\*|^\*\*In flight right now \(' "$1"; }
 # How many In flight blocks a plan holds; 0 for a plan with none or a missing file.
@@ -753,6 +760,19 @@ fi
 worktree_of() { echo "$(worktree_root "$1")/$2"; }
 branch_of() { echo "agent/$1"; }
 short() { git -C "$PROJECT_PATH" rev-parse --short "$1" 2>/dev/null || echo "$1"; }
+# What a merge's test run writes into runs/<slug>/<name>.merge-tests.log once the suite passes. merge.sh appends it,
+# orchestrator-record.sh counts a merge as tested by it, and verify.sh requires it; one string, so they cannot drift.
+# shellcheck disable=SC2034  # read by merge.sh, orchestrator-record.sh and verify.sh
+WS_MERGE_SUITE_MARK='--- ws merge: suite'
+# The subject merge.sh writes: "Merge agent/<name>[: <title>] (reviewed at <sha>)" or
+# "Merge agent/<name>[: <title>] (merged at <sha> with --no-review: <reason>)". Groups: 1 the step name, 4 the
+# reviewed SHA, 5 the --no-review SHA, 7 its reason.
+# shellcheck disable=SC2034  # read by orchestrator-record.sh and verify.sh
+WS_MERGE_SUBJECT_RE='^Merge agent/([A-Za-z0-9._/-]+)(: .*)? \((reviewed at ([0-9a-f]+)|merged at ([0-9a-f]+) with --no-review(: (.*))?)\)$'
+# A --no-look reason closes the same parenthesis after that text. It is split off first, because the
+# --no-review reason would otherwise swallow it; merge.sh refuses a reason holding this marker.
+# shellcheck disable=SC2034  # read by orchestrator-record.sh and verify.sh
+WS_NO_LOOK_RE='^(.*); --no-look: (.*)\)$'
 # The final `result` event of a stream-json log, or nothing if the run has not ended.
 result_json() { grep '"type":"result"' "$1" 2>/dev/null | tail -1; }
 # How many Claude findings an OpenCode review names in the same file within five lines (the approximate rule a

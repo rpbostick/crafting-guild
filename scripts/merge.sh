@@ -212,7 +212,7 @@ if [ -n "$TEST_CMD" ]; then
     # The tests passed but the push has not run yet: a crash during the restore below or the push must still name
     # the commit left unpushed on main, so the marker moves to the push stage instead of being removed.
     printf '%s %s %s push\n' "$name" "$tip" "$merged_full" > "$RUNS/merge.unfinished"
-    echo "--- ws merge: suite ${secs}s ---" >> "$log"
+    echo "$WS_MERGE_SUITE_MARK ${secs}s ---" >> "$log"
     echo "tests passed in ${secs}s (log: ${log#"$WS/"})"
     # Apart from the allowed plans/reports files above (whose local changes stay), any tracked file modified
     # after the merge is the test run's own output (a build that rewrites a committed size report with new

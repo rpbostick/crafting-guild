@@ -87,6 +87,14 @@ for pidf in "$RUNS"/*.pid; do
   fi
 done
 [ "$running" -eq 0 ] && echo "  no builder running"
+# A ws bg job is a detached command, not a builder; an editor with no background output still needs to see it.
+for bpf in "$RUNS"/bg/*.pid; do
+  [ -f "$bpf" ] || continue
+  bgn=$(basename "$bpf" .pid)
+  pid_file_alive "$bpf" || continue
+  [ -f "$RUNS/bg/$bgn.exit" ] && continue
+  echo "  bg $bgn ($(bg_elapsed "$(stat -c %Y "$bpf")"), log runs/$SLUG/bg/$bgn.log)"
+done
 # A merge a crash cut off leaves its commit on the main branch untested. It replaces a stale chain running line:
 # a chain cannot be live around an unheld unfinished merge, so that status is the one the crash left behind.
 ufline=$(unfinished_merge_line "$RUNS" "$PROJECT_PATH" "$PROJECT_BRANCH")

@@ -759,16 +759,18 @@ fi
 # The review agent runs on the only installed client, or on the branch's changed files when both are: documentation
 # only reviews on OpenCode, anything else on Claude; --agent and WS_REVIEW_AGENT win. <review.sh>, <config.sh> and an
 # optional <lib.sh> let a change be shown failing on the code before it.
-review_agent_cases() { # <review.sh> <config.sh> <scratch> [<lib.sh>]
-  local rv="$1" cfg="$2" t="$3" lib="${4:-$WS/scripts/lib.sh}" w="$3/ws" p="$3/proj" slugx x out rc=0 cl oc
+review_agent_cases() { # <review.sh> <config.sh> <scratch> [<lib.sh>] [<review_match.py>]
+  local rv="$1" cfg="$2" t="$3" lib="${4:-$WS/scripts/lib.sh}" match="${5:-$WS/scripts/review_match.py}"
+  local w="$3/ws" p="$3/proj" slugx x out rc=0 cl oc
   local -a common
   mkdir -p "$w/scripts/fixtures" "$w/schema" "$w/agents" "$w/lessons" "$w/projects" "$w/plans" "$w/runs" "$t/bin"
   cp "$rv" "$w/scripts/review.sh"
   cp "$cfg" "$w/config.sh"
   cp "$lib" "$w/scripts/lib.sh"
-  for f in precheck.sh opencode-review.sh opencode_run.py zdr-check.sh; do
+  for f in precheck.sh claims.sh claims.py opencode-review.sh opencode_run.py zdr-check.sh lessons-check.py; do
     cp "$WS/scripts/$f" "$w/scripts/$f"
   done
+  cp "$match" "$w/scripts/review_match.py"
   cp "$WS/scripts/fixtures/opencode-sample.jsonl" "$w/scripts/fixtures/"
   cp "$WS/schema/review.json" "$w/schema/"
   cp "$WS/agents/reviewer.md" "$w/agents/"
@@ -806,8 +808,39 @@ CL
 #!/bin/bash
 case " $* " in *" --version "*) echo "1.19.1"; exit 0 ;; esac
 : "${OC_CALLS:=/dev/null}"
-printf '%s\n' "$*" >> "$OC_CALLS"
-jq -c --arg t '{"verdict":"merge","summary":"stand-in","blocking":[],"suggestions":[]}' 'if .type == "text" then .part.text = $t else . end' "$OC_SAMPLE"
+case " $* " in *" --session "*) call=continue ;; *) call=first ;; esac
+printf '%s\n' "$call" >> "$OC_CALLS"
+t='{"verdict":"merge","summary":"stand-in","blocking":[],"suggestions":[]}'
+if [ "${OC_REVIEW_STUB:-}" = finding ]; then
+  if [ "$call" = continue ]; then t='{"verdict":"merge","summary":"repaired","blocking":[],"suggestions":[]}'
+  else t='{"verdict":"merge","summary":"stand-in","blocking":[],"suggestions":[{"file":"a.txt","line":1,"finding":"x"}]}'; fi
+fi
+# A different review on each call, counted in OC_COUNTER: the second repeats the first's blocking finding 3 lines on
+# (a duplicate under the line-within-5 rule for the same fault) and adds its own, with a stricter verdict.
+if [ "${OC_REVIEW_STUB:-}" = perpass ]; then
+  n=$(( $(cat "$OC_COUNTER" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$OC_COUNTER"
+  if [ "$n" = 1 ]; then t='{"verdict":"fix-first","summary":"first","blocking":[{"file":"a.txt","line":10,"rule":2,"why":"first pass"}],"suggestions":[{"file":"s.txt","line":1,"why":"tidy"}]}'
+  else t='{"verdict":"do-not-merge","summary":"second","blocking":[{"file":"a.txt","line":13,"rule":2,"why":"first pass again"},{"file":"b.txt","line":20,"rule":1,"why":"second pass"}],"suggestions":[{"file":"s.txt","line":3,"why":"tidy again"}]}'; fi
+fi
+# Two passes naming different blocking faults 2 lines apart in one file: both survive the union.
+if [ "${OC_REVIEW_STUB:-}" = faultsdiffer ]; then
+  n=$(( $(cat "$OC_COUNTER" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$OC_COUNTER"
+  if [ "$n" = 1 ]; then t='{"verdict":"fix-first","summary":"first","blocking":[{"file":"a.txt","line":10,"rule":2,"why":"unescaped shell argument"}],"suggestions":[]}'
+  else t='{"verdict":"do-not-merge","summary":"second","blocking":[{"file":"a.txt","line":12,"rule":3,"why":"missing error check"}],"suggestions":[]}'; fi
+fi
+# The same blocking fault worded differently 2 lines apart: one survives.
+if [ "${OC_REVIEW_STUB:-}" = faultssame ]; then
+  n=$(( $(cat "$OC_COUNTER" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$OC_COUNTER"
+  if [ "$n" = 1 ]; then t='{"verdict":"fix-first","summary":"first","blocking":[{"file":"a.txt","line":10,"rule":2,"why":"unescaped shell argument"}],"suggestions":[]}'
+  else t='{"verdict":"do-not-merge","summary":"second","blocking":[{"file":"a.txt","line":12,"rule":2,"why":"the shell argument is unescaped"}],"suggestions":[]}'; fi
+fi
+# A blocking finding in the first pass and its suggestion twin in the second: one blocking entry, no suggestion.
+if [ "${OC_REVIEW_STUB:-}" = faulttwin ]; then
+  n=$(( $(cat "$OC_COUNTER" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$OC_COUNTER"
+  if [ "$n" = 1 ]; then t='{"verdict":"fix-first","summary":"first","blocking":[{"file":"a.txt","line":10,"rule":2,"why":"unescaped shell argument"}],"suggestions":[]}'
+  else t='{"verdict":"merge","summary":"second","blocking":[],"suggestions":[{"file":"a.txt","line":12,"why":"the shell argument is unescaped"}]}'; fi
+fi
+jq -c --arg t "$t" 'if .type == "text" then .part.text = $t else . end' "$OC_SAMPLE"
 OC
   chmod +x "$t/bin/claude" "$t/bin/opencode"
   # Single-client PATHs: a stub dir holding only that client, plus links to every other executable on PATH except
@@ -895,6 +928,85 @@ OC
     && [ -f "$w/runs/$slugx/scriptsbr.opencode-review.json" ]; } \
     && echo "an opencode-only install reviews a scripts/ branch on opencode ok" \
     || { echo "opencode-only review agent FAILED (exit $x): $out"; rc=1; }
+  # The prompt names the item keys, so a model does not write `finding` where the schema needs `why`.
+  x=0
+  out=$(env "${common[@]}" "$w/scripts/review.sh" --project "$slugx" --agent claude --print-prompt docsonly 2>&1) || x=$?
+  { [ "$x" = 0 ] && grep -qF 'Each `blocking` item is `{"file", "line", "rule", "why"}`' <<< "$out" \
+    && grep -qF 'each `suggestions` item is `{"file", "line", "why"}`' <<< "$out" \
+    && grep -qF 'never `finding`, `message` or `reason`' <<< "$out"; } \
+    && echo "the review prompt names the item keys ok" \
+    || { echo "review prompt keys FAILED (exit $x): $out"; rc=1; }
+  # An invalid review (a suggestion keyed `finding`) gets exactly one continued call, and its valid reply is written.
+  rm -f "$w/runs/$slugx/docsonly.opencode-review.json"
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" OC_REVIEW_STUB=finding "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
+  { [ "$x" = 0 ] && [ "$(cut -d' ' -f1 "$oc" | paste -sd,)" = first,continue ] \
+    && [ "$(jq -r .verdict "$w/runs/$slugx/docsonly.review.json" 2>/dev/null)" = merge ] \
+    && [ "$(jq -r .summary "$w/runs/$slugx/docsonly.review.json" 2>/dev/null)" = repaired ]; } \
+    && echo "an invalid review is fixed by one continue ok" \
+    || { echo "opencode review continue FAILED (exit $x): $out (calls: $(cut -d' ' -f1 "$oc" | paste -sd,))"; rc=1; }
+  # One pass (the default) makes one call and records passes: 1, with no per-pass files.
+  local rj="$w/runs/$slugx/docsonly.review" p1 p2 c1 c2
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
+  { [ "$x" = 0 ] && [ "$(wc -l < "$oc")" -eq 1 ] && [ "$(jq -r '.passes' "$rj.json" 2>/dev/null)" = 1 ] \
+    && [ "$(jq -r '.summary' "$rj.json" 2>/dev/null)" = stand-in ] && [ ! -e "$rj.pass1.json" ] && [ ! -e "$rj.pass1.json.raw" ]; } \
+    && echo "a one-pass review writes one record and no pass files ok" \
+    || { echo "one-pass review FAILED (exit $x): $out"; rc=1; }
+  # WS_REVIEW_PASSES=2: two fresh calls, each pass kept, and a union of their findings under the strictest verdict.
+  : > "$cl"; : > "$oc"; : > "$t/oc-counter"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=perpass "OC_COUNTER=$t/oc-counter" \
+    "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
+  p1="$rj.pass1.json"; p2="$rj.pass2.json"
+  c1=$(grep '"type":"result"' "$p1.raw" 2>/dev/null | tail -1 | jq -r '.total_cost_usd' 2>/dev/null || true)
+  c2=$(grep '"type":"result"' "$p2.raw" 2>/dev/null | tail -1 | jq -r '.total_cost_usd' 2>/dev/null || true)
+  { [ "$x" = 1 ] && [ "$(wc -l < "$oc")" -eq 2 ] && [ "$(cat "$t/oc-counter")" = 2 ] \
+    && [ -s "$p1" ] && [ -s "$p2" ] && [ -s "$p1.raw" ] && [ -s "$p2.raw" ] \
+    && [ -s "$w/runs/$slugx/docsonly.opencode-review.pass1.json" ] && [ -s "$w/runs/$slugx/docsonly.review-prompt.pass2.txt" ] \
+    && [ "$(jq -r '.verdict' "$p1")" = fix-first ] && [ "$(jq -r '.verdict' "$p2")" = do-not-merge ] \
+    && [ "$(jq -r '.passes' "$rj.json")" = 2 ] && [ "$(jq -r '.verdict' "$rj.json")" = do-not-merge ] \
+    && [ "$(jq -c '[.blocking[] | "\(.file):\(.line)"]' "$rj.json")" = '["a.txt:10","b.txt:20"]' ] \
+    && [ "$(jq -c '[.suggestions[] | "\(.file):\(.line)"]' "$rj.json")" = '["s.txt:1"]' ] \
+    && jq -r '.summary' "$rj.json" | grep -qF 'pass 1: fix-first; pass 2: do-not-merge' \
+    && [ -n "$c1" ] && [ "$c1" != null ] && [ -n "$c2" ] && [ "$c2" != null ] \
+    && [ "$(jq -r '.total_cost_usd' "$rj.json")" = "$(python3 -c 'import sys; print(round(float(sys.argv[1]) + float(sys.argv[2]), 6))' "$c1" "$c2")" ] \
+    && grep -q '^\*\*Verdict: do-not-merge\.\*\*' "$rj.md" && grep -q '^- b.txt:20 (rule 1): second pass$' "$rj.md"; } \
+    && echo "two passes union their blocking findings under the strictest verdict, sum the cost and keep each pass ok" \
+    || { echo "two-pass review union FAILED (exit $x): $out (calls: $(wc -l < "$oc"); record: $(cat "$rj.json" 2>/dev/null))"; rc=1; }
+  # Two passes naming two different blocking faults 2 lines apart: both survive the union, under the stricter verdict.
+  : > "$cl"; : > "$oc"; : > "$t/oc-counter"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=faultsdiffer "OC_COUNTER=$t/oc-counter" \
+    "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
+  { [ "$x" = 1 ] && [ "$(jq -r '.verdict' "$rj.json")" = do-not-merge ] \
+    && [ "$(jq -c '[.blocking[] | "\(.file):\(.line)"]' "$rj.json")" = '["a.txt:10","a.txt:12"]' ]; } \
+    && echo "two different blocking faults within 5 lines both survive the union ok" \
+    || { echo "different-fault union FAILED (exit $x): $out (record: $(cat "$rj.json" 2>/dev/null))"; rc=1; }
+  # The same blocking fault worded differently 2 lines apart: one survives.
+  : > "$cl"; : > "$oc"; : > "$t/oc-counter"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=faultssame "OC_COUNTER=$t/oc-counter" \
+    "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
+  { [ "$x" = 1 ] && [ "$(jq -c '[.blocking[] | "\(.file):\(.line)"]' "$rj.json")" = '["a.txt:10"]' ]; } \
+    && echo "the same blocking fault worded differently within 5 lines collapses to one ok" \
+    || { echo "same-fault union FAILED (exit $x): $out (record: $(cat "$rj.json" 2>/dev/null))"; rc=1; }
+  # A blocking finding in the first pass and its suggestion twin in the second: one blocking entry, no suggestion.
+  : > "$cl"; : > "$oc"; : > "$t/oc-counter"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=faulttwin "OC_COUNTER=$t/oc-counter" \
+    "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
+  { [ "$x" = 1 ] && [ "$(jq -c '[.blocking[] | "\(.file):\(.line)"]' "$rj.json")" = '["a.txt:10"]' ] \
+    && [ "$(jq -c '[.suggestions[] | "\(.file):\(.line)"]' "$rj.json")" = '[]' ]; } \
+    && echo "a blocking finding drops its suggestion twin ok" \
+    || { echo "blocking-twin union FAILED (exit $x): $out (record: $(cat "$rj.json" 2>/dev/null))"; rc=1; }
+  # --passes overrides WS_REVIEW_PASSES; a count outside 1-3 is refused before any call.
+  : > "$oc"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 "$w/scripts/review.sh" --project "$slugx" --agent opencode --passes 3 docsonly 2>&1) || x=$?
+  { [ "$x" = 0 ] && [ "$(wc -l < "$oc")" -eq 3 ] && [ "$(jq -r '.passes' "$rj.json")" = 3 ] && [ -s "$rj.pass3.json" ]; } \
+    && echo "--passes 3 overrides WS_REVIEW_PASSES ok" \
+    || { echo "--passes override FAILED (exit $x): $out"; rc=1; }
+  : > "$oc"; x=0
+  out=$(env "${common[@]}" "$w/scripts/review.sh" --project "$slugx" --agent opencode --passes 4 docsonly 2>&1) || x=$?
+  { [ "$x" != 0 ] && [ ! -s "$oc" ] && grep -qF "take 1, 2 or 3, not '4'" <<< "$out"; } \
+    && echo "--passes 4 is refused ok" \
+    || { echo "--passes 4 refusal FAILED (exit $x): $out"; rc=1; }
   return "$rc"
 }
 # Run only the review-agent cases against the worktree's own scripts.
@@ -903,15 +1015,16 @@ if [ "${1:-}" = --review-agent ]; then
   review_agent_cases "$WS/scripts/review.sh" "$WS/config.sh" "$d/case"
   exit $?
 fi
-# Run only the review-agent cases against another revision's review.sh, config.sh and lib.sh, so a change can be
-# shown failing on the code before it: scripts/selftest.sh --review-agent-before <git-ref>.
+# Run only the review-agent cases against another revision's review.sh, config.sh, lib.sh and review_match.py, so a
+# change can be shown failing on the code before it: scripts/selftest.sh --review-agent-before <git-ref>.
 if [ "${1:-}" = --review-agent-before ]; then
   ref="${2:?usage: selftest.sh --review-agent-before <git-ref>}"
   d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
   git -C "$WS" show "$ref:scripts/review.sh" > "$d/review.sh" || { echo "no scripts/review.sh at $ref"; exit 1; }
   git -C "$WS" show "$ref:config.sh" > "$d/config.sh" || { echo "no config.sh at $ref"; exit 1; }
   git -C "$WS" show "$ref:scripts/lib.sh" > "$d/lib.sh" || { echo "no scripts/lib.sh at $ref"; exit 1; }
-  review_agent_cases "$d/review.sh" "$d/config.sh" "$d/case" "$d/lib.sh"
+  git -C "$WS" show "$ref:scripts/review_match.py" > "$d/review_match.py" || { echo "no scripts/review_match.py at $ref"; exit 1; }
+  review_agent_cases "$d/review.sh" "$d/config.sh" "$d/case" "$d/lib.sh" "$d/review_match.py"
   exit $?
 fi
 # Run only the no-client review fallback case against another revision's lib.sh, so a change can be shown failing
@@ -921,6 +1034,11 @@ if [ "${1:-}" = --review-fallback-before ]; then
   d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
   git -C "$WS" show "$ref:scripts/lib.sh" > "$d/lib.sh" || { echo "no scripts/lib.sh at $ref"; exit 1; }
   review_fallback_case "$d/lib.sh" "$d"
+  exit $?
+fi
+# Run only the ws verify cases, so a fix round can show them failing before a change and passing after.
+if [ "${1:-}" = --verify ]; then
+  bash "$WS/scripts/verify-check.sh"
   exit $?
 fi
 # The test-quality cases in their own scratch workspace: a good test passes, each defect class is flagged, a file
@@ -1088,6 +1206,137 @@ TQWTEST
     || { echo "review prompt section removal FAILED (exit $x):"; echo "$out" | head -40; fails=$((fails + 1)); }
   return "$fails"
 }
+# The claims cases in their own scratch workspace: a comment and a docstring that make a claim, a claim in a test
+# file that must be skipped, a prose line that makes none, and a branch that adds no prose. <source-root> holds
+# scripts/, config.sh, agents/, lessons/ and checklist.md; <scratch> is a fresh directory. Prints one ok line per
+# case and returns 1 when any fails, so a before run records all of them.
+claims_cases() { # <source-root> <scratch>
+  local src="$1" t="$2" w="$2/ws" p="$2/proj" slugx out x fails=0 conf wt base capwt i
+  mkdir -p "$w/scripts" "$w/projects" "$w/plans" "$w/runs" "$w/agents" "$w/lessons" "$t"
+  cp -a "$src/scripts/." "$w/scripts/"
+  cp "$src/config.sh" "$w/config.sh"
+  if [ -f "$src/VERSION" ]; then cp "$src/VERSION" "$w/VERSION"; fi
+  cp -a "$src/agents/." "$w/agents/"
+  cp -a "$src/lessons/." "$w/lessons/"
+  cp "$src/checklist.md" "$w/checklist.md"
+  chmod +x "$w/scripts/"*.sh
+  p="$t/proj"; mkdir -p "$p"
+  git -C "$p" init -q -b main
+  printf '.worktrees\n.ws-evidence\n' > "$p/.git/info/exclude"
+  printf 'base\n' > "$p/base.txt"
+  git -C "$p" add base.txt
+  git -C "$p" -c user.name=t -c user.email=t@t commit -qm base
+  slugx=$(basename "$p" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')
+  conf="$w/projects/$slugx.conf"
+  printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$p" > "$conf"
+  ct_commit() { git -C "$1" add -A; git -C "$1" -c user.name=t -c user.email=t@t commit -qm "$2"; }
+  ct_run() { "$w/scripts/claims.sh" --project "$slugx" --worktree "$1" --base "$2" "$3" 2>&1 || true; }
+  wt="$p/.worktrees/claims"
+  git -C "$p" worktree add -q -b agent/claims "$wt" main
+  mkdir -p "$wt/scripts" "$wt/tests"
+  printf '#!/bin/sh\nrender_widget() { echo hi; }\n' > "$wt/scripts/widget.sh"
+  printf 'def render_widget():\n    return "hi"\n' > "$wt/scripts/widget.py"
+  cat > "$wt/tests/widget.test.mjs" <<'CLMTEST'
+import { test, expect } from "vitest";
+test("renders", () => {
+  expect(2 + 2).toBe(4);
+});
+CLMTEST
+  ct_commit "$wt" "a base to change"
+  base=$(git -C "$wt" rev-parse HEAD)
+  printf '#!/bin/sh\n# Only when the cache is warm does it read from disk.\nrender_widget() { echo hi; }\n' > "$wt/scripts/widget.sh"
+  printf 'def render_widget():\n    """Always returns the cached value unless it was never written."""\n    return "hi"\n' > "$wt/scripts/widget.py"
+  printf '// Except for the empty case, every render returns text.\n' >> "$wt/tests/widget.test.mjs"
+  ct_commit "$wt" "a comment, a docstring and a test comment that make a claim"
+  out=$(ct_run "$wt" "$base" claims)
+  { grep -q '^scripts/widget.sh:2: Only when the cache is warm does it read from disk\.$' <<< "$out" \
+    && grep -q '^scripts/widget.py:2: Always returns the cached value unless it was never written\.$' <<< "$out" \
+    && ! grep -q 'tests/widget.test.mjs' <<< "$out"; } \
+    && echo "claims lists a comment and a docstring with file:line, and skips a test file ok" \
+    || { echo "claims comment and docstring FAILED:"; echo "$out"; fails=$((fails + 1)); }
+  base=$(git -C "$wt" rev-parse HEAD)
+  mkdir -p "$wt/docs"
+  printf 'The renderer reads the disk when the cache is warm.\n' > "$wt/docs/notes.md"
+  ct_commit "$wt" "prose with no claim word"
+  out=$(ct_run "$wt" "$base" claims)
+  { [ "$out" = none ] && ! grep -q 'The renderer reads the disk' <<< "$out"; } \
+    && echo "claims prints none for prose with no claim word ok" \
+    || { echo "claims non-claim prose FAILED:"; echo "$out"; fails=$((fails + 1)); }
+  base=$(git -C "$wt" rev-parse HEAD)
+  printf 'def helper():\n    return 2\n' >> "$wt/scripts/widget.py"
+  ct_commit "$wt" "code only"
+  out=$(ct_run "$wt" "$base" claims)
+  [ "$out" = none ] \
+    && echo "claims prints none when the diff adds no prose ok" \
+    || { echo "claims code-only FAILED:"; echo "$out"; fails=$((fails + 1)); }
+  base=$(git -C "$wt" rev-parse HEAD)
+  printf '#!/bin/sh\necho "a # b"\necho "all # Only when the cache is warm"\n# Never reads a missing file.\n' > "$wt/scripts/quote.sh"
+  ct_commit "$wt" "a quoted hash and a whole-line comment"
+  out=$(ct_run "$wt" "$base" claims)
+  { grep -q '^scripts/quote.sh:4: Never reads a missing file\.$' <<< "$out" \
+    && ! grep -q '^scripts/quote.sh:2:' <<< "$out" && ! grep -q '^scripts/quote.sh:3:' <<< "$out"; } \
+    && echo "claims skips a hash inside a quoted string and keeps a whole-line comment ok" \
+    || { echo "claims quoted hash FAILED:"; echo "$out"; fails=$((fails + 1)); }
+  capwt="$p/.worktrees/claimscap"
+  git -C "$p" worktree add -q -b agent/claimscap "$capwt" main
+  mkdir -p "$capwt/scripts"
+  { printf '# Only when %s does it count.\n' "$(printf 'x%.0s' {1..300})"
+    for i in {2..25}; do printf '# Only when item %s runs does it count.\n' "$i"; done
+  } > "$capwt/scripts/many.sh"
+  ct_commit "$capwt" "25 claim lines, one of them long"
+  out=$(ct_run "$capwt" "$(git -C "$p" rev-parse main)" claimscap)
+  { [ "$(grep -c '^scripts/many.sh:' <<< "$out")" = 20 ] \
+    && [ "$(awk 'length > 200' <<< "$out" | wc -l)" = 0 ] \
+    && [ "$(awk 'NR == 1 {print length}' <<< "$out")" = 200 ]; } \
+    && echo "claims stops at 20 candidates and cuts each line at 200 characters ok" \
+    || { echo "claims cap and line length FAILED:"; echo "$out" | head -5; fails=$((fails + 1)); }
+  printf '# review prompt task\n\n**Track: light.**\n\n## Done when\n- the branch is reviewed\n' > "$t/task.md"
+  mkdir -p "$w/runs/$slugx"
+  printf 'task=%s\n' "$t/task.md" > "$w/runs/$slugx/claims.task.txt"
+  out=$(WS_REVIEW_SHADOW= WS_ALLOWANCE_DB= "$w/scripts/review.sh" --project "$slugx" --agent claude --print-prompt claims 2>&1) && x=0 || x=$?
+  { [ "$x" = 0 ] && grep -q 'Claims in the diff (scripts/claims.sh' <<< "$out" \
+    && grep -q '^scripts/widget.sh:2: Only when the cache is warm does it read from disk\.$' <<< "$out"; } \
+    && echo "the review prompt carries the claims input ok" \
+    || { echo "review prompt claims input FAILED (exit $x):"; echo "$out" | head -40; fails=$((fails + 1)); }
+  grep -v '^\$claims$' "$w/scripts/review.sh" > "$t/review-removed.sh"
+  cp "$t/review-removed.sh" "$w/scripts/review.sh"
+  out=$(WS_REVIEW_SHADOW= WS_ALLOWANCE_DB= "$w/scripts/review.sh" --project "$slugx" --agent claude --print-prompt claims 2>&1) && x=0 || x=$?
+  { [ "$x" = 0 ] && grep -q 'Claims in the diff (scripts/claims.sh' <<< "$out" \
+    && ! grep -q '^scripts/widget.sh:2: Only when the cache is warm does it read from disk\.$' <<< "$out"; } \
+    && echo "the review prompt claims guard fails when its wiring is removed ok" \
+    || { echo "review prompt claims wiring removal FAILED (exit $x):"; echo "$out" | head -40; fails=$((fails + 1)); }
+  return "$fails"
+}
+# Run only the claims cases against the worktree's own scripts.
+if [ "${1:-}" = --claims ]; then
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  claims_cases "$WS" "$d/case"
+  exit $?
+fi
+# Run only the claims cases against another revision's review.sh and claims scripts, so the cases can be shown
+# failing on the code before them: scripts/selftest.sh --claims-before <git-ref>.
+if [ "${1:-}" = --claims-before ]; then
+  ref="${2:?usage: selftest.sh --claims-before <git-ref>}"
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  mkdir -p "$d/src/scripts"
+  cp -a "$WS/scripts/." "$d/src/scripts/"
+  cp "$WS/config.sh" "$d/src/config.sh"
+  if [ -f "$WS/VERSION" ]; then cp "$WS/VERSION" "$d/src/VERSION"; fi
+  cp -a "$WS/agents" "$d/src/agents"
+  cp -a "$WS/lessons" "$d/src/lessons"
+  cp "$WS/checklist.md" "$d/src/checklist.md"
+  git -C "$WS" show "$ref:scripts/review.sh" > "$d/src/scripts/review.sh" || { echo "no scripts/review.sh at $ref"; exit 1; }
+  for f in claims.sh claims.py; do
+    if git -C "$WS" cat-file -e "$ref:scripts/$f" 2>/dev/null; then
+      git -C "$WS" show "$ref:scripts/$f" > "$d/src/scripts/$f"
+    else
+      rm -f "$d/src/scripts/$f"
+    fi
+  done
+  chmod +x "$d/src/scripts/"*.sh
+  claims_cases "$d/src" "$d/case"
+  exit $?
+fi
 # Run only the test-quality cases against the worktree's own scripts.
 if [ "${1:-}" = --test-quality ]; then
   d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
@@ -1471,6 +1720,32 @@ rm -f "$WS/runs/$slug/csbuild.pid" "$WS/runs/$slug/chain.pid" "$WS/runs/$slug/ch
 { grep -q 'RUNNING csbuild' <<< "$cs" && ! grep -q 'RUNNING chain' <<< "$cs" && grep -q 'CHAIN running' <<< "$cs"; } \
   && echo "cold start leaves the chain to the CHAIN line ok" \
   || { echo "cold start chain duplicate FAILED"; echo "$cs"; exit 1; }
+# A live ws bg job is named with its run time and log path; a dead pid and a job that wrote its exit print nothing,
+# and a project with no bg dir keeps the output it had.
+rm -rf "$WS/runs/$slug/bg"
+csno=$("$WS/scripts/cold-start.sh" "$slug" 2>&1)
+mkdir -p "$WS/runs/$slug/bg"
+sleep 30 & csbg=$!
+printf '%s\n' "$csbg" > "$WS/runs/$slug/bg/csjob.pid"
+: > "$WS/runs/$slug/bg/csjob.log"
+printf '%s\n' "$csbg" > "$WS/runs/$slug/bg/csfinished.pid"
+printf '0\n' > "$WS/runs/$slug/bg/csfinished.exit"
+sleep 0.1 & csdead=$!
+wait "$csdead" 2>/dev/null || true
+printf '%s\n' "$csdead" > "$WS/runs/$slug/bg/csdead.pid"
+cs=$("$WS/scripts/cold-start.sh" "$slug" 2>&1)
+kill "$csbg" 2>/dev/null || true; wait "$csbg" 2>/dev/null || true
+rm -rf "$WS/runs/$slug/bg"
+{ ! grep -qE '^  bg ' <<< "$csno" \
+  && grep -qE "^  bg csjob \([0-9]+ min, log runs/$slug/bg/csjob.log\)$" <<< "$cs" \
+  && ! grep -q 'bg csdead' <<< "$cs" && ! grep -q 'bg csfinished' <<< "$cs"; } \
+  && echo "cold start names a live bg job and skips a dead pid and a finished job ok" \
+  || { echo "cold start bg job FAILED"; echo "$cs"; exit 1; }
+# The elapsed style: minutes under an hour, hours and minutes at or past it.
+bel=$(. "$WS/scripts/lib.sh" >/dev/null; bg_elapsed "$(( $(date +%s) - 1500 ))")
+bhl=$(. "$WS/scripts/lib.sh" >/dev/null; bg_elapsed "$(( $(date +%s) - 3900 ))")
+[ "$bel" = "25 min" ] && [ "$bhl" = "1 h 5 min" ] && echo "bg elapsed prints minutes, then hours and minutes ok" \
+  || { echo "bg elapsed FAILED: '$bel' '$bhl'"; exit 1; }
 # The allowance meter, on a stand-in of OpenCode's message table. al_db <file> <model:dollars:age-seconds>...; the
 # ages are measured back from al_now, and Pro's row and a Claude-provider row stand beside Flash's.
 al_now=$(date +%s)
@@ -1668,6 +1943,7 @@ par_start chain-resume bash "$WS/scripts/chain-resume-check.sh"
 par_start chain-kill bash "$WS/scripts/chain-kill-check.sh"
 par_start orchestrator-record bash "$WS/scripts/orchestrator-record-check.sh"
 par_start orchestrator-record-doc bash "$WS/scripts/orchestrator-record-doc-check.sh"
+par_start verify bash "$WS/scripts/verify-check.sh"
 # The probe leaves no child behind (a SIGTERM-ignoring stand-in proves the group kill and the sweep), and a stale
 # pin in an existing orchestrator.json is named while a current one is silent. doctor-browser-selftest runs in the
 # background check group above, on its own temp workspace.
@@ -2519,6 +2795,9 @@ out=$("$WS/bin/ws" --project "$slug" review --print-prompt demo 2>&1 || true)
 grep -q 'The widget renders.' <<< "$out" && grep -q 'partial (inferred): The widget renders. | evidence: no browser here' <<< "$out" \
   && grep -q '^edge_cases:$' <<< "$out" && grep -q '^- platform: n/a: no browser feature$' <<< "$out" && grep -q '^- state_resets: n/a: no user input$' <<< "$out" \
   && echo "review prompt done-when and edge cases ok" || { echo "review prompt done-when FAILED"; echo "$out" | head -40; exit 1; }
+# review: the claims and test-quality inputs are in the prompt, after the mechanical precheck.
+grep -q 'Claims in the diff (scripts/claims.sh' <<< "$out" \
+  && echo "review prompt carries the claims input ok" || { echo "review claims input FAILED"; echo "$out" | head -40; exit 1; }
 # review: the test-quality input is in the prompt, after the mechanical precheck.
 grep -q 'Test-quality check (scripts/test-quality.sh' <<< "$out" \
   && echo "review prompt carries the test-quality input ok" || { echo "review test-quality input FAILED"; echo "$out" | head -40; exit 1; }
@@ -3207,6 +3486,9 @@ pc_nobase=$("$WS/scripts/precheck.sh" --project "$slug" --worktree "$W" nosuchbr
 # a changed test command's own script is not production, a whole-suite failing run counts, and the review
 # prompt's section is a real guard. Its scratch is outside $T because the release cases commit everything under $T.
 test_quality_cases "$WS" "$TQ/case" || exit 1
+# claims: a comment and a docstring claim with file:line, a test claim skipped, no claim word and no added prose
+# give "none", and the review prompt carries the section. Its scratch is outside $T for the same reason.
+claims_cases "$WS" "$TQ/claims" || exit 1
 # review: the reviewer's .local.md lessons reach its prompt after the shared file.
 printf -- '- shared reviewer marker\n' > "$L/reviewer.md"; printf -- '- local reviewer marker\n' > "$L/reviewer.local.md"
 out=$(WS_LESSONS_DIR="$L" "$WS/scripts/review.sh" --project "$slug" --print-prompt demo 2>&1 || true)
@@ -3614,11 +3896,14 @@ printf 'RELEASE_PATHS=("README.md" "lessons/builder.local.md=lessons/builder.md"
 bad=""; for f in "$WS"/projects/*.conf; do [ -f "$f" ] || continue; bad+=$(private_release_paths "$f"); done
 [ -n "$(private_release_paths "$T/private.conf")" ] && [ -z "$bad" ] && echo "no private file in RELEASE_PATHS ok" || { echo "private file in RELEASE_PATHS: $bad"; exit 1; }
 # The release cases commit $T with `git add -A`, so scratch a case leaves there is swept into the demo project; a
-# copied private lesson once made the release audit refuse the release. This fails, naming each unexpected
-# top-level entry, when a case leaves a new one. The allowlist is what the suite leaves today; a new fixture in
-# the release block or a new scratch directory must be added to it. Top-level entries are compared because $T
-# also tracks bare-repo object files and mktemp-suffixed plan paths whose full names differ on every run.
-release_scratch_entries='alchain.md
+# copied private lesson once made the release audit refuse the release. This fails, naming each unexpected path,
+# when a case leaves a new one. The allowlist is what the suite leaves today; a new fixture in the release block
+# or a new scratch file must be added to it. Full paths are compared, so a new file under lessons/, plans/ or
+# private/ is named too; only the bare repos' contents are matched by prefix, because their object names differ
+# on every run. plans/$slug/a.md carries the run's mktemp-derived slug.
+release_scratch_entries='CHANGELOG.public.md
+a.txt
+alchain.md
 alchain.out
 alchain.queue
 allowance-bad.db
@@ -3629,21 +3914,26 @@ allowance-pool.db
 allowance-starts.db
 allowance-sum.db
 args
-arm-files
-arm-plain
-a.txt
+arm-files/agents/builder.md
+arm-files/lessons/builder.md
+arm-files/map.md
+arm-files/stages/build/context.md
+arm-plain/agents/builder.md
+arm-plain/lessons/builder.local.md
+arm-plain/lessons/builder.md
+b.txt
 bench-hold.out
 bt.md
-b.txt
 bwrap-ok
 bwrap-old
 called
-ccbin
-cc-cap
+cc-cap/bin/claude
+cc-cap/called
+cc-cap/prompt.txt
 cc-prompt.txt
 cc-schema.json
+ccbin/claude
 cf.md
-CHANGELOG.public.md
 claude-probe.args
 clbuilder.md
 cmd-fix.md
@@ -3655,25 +3945,34 @@ deny-guard.err
 deny-guard.test.mjs
 deny-without-python
 done.md
-dvbin
+dvbin/claude
+dvbin/gh
+dvbin/npm
+dvbin/opencode
 dw.md
-fakebin
 fake_oc_server.py
+fakebin/claude
 grants
 held.queue
 heldtask.md
-helpbin
 help-stderr
+helpbin/claude
+helpbin/opencode
 input.u8
 interp-bundled.md
 interp-eval.md
-interp.md
 interp-unittest.md
-lessons
-light.md
+interp.md
+lessons/builder.local.md
+lessons/builder.md
+lessons/orchestrator.local.md
+lessons/orchestrator.md
+lessons/reviewer.local.md
+lessons/reviewer.md
 light-ui.md
+light.md
 locked
-nobin
+nobin/npm
 notify.log
 oc-browser-blank.json
 oc-browser-blank.pid
@@ -3689,11 +3988,10 @@ oc-browser-worked.json
 oc-browser-worked.pid
 oc-budget.pid
 oc-err.pid
-oc-perms.err
 oc-perms-mem.err
 oc-perms-mem.out
 oc-perms-refuse.err
-oc.pid
+oc-perms.err
 oc-receipt.json
 oc-skill-call-forced.jsonl
 oc-skill-call-forced.pid
@@ -3733,26 +4031,35 @@ oc-web-noresults.jsonl
 oc-web-noresults.pid
 oc-web-worked.jsonl
 oc-web-worked.pid
-origin.git
+oc.pid
 package.json
-pbin
+pbin/claude
+pbin/npm
+pbin/opencode
 pid-dead.pid
 pid-live.pid
 pid-old.pid
 pid-preboot.pid
 pid-serve.pid
 pid-thread.pid
-plans
-pmbin
-private
-probe-bin
+plans/other/p.md
+pmbin/notify-send
+pmbin/npm
+private/notes.local.md
+private/notes.md
+probe-bin/claude
+probe-bin/opencode
 probe.log
-public.git
 q.queue
 quoted-entry.md
 quoted-opts.md
 reply-time-plugin.test.mjs
-review-probe
+review-probe/both-bin/claude
+review-probe/both-bin/opencode
+review-probe/full.md
+review-probe/full.task.txt
+review-probe/light.md
+review-probe/light.task.txt
 rv.json
 sb-gitconfig
 sg.deny
@@ -3760,33 +4067,50 @@ sg.grants
 shell-c.md
 shell-covered.md
 shell-exact.md
-skillhome
+skillhome/.claude/skills/orchestrators-folder/SKILL.md
 sugg.json
-task.md
 t.sh
+task.md
 uf-empty.queue
 uf-locked
 uf.md
 uf.out
+uf.queue
 ufq-locked
 ufq.out
-uf.queue
-uf-remote.git
 ui.md
 web.queue
-webtask.md
-webtask-web-1.md'
+webtask-web-1.md
+webtask.md'
+release_scratch_entries+=$'\n'"plans/$slug/a.md"
 release_scratch_guard() { # <repo>
   local entry unexpected=''
   while IFS= read -r entry; do
-    grep -qxF "$entry" <<< "$release_scratch_entries" || unexpected+="$entry"$'\n'
-  done < <(git -C "$1" ls-files | cut -d/ -f1 | LC_ALL=C sort -u)
+    if grep -qxF "$entry" <<< "$release_scratch_entries"; then continue; fi
+    case "$entry" in
+      origin.git/*|public.git/*|uf-remote.git/*) continue ;;
+    esac
+    unexpected+="$entry"$'\n'
+  done < <(git -C "$1" ls-files | LC_ALL=C sort -u)
   if [ -n "$unexpected" ]; then
     echo "release scratch tracks unexpected entries:"
     printf '%s' "$unexpected"
     return 1
   fi
 }
+# The guard names a full path under an allowlisted directory that the cases do not create, then passes once it is gone.
+GC="$T/guard-copy"; git -C "$T" worktree add -q --detach "$GC" HEAD
+printf 'x\n' > "$GC/lessons/x.local.md"; git -C "$GC" add -- lessons/x.local.md
+git -C "$GC" -c user.name=t -c user.email=t@t commit -qm "an unexpected private lesson"
+gout=$(release_scratch_guard "$GC" 2>&1) && gx=0 || gx=$?
+{ [ "$gx" = 1 ] && grep -qx 'lessons/x.local.md' <<< "$gout"; } \
+  && echo "release scratch guard names a nested path under an allowed directory ok" \
+  || { echo "release scratch guard nested path FAILED (exit $gx):"; echo "$gout"; exit 1; }
+git -C "$GC" rm -q -- lessons/x.local.md
+git -C "$GC" -c user.name=t -c user.email=t@t commit -qm "remove the unexpected private lesson"
+release_scratch_guard "$GC" && echo "release scratch guard passes once the nested path is removed ok" \
+  || { echo "release scratch guard nested removal FAILED"; exit 1; }
+git -C "$T" worktree remove --force "$GC"
 release_scratch_guard "$T" && echo "release scratch tracks only its known entries ok" || exit 1
 # audit: a check script the test command's own script runs (here selftest.sh runs check-result.sh) is not flagged as unrun.
 mkdir -p "$T/no-runs"; au=$(python3 "$WS/scripts/audit.py" self "$WS" "bash scripts/selftest.sh" "$T/no-runs" "$T/no-plans" 30 2>&1 || true)
@@ -3919,6 +4243,7 @@ case "$OC_STUB" in
   reviewdiff) [ -n "${OC_MSG_OUT:-}" ] && printf '%s' "$msg" > "$OC_MSG_OUT"; t='{"verdict":"merge","summary":"stand-in review","blocking":[],"suggestions":[]}' ;;
   fix) [ "$call" = continue ] && t="$valid" || t='{"status":"done"}' ;;
   cutoff) t='{"status":"done"' ;;
+  nosession) printf '%s\n' '{"type":"step_start","part":{}}' '{"type":"text","part":{"type":"text","text":"not a review"}}'; exit 0 ;;
   nonl) out=$(jq -c --arg t "$valid" 'if .type == "text" then .part.text = $t else . end' "$OC_SAMPLE"); printf '%s' "$out"; exit 0 ;;
   slow) head -3 "$OC_SAMPLE"; sleep 30 & echo $! > "${OC_CHILD:-/dev/null}"; wait ;;
   shadowslow) for _ in $(seq 200); do [ -e "${OC_SHADOW_RELEASE:-}" ] && break; sleep 0.05; done; t='{"verdict":"merge","summary":"stand-in slow review","blocking":[],"suggestions":[]}' ;;
@@ -4330,6 +4655,15 @@ line=$(cat "$T/oc-calls" 2>/dev/null || true)
   && grep -Eq "^first stdin=/dev/null config=deny plugins= msg=[0-9a-f]{64} msg_len=[0-9]{1,3} custom=none file=${long_bytes}:${long_sha}$" <<< "$line" \
   && echo "opencode review prompt over the argv limit is attached as a file ok" || ofail "opencode long review prompt file" "$line
 $(tail -5 "$ocr/oclong.review.jsonl" 2>/dev/null)"
+# A reply that is not a valid review, in a log with no session id, cannot be continued: the launcher notes it and
+# does not call the stand-in a second time.
+rm -f "$T/oc-calls"
+( OPENCODE_CONFIG="$OC/opencode/orchestrator.json" oc nosession "$WS/scripts/opencode-review.sh" --model opencode-go/deepseek-v4.1-flash --budget 1 --config "$ocr/demo.opencode.json" \
+  --log "$ocr/ocnosession.review.jsonl" --name "ws:$slug:ocnosession" "$T/task.md" > "$ocr/ocnosession.review.jsonl" 2>&1 ) || true
+[ "$(cut -d' ' -f1 "$T/oc-calls")" = first ] \
+  && grep -q 'the reply is not a valid review and .* holds no session id, so there is no continue' "$ocr/ocnosession.review.jsonl" \
+  && echo "opencode review with no session id notes it and does not continue ok" \
+  || ofail "opencode review no session id" "$(cat "$T/oc-calls" "$ocr/ocnosession.review.jsonl" 2>/dev/null)"
 # Over the budget: the first step's cost passes it, the stand-in's whole process group is stopped (its sleep child
 # too), and the run is reported partial.
 t0=$(date +%s); ocb slow ocslow 0.001; secs=$(( $(date +%s) - t0 ))
@@ -5139,6 +5473,8 @@ printf 'epoch=1761588000\ntime=2026-10-27 11:00 MDT\ntip=%s\nnote=the sidebar is
 printf 'epoch=1761588000\ntime=2026-10-27 11:00 MDT\ntip=%s\nnote=a fix is running\n' "$(git -C "$BA" rev-parse main)" > "$BW/runs/brief-a/partial.hold"
 printf '%s 8800\n' "$$" > "$BW/runs/brief-a/serve-main.pid"
 printf '%s\n' "$$" > "$BW/runs/brief-a/livebuilder.pid"; : > "$BW/runs/brief-a/livebuilder.jsonl"
+mkdir -p "$BW/runs/brief-a/bg"
+printf '%s\n' "$$" > "$BW/runs/brief-a/bg/livejob.pid"; : > "$BW/runs/brief-a/bg/livejob.log"
 printf '# one\n\n**In flight right now (2026-10-27 12:58 MDT):** **Build:** dated marker\n\n**Next:** after that\n\n## Requirements\nnot this\n' > "$BW/plans/brief-a/one.md"
 printf '# two\n\n**In flight right now**\n\n**Now:** exact marker\n\n## Requirements\nnot this either\n' > "$BW/plans/brief-a/two.md"
 printf '# note\n' > "$BW/plans/brief-a/note.md"
@@ -5161,6 +5497,7 @@ grep -q 'run stale:' <<< "$out" && bok=false
 grep -q 'run nocommit: NO RESULT: a builder killed before its first commit' <<< "$out" || bok=false
 grep -q '^## Running' <<< "$out" || bok=false
 grep -q 'livebuilder' <<< "$out" || bok=false
+grep -q 'brief-a: bg livejob (.*log runs/brief-a/bg/livejob.log)' <<< "$out" || bok=false
 grep -q 'preview main on :8800' <<< "$out" || bok=false
 grep -q '^## In flight' <<< "$out" || bok=false
 grep -q 'dated marker' <<< "$out" || bok=false

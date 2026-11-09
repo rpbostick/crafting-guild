@@ -71,6 +71,8 @@ if ! over && ! errs=$(python3 -I "$helper" check "$log" "$schema"); then
     run --session "$sid" "Your last reply is not a valid review JSON. Errors:
 $errs
 Reply with only the JSON review."
+  else
+    note "opencode-review: the reply is not a valid review and $log holds no session id, so there is no continue"
   fi
 fi
 finish

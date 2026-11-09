@@ -114,6 +114,9 @@ case_doctor all-opencode-no-claude 0 \
 case_doctor claude-role-no-claude 1 \
   'FAIL  claude not found (needed by WS_AGENT)' \
   "$no_claude_path" claude opencode
+case_doctor claude-review-role-no-claude 1 \
+  'FAIL  claude not found (needed by WS_REVIEW_AGENT)' \
+  "$no_claude_path" opencode claude
 case_doctor all-opencode-no-opencode 1 \
   'FAIL  opencode not found (needed by WS_AGENT and WS_REVIEW_AGENT)' \
   "$no_opencode_path" opencode opencode
@@ -122,8 +125,10 @@ case_doctor all-opencode-no-opencode 1 \
 case_doctor auto-review-claude-only 0 \
   'ok    claude 2.1.999' \
   "$claude_only_path" claude '' 'FAIL  opencode'
+# An OpenCode-only install: builders on OpenCode, WS_REVIEW_AGENT empty, no claude on PATH. The auto note shows the
+# review role routed to OpenCode, not the Claude fallback.
 case_doctor auto-review-opencode-only 0 \
-  'ok    opencode 1.19.1' \
+  '(auto: reviews use opencode, the only client installed)' \
   "$no_claude_path" opencode '' 'FAIL  claude'
 case_doctor auto-review-both-clients 0 \
   'ok    opencode 1.19.1' \

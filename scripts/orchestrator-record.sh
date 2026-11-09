@@ -27,10 +27,9 @@ since_args=()
 # Deliberate: the time is spelled out; a bare date in git's --since takes the current time of day, which drops
 # that morning's commits.
 [ -z "$since" ] || since_args=("--since=$since 00:00:00")
-subject_re='^Merge agent/([A-Za-z0-9._/-]+)(: .*)? \((reviewed at ([0-9a-f]+)|merged at ([0-9a-f]+) with --no-review(: (.*))?)\)$'
-# A --no-look reason closes the same parenthesis, after subject_re's text. Split off first, because subject_re's
-# --no-review reason would otherwise swallow it; merge.sh refuses a reason holding this text.
-no_look_re='^(.*); --no-look: (.*)\)$'
+# The subject's shape and the --no-look split come from lib.sh, so verify.sh reads the same merge history.
+subject_re="$WS_MERGE_SUBJECT_RE"
+no_look_re="$WS_NO_LOOK_RE"
 
 # Paths a builder never needs: an edit here is the orchestrator's own record, not a change that bypassed one.
 is_bookkeeping() {
@@ -131,7 +130,7 @@ report_project() { # <slug>
       else other_sha=$((other_sha + 1)); fi
     else unrecognised=$((unrecognised + 1)); fi
     # The history is newest first and a reused step name overwrites its log, so only the newest merge owns it.
-    if [ -n "$name" ] && [ -z "${log_used[$name]:-}" ] && grep -qF -- '--- ws merge: suite' "$runs/$name.merge-tests.log" 2>/dev/null; then
+    if [ -n "$name" ] && [ -z "${log_used[$name]:-}" ] && grep -qF -- "$WS_MERGE_SUITE_MARK" "$runs/$name.merge-tests.log" 2>/dev/null; then
       log_used["$name"]=1; tests_on=$((tests_on + 1))
     else tests_off=$((tests_off + 1)); fi
     if [ -n "$first_look" ]; then

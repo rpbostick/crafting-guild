@@ -41,6 +41,13 @@ scripts/archive-inflight.sh  `ws archive-inflight [--dry-run] [<plan.md>...]`: k
                         top of the plan's in-flight-history.md (created with the existing history header when missing).
                         The default plans are the selected project's plans/<slug>/*.md except in-flight-history.md
                         and task-*.md; --dry-run prints what would move and writes nothing.
+scripts/claims.sh       the claim sentences added in a branch's prose and comments, for the reviewer prompt:
+                        at most 20 `<file>:<line>: <sentence>` lines, each cut at 200 characters, or `none`.
+                        Candidates, not verdicts; review.sh puts them in the prompt from this output.
+scripts/claims.py       the scan behind claims.sh: the added prose and comment lines in the branch diff, the
+                        claim word list, and the skips (test files, .ws-evidence/). A `#` counts as a comment only
+                        at the line's first non-space character or in a Python docstring, so a quoted `#` is left
+                        alone; C-style `//` and `/* */` comments are read on their own.
 scripts/dispatch.sh     creates the worktree, builds the builder prompt and grant, runs claude -p in the background,
                         then runs check-result.sh when it ends. `--agent opencode` (or WS_AGENT) runs opencode-builder.sh
                         in its place, with the grants written to runs/<slug>/<name>.opencode.json. `--effort E` is
@@ -123,6 +130,10 @@ scripts/review-shadow.sh  a shadow review: the same SHA and merge base reviewed 
 scripts/review_match.py  the nearby-text rule: same file, and a line within five or within 20 with the same fault by
                         word match. `count` is one pair, `report` recomputes review-shadow.tsv from kept records and
                         writes nothing. The TSV's named column stays under the five-line rule so its rows stay comparable.
+                        `union` merges the passes of `ws review --passes N` (or WS_REVIEW_PASSES): findings deduped by
+                        file and a line within five, the strictest verdict, the summed cost and `"passes": N`. A record
+                        review.sh writes always carries the field, `"passes": 1` for a one-pass review, so only an older
+                        record lacks it.
                         A row whose records changed after it was written keeps its written count and is named in
                         the output, as is any record that does not parse.
 scripts/orchestrator-record.sh  `ws orchestrator-record [--project slug|--all] [--since YYYY-MM-DD] [--runs DIR]`: one
@@ -138,6 +149,16 @@ scripts/orchestrator-record.sh  `ws orchestrator-record [--project slug|--all] [
                         --runs names another runs/ directory, since a linked worktree has none of its own.
 scripts/orchestrator-record-check.sh  its check on a throwaway project with a known mix; selftest.sh runs it.
 scripts/orchestrator-record-doc-check.sh  its check that doc, config and code direct commits are counted apart; selftest.sh runs it.
+scripts/verify.sh       `ws verify [--project slug] [--since YYYY-MM-DD] [--passes N] [--json]`: checks every merge
+                         on the project branch since the date. The subject must name the reviewed SHA and the step; a
+                         review at that SHA must carry it and say merge; a merge test run must be on record (the log's
+                         WS_MERGE_SUITE_MARK or the merge.unfinished marker at stage push, with only the newest merge of
+                         a reused step name owning the shared log); no --no-review and no
+                         unreasoned --no-look; with --passes N (or WS_VERIFY_PASSES) a merge that changes a file other
+                         than documentation or a test must record at least N review passes. Prints each broken rule and
+                         exits 1; --json prints the same as a record. Reads the merge subjects through the regexes in
+                         lib.sh that orchestrator-record.sh uses too, and needs no model call or network.
+ scripts/verify-check.sh  its check on throwaway clean and broken projects, one merge per rule; selftest.sh runs it.
 scripts/opencode-review.sh  the OpenCode review launcher: zdr-check.sh first, then `opencode run` under the read-only
                         config, the budget watch, one continue on an invalid review, and the result line review.sh reads.
                         Both launchers take their prompt arguments from lib.sh's opencode_prompt_args: over 96 KiB the prompt

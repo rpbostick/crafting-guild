@@ -26,15 +26,17 @@ ws dispatch [flags] <name> <task-file>   run a builder (see scripts/dispatch.sh 
                                 through OpenCode on a zero-retention model (--model provider/model, WS_OPENCODE_MODEL);
                                 --effort E is then a model variant ("opencode run --variant", e.g. high or max), checked
                                 against the model's list; --temperature T (0-2) and --top-p P (over 0 up to 1) set
-                                its build agent's sampling
+                                its build agent's sampling; --agent claude needs the Claude CLI and is optional, so an
+                                OpenCode-only install leaves it out
 ws wait <name> [minutes]        block until the run finishes; exit 0 if its result checks out
 ws tail <name>                  follow a run's log as readable lines
 ws runs [slug]                  runs and their results
 ws review [--agent claude|opencode] [flags] <name>   review the branch; prints the verdict and the SHA to merge
                                 --agent opencode runs the review on OpenCode (--model provider/model, WS_REVIEW_AGENT)
+                                --passes N (1-3, WS_REVIEW_PASSES) runs N reviews and unions their findings
                                 auto routing uses whichever client is installed (the changed files decide when both
-                                are); an OpenCode-only install also sets WS_AGENT=opencode. Set WS_REVIEW_AGENT
-                                only to force a client
+                                are); an OpenCode-only install also sets WS_AGENT=opencode and reviews on OpenCode,
+                                two passes unioned when WS_REVIEW_PASSES=2. Set WS_REVIEW_AGENT only to force a client
 ws review-compare [flags] <name>...   run an OpenCode review beside the Claude review on record and print verdicts,
                                 blocking counts and the findings OpenCode names within five lines
 ws review-compare --fix-first [--dry-run] [--limit N] [name[@sha]...]   use the commits Claude marked fix-first in
@@ -50,6 +52,10 @@ ws orchestrator-record [--project slug|--all] [--since YYYY-MM-DD] [--runs DIR] 
                                 bookkeeping commits, test runs on record, gates, chain stops by how they were noted,
                                 each --no-review and --no-look reason, visible merges with and without a look; "not recorded" when no
                                 source holds a number; owners from WS_ORCHESTRATOR_OPENCODE
+ws verify [--project slug] [--since YYYY-MM-DD] [--passes N] [--json]   check every merge's recorded invariants:
+                                reviewed at the merged SHA with verdict merge, a test run on record, no --no-review and
+                                a --no-look reason, and (with --passes N or WS_VERIFY_PASSES) N passes on a merge that
+                                changes code; exits 1 naming each broken rule, --json prints the record
 ws teeth <name>                 check the branch tip without its non-test changes: ok (its tests fail), toothless
                                 (they pass), n/a or error; runs/<slug>/<name>.teeth.txt, chain runs it before review
 ws merge [--no-review "<reason>"] [--no-look "<reason>"] <name> <sha>   merge a reviewed branch, test, push, clean up;
@@ -127,8 +133,9 @@ ws site [--dry-run]             copy the project's SITE_SYNC files into its SITE
                                 run the site's tests, commit, push, wait until live
 ws doctor [--parity]            check this machine and the selected project; --parity runs one structured-output probe per agent, and OpenCode's web fetch, web search, browser, skill list and skill call
 ws claude [--budget USD] [--schema file] [--dir path] [--allow tool] [--raw] [--spent] <prompt-file|->
-                                run one Claude Code job from this session (read-only by default; no worktree);
-                                --spent prints today's total, the cap and the room left, and starts no job
+                                run one Claude Code job from this session; needs the Claude CLI and is optional
+                                (read-only by default; no worktree); --spent prints today's total, the cap and the
+                                room left, and starts no job
 ws email-audit [--project slug | --repo path]... [--all] [--range R]   find personal addresses in git identity,
                                 commit metadata, reflogs and tracked files; exits 1 on a finding
 ws opencode-perms [--dry-run] [--config <file>]   write the orchestrator's OpenCode config (orchestrator.json,
@@ -238,6 +245,7 @@ case "$cmd" in
   review-compare) "$WS/scripts/review-compare.sh" ${proj:+--project "$proj"} "$@" ;;
   review-shadow) "$WS/scripts/review-shadow.sh" ${proj:+--project "$proj"} "$@" ;;
   orchestrator-record) "$WS/scripts/orchestrator-record.sh" ${proj:+--project "$proj"} "$@" ;;
+  verify) "$WS/scripts/verify.sh" ${proj:+--project "$proj"} "$@" ;;
   merge) "$WS/scripts/merge.sh" ${proj:+--project "$proj"} "$@" ;;
   hold) "$WS/scripts/hold.sh" ${proj:+--project "$proj"} "$@" ;;
   archive-inflight) "$WS/scripts/archive-inflight.sh" ${proj:+--project "$proj"} "$@" ;;
