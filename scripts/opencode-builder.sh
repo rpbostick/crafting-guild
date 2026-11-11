@@ -42,7 +42,7 @@ if [ -z "$display" ]; then
   reason="no display name for $model in WS_OPENCODE_MODEL_NAMES (config.sh), so zdr-check cannot read its privacy row"
   echo "opencode-builder: refused: $reason"; finish --refused "$reason"; exit 1
 fi
-if ! zdr=$("$WS/scripts/zdr-check.sh" ${WS_ZDR_PAGE:+--page "$WS_ZDR_PAGE"} "$display" 2>&1); then
+if ! zdr=$("$WS/scripts/zdr-check.sh" --provider "${model%%/*}" ${WS_ZDR_PAGE:+--page "$WS_ZDR_PAGE"} "$display" 2>&1); then
   echo "opencode-builder: refused: $zdr"; finish --refused "$zdr"; exit 1
 fi
 echo "opencode-builder: $zdr"

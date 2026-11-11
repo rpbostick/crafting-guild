@@ -10,6 +10,8 @@ slug="${1:-}"
 echo "=== ws cold-start $(now_local) (v$(cat "$WS/VERSION" 2>/dev/null || echo ?)) ==="
 # The hourly brief: name the file, its age and what waits on you, so a session knows where to look.
 if $brief; then
+  ask_prompts_line
+  maintenance_due_line
   bn=0; planw=""; ufw=""
   while IFS= read -r bslug; do
     [ -n "$bslug" ] || continue

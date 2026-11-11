@@ -12,15 +12,18 @@
 # and reviewer prompt (the worktree path is left out: a scratch checkout varies it per run, and a bench replay
 # commits with a fixed date, so the same replay's commit and prompt repeat), so re-running a case copies it instead
 # of paying for the model again; --no-cache reviews it again. The merged mode and the shadow reviews are never cached.
-# Usage: review-compare.sh [--project slug] [--model provider/model] [--budget USD] <name>...
-#        review-compare.sh [--project slug] [--model provider/model] [--budget USD] --fix-first [--dry-run] [--no-cache] [--limit N] [name[@sha]...]
-#        review-compare.sh [--bench slug] [--arm label] [--model provider/model] [--budget USD] [--no-cache] [--limit N] [run...]
+# --variant runs every OpenCode review at that model variant (its reasoning effort), so a comparison can hold the
+# effort fixed across arms.
+# Usage: review-compare.sh [--project slug] [--model provider/model] [--budget USD] [--variant <name>] <name>...
+#        review-compare.sh [--project slug] [--model provider/model] [--budget USD] [--variant <name>] --fix-first [--dry-run] [--no-cache] [--limit N] [name[@sha]...]
+#        review-compare.sh [--bench slug] [--arm label] [--model provider/model] [--budget USD] [--variant <name>] [--no-cache] [--limit N] [run...]
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
-slug="" model="" budget="$WS_REVIEW_BUDGET" fix_first=false bench_slug="" bench_arm="" limit="" mode=merged dry_run=false
+slug="" model="" budget="$WS_REVIEW_BUDGET" variant="" fix_first=false bench_slug="" bench_arm="" limit="" mode=merged dry_run=false
 no_cache=false cache_enabled=false cache_hits=0 cache_misses=0
 while [ $# -gt 0 ]; do case "$1" in
   --project) slug="$2"; shift 2 ;; --model) model="$2"; shift 2 ;; --budget) budget="$2"; shift 2 ;;
+  --variant) variant="$2"; shift 2 ;;
   --fix-first) fix_first=true; shift ;;
   --dry-run) dry_run=true; shift ;;
   --no-cache) no_cache=true; shift ;;
@@ -82,9 +85,10 @@ review_cache_key() { # <name> <out-base> <worktree> <base>
   [ -n "$prompt" ] || return 1
   # A fix-first case reviews a scratch worktree whose path carries this run's PID, so the path itself would change
   # the key on every invocation while the same committed tree is reviewed. The prompt names the path only as the
-  # place to read files, so leave it out of the key.
+  # place to read files, so leave it out of the key. The variant is part of the key: the same prompt at another
+  # effort is another review.
   prompt=${prompt//"$wt"/<worktree>}
-  printf '%s\n%s' "${model:-$WS_OPENCODE_MODEL}" "$prompt" | sha256sum | cut -d' ' -f1
+  printf '%s\n%s\n%s' "${model:-$WS_OPENCODE_MODEL}" "$variant" "$prompt" | sha256sum | cut -d' ' -f1
 }
 
 review_cache_hit() { # <key> <out-base>
@@ -123,6 +127,7 @@ run_opencode_review() { # <name> <out-base> <worktree> <base> <log>
   local -a rev_args=(--project "$SLUG" --agent opencode --budget "$budget" --out "$out_base" --worktree "$wt")
   [ -n "$base" ] && rev_args+=(--base "$base")
   [ -n "$model" ] && rev_args+=(--model "$model")
+  [ -n "$variant" ] && rev_args+=(--variant "$variant")
   rm -f "$out_base.json" "$out_base.md"
   if [ "$cache_enabled" = true ]; then
     key=$(review_cache_key "$name" "$out_base" "$wt" "$base") || key=""

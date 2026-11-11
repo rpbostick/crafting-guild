@@ -180,6 +180,13 @@ if [ -n "${WS_ATTRIBUTION_RE:-}" ]; then
   [ -z "$attrib" ] || die "branch $br adds lines that attribute work to a person or to this process (first 5 below). State the reason as a fact, or 'Deliberate:' for a choice that must stay; commit, and review again. An intended credit belongs in the project's CREDIT_PATHS.
 $attrib"
 fi
+# A deterministic scan of the branch's added lines, before the merge commit exists: a secret, a private-key header
+# or a committed credential file blocks it, so a finding cannot be argued past a reviewer; risky shell spellings
+# are printed for the merge log and do not block. Deliberate: only the branch's diff is scanned, so an old secret
+# already on the main branch does not block every merge, and no network call is made.
+x=0; scan=$("$WS/scripts/security-scan.sh" --repo "$PROJECT_PATH" --base "$PROJECT_BRANCH" --head "$tip" 2>&1) || x=$?
+[ -z "$scan" ] || printf '%s\n' "$scan" >&2
+[ "$x" = 0 ] || die "security scan blocked the merge (above); fix it on the branch, commit, and review again"
 has_remote=false
 if git -C "$PROJECT_PATH" remote get-url origin >/dev/null 2>&1; then
   has_remote=true; timeout 20 git -C "$PROJECT_PATH" fetch origin -q || die "fetch failed"

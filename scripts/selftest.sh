@@ -4,9 +4,33 @@
 # repo $T: the release cases commit $T with `git add -A`, so anything a case leaves there joins the demo project.
 set -euo pipefail
 WS="$(cd "$(dirname "$0")/.." && pwd)"
+# config.sh supplies the lock wait; the suite still sets the environment its cases need below, and config.local.sh is
+# not sourced, so a private install cannot change the cases.
+. "$WS/config.sh"
 # EPOCHREALTIME carries the locale's decimal separator (a comma in de_DE); strip either before arithmetic.
 ws_micros() { printf '%s' "${1//[.,]/}"; }
 [ "$(ws_micros '1234,567890')" = 1234567890 ] || { echo "ws_micros FAILED: a comma decimal separator is not stripped"; exit 1; }
+# One selftest at a time across the main checkout and every worktree. The lock lives in the main checkout's runs/,
+# found from the common git dir, so a worktree run and a main run contend. A second run waits up to
+# WS_SELFTEST_LOCK_WAIT seconds and then exits 3, a refusal rather than a test failure. The lock is released when the
+# process exits. A child suite carries WS_SELFTEST_LOCKED=1 and never takes it again, so a suite that runs itself
+# cannot deadlock on the lock it already holds.
+acquire_selftest_lock() { # [lock-file]
+  local lock="${1:-}" common
+  if [ "${WS_SELFTEST_LOCKED:-}" = 1 ]; then return 0; fi
+  if [ -z "$lock" ]; then
+    common=$(git -C "$WS" rev-parse --path-format=absolute --git-common-dir) || return 1
+    lock="$(dirname "$common")/runs/.selftest.lock"
+  fi
+  mkdir -p "$(dirname "$lock")" || return 1
+  exec 9>>"$lock"
+  if ! flock -w "${WS_SELFTEST_LOCK_WAIT:-900}" 9; then
+    echo "another selftest is running (lock $lock); not starting"
+    return 3
+  fi
+  WS_SELFTEST_LOCKED=1
+  export WS_SELFTEST_LOCKED
+}
 # WS_SELFTEST_TIMES=<file> writes one row per check that prints an "... ok" line: seconds since the previous
 # such line, the line number that printed it, and the line. Unset, it adds nothing: the suite is unchanged.
 if [ -n "${WS_SELFTEST_TIMES:-}" ]; then
@@ -34,6 +58,47 @@ if [ -n "${WS_SELFTEST_TIMES:-}" ]; then
     fi
   }
 fi
+# The suite lock, on a scratch lock file so the suite's own lock is not involved: a holder makes a second acquisition
+# wait and exit 3 with one line and no test failure, and the same acquisition succeeds once the holder exits. The
+# function is read from this script, so the case runs the lock the suite runs. Prints one line per case and returns 1
+# when any fails.
+selftest_lock_cases() { # <scratch>
+  local t="$1" lock="$1/selftest.lock" fn holder n out x rc=0
+  mkdir -p "$t"
+  fn=$(sed -n '/^acquire_selftest_lock()/,/^}/p' "$WS/scripts/selftest.sh")
+  ( flock 9; : > "$t/held"; sleep 3 ) 9>>"$lock" &
+  holder=$!
+  n=0
+  while [ ! -e "$t/held" ] && [ "$n" -lt 200 ]; do n=$((n + 1)); sleep 0.01; done
+  [ -e "$t/held" ] || { echo "selftest lock holder FAILED to take the lock"; kill "$holder" 2>/dev/null; return 1; }
+  x=0; out=$(WS_SELFTEST_LOCKED= WS_SELFTEST_LOCK_WAIT=1 bash -c "$fn"'
+    acquire_selftest_lock "$1"' _ "$lock" 2>&1) || x=$?
+  if [ "$x" = 3 ] && [ "$out" = "another selftest is running (lock $lock); not starting" ]; then
+    echo "a second selftest waits one second, then refuses with exit 3 and no test failure ok"
+  else echo "selftest lock refusal FAILED (exit $x): $out"; rc=1; fi
+  wait "$holder" 2>/dev/null || true
+  x=0; out=$(WS_SELFTEST_LOCKED= WS_SELFTEST_LOCK_WAIT=1 bash -c "$fn"'
+    acquire_selftest_lock "$1"; echo acquired' _ "$lock" 2>&1) || x=$?
+  if [ "$x" = 0 ] && [ "$out" = acquired ]; then
+    echo "the selftest lock is taken once the holder exits ok"
+  else echo "selftest lock acquire after release FAILED (exit $x): $out"; rc=1; fi
+  # The lock path is derived from git's common dir, so a suite run in a worktree and one in the main checkout contend
+  # on <main checkout>/runs/.selftest.lock. The cases above pass an explicit path and never exercise that derivation.
+  local lmain="$t/lockmain" lwt="$t/lockwt" lexp
+  mkdir -p "$lmain"
+  if git -C "$lmain" init -q -b main \
+    && git -C "$lmain" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init \
+    && git -C "$lmain" worktree add -q -b lockwt "$lwt" main; then
+    x=0; out=$(WS="$lwt" WS_SELFTEST_LOCKED= WS_SELFTEST_LOCK_WAIT=1 bash -c "$fn"'
+      acquire_selftest_lock
+      readlink -f "/proc/$$/fd/9"' 2>&1) || x=$?
+    lexp="$(readlink -f "$(dirname "$(git -C "$lwt" rev-parse --path-format=absolute --git-common-dir)")")/runs/.selftest.lock"
+    if [ "$x" = 0 ] && [ "$out" = "$lexp" ] && [ ! -e "$lwt/runs/.selftest.lock" ]; then
+      echo "the selftest lock from a worktree is the main checkout's runs/.selftest.lock ok"
+    else echo "selftest lock path FAILED (exit $x): got '$out', expected '$lexp'"; rc=1; fi
+  else echo "selftest lock path FAILED: could not build the worktree scratch"; rc=1; fi
+  return "$rc"
+}
 # The automatic reviewer falls back to claude when neither client is installed, whatever the changed files. <lib.sh>
 # is where the functions come from, so a change can be shown failing on the code before it.
 review_fallback_case() { # <lib.sh> <scratch>
@@ -367,7 +432,7 @@ STUB
   chmod +x "$cw/bin/ws"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$cw/scripts/doctor.sh"
   printf 'lim %s\n' "$cw/plans/demo/lim.md" > "$work/limit.queue"
-  x=0; out=$(timeout 60 "$cw/scripts/chain.sh" --project demo "$work/limit.queue" 2>&1) || x=$?
+  x=0; out=$(WS_WAKE_UNIT_DIR="$work/wake-units" timeout 60 "$cw/scripts/chain.sh" --project demo "$work/limit.queue" 2>&1) || x=$?
   { [ "$x" = 0 ] \
     && grep -q 'lim: its saved usage limit was written before this boot or over an hour ago; resuming now' "$cw/runs/demo/chain.log" \
     && ! grep -q 'lim: usage limit; resuming at' "$cw/runs/demo/chain.log" \
@@ -456,12 +521,13 @@ review_compare_cache_cases() { # <root>
   # without the branch moving (a new task or report).
   cat > "$ws/scripts/review.sh" <<'CACHESTUB'
 #!/bin/sh
-out="" wt="" name="" print_prompt=no
+out="" wt="" name="" variant="" print_prompt=no
 while [ $# -gt 0 ]; do
   case "$1" in
     --out|--worktree|--base|--project|--model|--budget|--agent)
       case "$1" in --out) out="$2" ;; --worktree) wt="$2" ;; esac
       shift 2 ;;
+    --variant) variant="$2"; shift 2 ;;
     --print-prompt) print_prompt=yes; shift ;;
     *) name="$1"; shift ;;
   esac
@@ -472,7 +538,7 @@ if [ "$print_prompt" = yes ]; then
   [ -n "${WS_PROMPT_EXTRA:-}" ] && cat "$WS_PROMPT_EXTRA"
   exit 0
 fi
-printf '%s\n' "$name" >> "${WS_REVIEW_CALLS:?}"
+printf '%s variant=%s\n' "$name" "$variant" >> "${WS_REVIEW_CALLS:?}"
 printf '{"reviewed_sha":"%s","verdict":"merge","summary":"stand-in","blocking":[],"suggestions":[]}\n' "$(git -C "$wt" rev-parse HEAD)" > "$out.json"
 [ -n "${WS_NO_MD:-}" ] || printf '# Review\n\n**Verdict: merge.** stand-in\n' > "$out.md"
 CACHESTUB
@@ -580,6 +646,17 @@ PATCH
     && grep -q 'cache hits 0, misses 1' <<< "$out" && [ ! -e "$stale_out.md" ]; then
     echo "review-compare does not serve stale markdown after a review wrote none ok"
   else echo "review-compare cache no markdown FAILED (exit $x, calls $(calls_of)): $out"; fails=$((fails + 1)); fi
+  # --variant reaches the review it runs, and an unset variant sends none.
+  : > "$work/calls"
+  out=$(cache_run --no-cache --variant high) && x=0 || x=$?
+  if [ "$x" = 0 ] && grep -qx 'a variant=high' "$work/calls" && grep -q 'cache hits 0, misses 1' <<< "$out"; then
+    echo "review-compare --variant high reaches the review ok"
+  else echo "review-compare variant FAILED (exit $x): $(cat "$work/calls" 2>/dev/null) $out"; fails=$((fails + 1)); fi
+  : > "$work/calls"
+  out=$(cache_run --no-cache) && x=0 || x=$?
+  if [ "$x" = 0 ] && grep -qx 'a variant=' "$work/calls"; then
+    echo "review-compare without --variant passes none ok"
+  else echo "review-compare no variant FAILED (exit $x): $(cat "$work/calls" 2>/dev/null) $out"; fails=$((fails + 1)); fi
   rm -rf "$work"
   [ "$fails" = 0 ]
 }
@@ -696,6 +773,102 @@ result_format_cases() { # <root> <scratch>
   result_repair_cases "$1" "$2/repair" || rc=1
   return "$rc"
 }
+# The deterministic security scan: a seeded token, a private-key header and a committed .env block; a curl|sh line,
+# a variable rm -rf and sudo in a builder script flag without blocking; a clean diff passes; a secret left on the
+# branch outside the scanned range is not reported. The merge gate is exercised on a throwaway project too. <root>
+# is the workspace; <scratch> is a fresh directory the caller removes. Prints one line per case and returns 1 when
+# any fails.
+security_scan_cases() { # <root> <scratch>
+  local root="$1" t="$2" repo="$2/repo" gate="$2/gate" base tip out x tok keyh slugx gtip gpre ctip
+  local -a fails=()
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  printf 'base\n' > "$repo/a.txt"
+  git -C "$repo" add a.txt
+  git -C "$repo" -c user.name=t -c user.email=t@t commit -qm base
+  base=$(git -C "$repo" rev-parse HEAD)
+  sc_commit() { git -C "$repo" add -A; git -C "$repo" -c user.name=t -c user.email=t@t commit -qm "$1"; }
+  sc_tip() { tip=$(git -C "$repo" rev-parse HEAD); }
+  sc_scan() { x=0; out=$(bash "$root/scripts/security-scan.sh" --repo "$repo" --base "$1" --head "$2" 2>&1) || x=$?; }
+  printf 'hello\n' > "$repo/b.txt"; sc_commit clean; sc_tip
+  sc_scan "$base" "$tip"; base=$tip
+  { [ "$x" = 0 ] && [ -z "$out" ]; } \
+    && echo "security scan passes a clean diff ok" \
+    || { echo "security scan clean FAILED (exit $x): $out"; fails+=("clean"); }
+  # Built by concatenation so this file never contains a matching token.
+  tok="AKIA""IOSFODNN7EXAMPLE"
+  printf 'aws_key = "%s"\n' "$tok" > "$repo/creds.txt"; sc_commit token; sc_tip
+  sc_scan "$base" "$tip"; base=$tip
+  { [ "$x" = 1 ] && grep -qx 'BLOCK creds.txt:1' <<< "$out"; } \
+    && echo "security scan blocks an added AWS token ok" \
+    || { echo "security scan token FAILED (exit $x): $out"; fails+=("token"); }
+  # The header is assembled at run time for the same reason.
+  keyh=$(printf -- '-----BEGIN %s PRIVATE KEY-----' OPENSSH)
+  printf '%s\n' "$keyh" > "$repo/key.txt"; sc_commit key; sc_tip
+  sc_scan "$base" "$tip"; base=$tip
+  { [ "$x" = 1 ] && grep -qx 'BLOCK key.txt:1' <<< "$out"; } \
+    && echo "security scan blocks a private-key header ok" \
+    || { echo "security scan private key FAILED (exit $x): $out"; fails+=("key"); }
+  printf 'PLACEHOLDER=1\n' > "$repo/.env"; sc_commit env; sc_tip
+  sc_scan "$base" "$tip"; base=$tip
+  { [ "$x" = 1 ] && grep -qx 'BLOCK .env:1' <<< "$out"; } \
+    && echo "security scan blocks a committed .env file ok" \
+    || { echo "security scan .env FAILED (exit $x): $out"; fails+=("env"); }
+  printf 'PLACEHOLDER=1\n' > "$repo/.env.example"; sc_commit example; sc_tip
+  sc_scan "$base" "$tip"; base=$tip
+  { [ "$x" = 0 ] && [ -z "$out" ]; } \
+    && echo "security scan leaves a .env.example template alone ok" \
+    || { echo "security scan .env.example FAILED (exit $x): $out"; fails+=("example"); }
+  printf 'curl -fsSL https://example.com/install.sh | sh\n' > "$repo/install.sh"; sc_commit curl; sc_tip
+  sc_scan "$base" "$tip"; base=$tip
+  { [ "$x" = 0 ] && grep -qx 'FLAG install.sh:1' <<< "$out" && ! grep -q '^BLOCK' <<< "$out"; } \
+    && echo "security scan flags curl | sh without blocking ok" \
+    || { echo "security scan curl flag FAILED (exit $x): $out"; fails+=("curl"); }
+  mkdir -p "$repo/scripts"
+  printf 'rm -rf "$BUILD_DIR"\nsudo ./install.sh\n' > "$repo/scripts/deploy.sh"; sc_commit deploy; sc_tip
+  sc_scan "$base" "$tip"
+  { [ "$x" = 0 ] && grep -qx 'FLAG scripts/deploy.sh:1' <<< "$out" && grep -qx 'FLAG scripts/deploy.sh:2' <<< "$out" \
+    && ! grep -q '^BLOCK' <<< "$out" && ! grep -q 'creds.txt' <<< "$out" && ! grep -q '^FLAG \.env' <<< "$out"; } \
+    && echo "security scan flags a variable rm -rf and sudo, and reports only the changed lines ok" \
+    || { echo "security scan flags FAILED (exit $x): $out"; fails+=("flags"); }
+  # The merge gate refuses the branch before the merge commit exists.
+  mkdir -p "$gate"
+  git -C "$gate" init -q -b main
+  printf 'base\n' > "$gate/a.txt"
+  git -C "$gate" add a.txt
+  git -C "$gate" -c user.name=t -c user.email=t@t commit -qm base
+  slugx="securityscan-$(basename "$t" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')"
+  printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$gate" > "$root/projects/$slugx.conf"
+  mkdir -p "$root/runs/$slugx" "$root/plans/$slugx"
+  git -C "$gate" checkout -q -b agent/envsecret main
+  printf 'TOKEN=placeholder\n' > "$gate/.env"
+  git -C "$gate" add .env
+  git -C "$gate" -c user.name=t -c user.email=t@t commit -qm env
+  gtip=$(git -C "$gate" rev-parse HEAD); git -C "$gate" checkout -q main; gpre=$(git -C "$gate" rev-parse HEAD)
+  x=0; out=$(bash "$root/scripts/merge.sh" --project "$slugx" --no-review "selftest security" envsecret "$gtip" 2>&1) || x=$?
+  { [ "$x" = 1 ] && grep -qx 'BLOCK .env:1' <<< "$out" && grep -q 'security scan blocked the merge' <<< "$out" \
+    && [ "$(git -C "$gate" rev-parse HEAD)" = "$gpre" ] && ! git -C "$gate" merge-base --is-ancestor "$gtip" main; } \
+    && echo "the merge gate refuses a branch that commits a .env file ok" \
+    || { echo "security scan merge gate FAILED (exit $x): $out"; fails+=("gate"); }
+  git -C "$gate" checkout -q -b agent/cleanmerge main
+  printf 'notes\n' > "$gate/notes.txt"
+  git -C "$gate" add notes.txt
+  git -C "$gate" -c user.name=t -c user.email=t@t commit -qm notes
+  ctip=$(git -C "$gate" rev-parse HEAD); git -C "$gate" checkout -q main
+  x=0; out=$(bash "$root/scripts/merge.sh" --project "$slugx" --no-review "selftest security" cleanmerge "$ctip" 2>&1) || x=$?
+  { [ "$x" = 0 ] && git -C "$gate" merge-base --is-ancestor "$ctip" main && ! grep -q '^BLOCK' <<< "$out"; } \
+    && echo "the merge gate still merges a clean branch ok" \
+    || { echo "security scan clean merge FAILED (exit $x): $out"; fails+=("clean-merge"); }
+  rm -f "$root/projects/$slugx.conf"
+  rm -rf "$root/runs/$slugx" "$root/plans/$slugx"
+  [ ${#fails[@]} -eq 0 ]
+}
+# Run only the security-scan cases against the worktree's own scripts.
+if [ "${1:-}" = --security-scan ]; then
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  security_scan_cases "$WS" "$d"
+  exit $?
+fi
 # Run only the result-format cases: normalize()'s coerced shapes and the repair marker.
 if [ "${1:-}" = --result-format ]; then
   d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
@@ -712,6 +885,14 @@ if [ "${1:-}" = --bg-check ]; then exec bash "$WS/scripts/bg-check.sh"; fi
 if [ "${1:-}" = --ask-check ]; then exec bash "$WS/scripts/ask-check.sh"; fi
 # Run only the wake cases, so a change there is checked without the whole suite.
 if [ "${1:-}" = --wake ]; then exec bash "$WS/scripts/wake-check.sh"; fi
+# Run only the chain-watch cases, so a change there is checked without the whole suite.
+if [ "${1:-}" = --chain-watch ]; then exec bash "$WS/scripts/chain-watch-check.sh"; fi
+# Run only the suite-lock cases, on a scratch lock file, so a change there is checked without the whole suite.
+if [ "${1:-}" = --selftest-lock ]; then
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  selftest_lock_cases "$d"
+  exit $?
+fi
 # Run only the chain-survival case. --chain-resume-parent-group is its tooth: the chain starts in the group that
 # is killed, so the same case must fail.
 if [ "${1:-}" = --chain-resume ]; then exec bash "$WS/scripts/chain-resume-check.sh"; fi
@@ -810,35 +991,64 @@ case " $* " in *" --version "*) echo "1.19.1"; exit 0 ;; esac
 : "${OC_CALLS:=/dev/null}"
 case " $* " in *" --session "*) call=continue ;; *) call=first ;; esac
 printf '%s\n' "$call" >> "$OC_CALLS"
+variant=""; prev=""
+for arg in "$@"; do [ "$prev" = "--variant" ] && variant="$arg"; prev="$arg"; done
+[ -n "${OC_VARIANTS:-}" ] && printf '%s\n' "${variant:-unset}" >> "$OC_VARIANTS"
+# Which pass this call is, from the per-pass log path in the launching opencode-review.sh's command line, so a
+# stand-in can give each concurrent pass its own reply without a shared counter to race on.
+passno=1
+own_cmd=$(tr '\0' ' ' < "/proc/$PPID/cmdline" 2>/dev/null || true)
+case "$own_cmd" in *".pass2."*) passno=2 ;; *".pass3."*) passno=3 ;; esac
 t='{"verdict":"merge","summary":"stand-in","blocking":[],"suggestions":[]}'
 if [ "${OC_REVIEW_STUB:-}" = finding ]; then
   if [ "$call" = continue ]; then t='{"verdict":"merge","summary":"repaired","blocking":[],"suggestions":[]}'
   else t='{"verdict":"merge","summary":"stand-in","blocking":[],"suggestions":[{"file":"a.txt","line":1,"finding":"x"}]}'; fi
 fi
-# A different review on each call, counted in OC_COUNTER: the second repeats the first's blocking finding 3 lines on
-# (a duplicate under the line-within-5 rule for the same fault) and adds its own, with a stricter verdict.
+# A different review for each pass: pass 2 repeats pass 1's blocking finding 3 lines on (a duplicate under the
+# line-within-5 rule for the same fault) and adds its own, with a stricter verdict.
 if [ "${OC_REVIEW_STUB:-}" = perpass ]; then
-  n=$(( $(cat "$OC_COUNTER" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$OC_COUNTER"
-  if [ "$n" = 1 ]; then t='{"verdict":"fix-first","summary":"first","blocking":[{"file":"a.txt","line":10,"rule":2,"why":"first pass"}],"suggestions":[{"file":"s.txt","line":1,"why":"tidy"}]}'
+  if [ "$passno" = 1 ]; then t='{"verdict":"fix-first","summary":"first","blocking":[{"file":"a.txt","line":10,"rule":2,"why":"first pass"}],"suggestions":[{"file":"s.txt","line":1,"why":"tidy"}]}'
   else t='{"verdict":"do-not-merge","summary":"second","blocking":[{"file":"a.txt","line":13,"rule":2,"why":"first pass again"},{"file":"b.txt","line":20,"rule":1,"why":"second pass"}],"suggestions":[{"file":"s.txt","line":3,"why":"tidy again"}]}'; fi
 fi
 # Two passes naming different blocking faults 2 lines apart in one file: both survive the union.
 if [ "${OC_REVIEW_STUB:-}" = faultsdiffer ]; then
-  n=$(( $(cat "$OC_COUNTER" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$OC_COUNTER"
-  if [ "$n" = 1 ]; then t='{"verdict":"fix-first","summary":"first","blocking":[{"file":"a.txt","line":10,"rule":2,"why":"unescaped shell argument"}],"suggestions":[]}'
+  if [ "$passno" = 1 ]; then t='{"verdict":"fix-first","summary":"first","blocking":[{"file":"a.txt","line":10,"rule":2,"why":"unescaped shell argument"}],"suggestions":[]}'
   else t='{"verdict":"do-not-merge","summary":"second","blocking":[{"file":"a.txt","line":12,"rule":3,"why":"missing error check"}],"suggestions":[]}'; fi
 fi
 # The same blocking fault worded differently 2 lines apart: one survives.
 if [ "${OC_REVIEW_STUB:-}" = faultssame ]; then
-  n=$(( $(cat "$OC_COUNTER" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$OC_COUNTER"
-  if [ "$n" = 1 ]; then t='{"verdict":"fix-first","summary":"first","blocking":[{"file":"a.txt","line":10,"rule":2,"why":"unescaped shell argument"}],"suggestions":[]}'
+  if [ "$passno" = 1 ]; then t='{"verdict":"fix-first","summary":"first","blocking":[{"file":"a.txt","line":10,"rule":2,"why":"unescaped shell argument"}],"suggestions":[]}'
   else t='{"verdict":"do-not-merge","summary":"second","blocking":[{"file":"a.txt","line":12,"rule":2,"why":"the shell argument is unescaped"}],"suggestions":[]}'; fi
 fi
 # A blocking finding in the first pass and its suggestion twin in the second: one blocking entry, no suggestion.
 if [ "${OC_REVIEW_STUB:-}" = faulttwin ]; then
-  n=$(( $(cat "$OC_COUNTER" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$OC_COUNTER"
-  if [ "$n" = 1 ]; then t='{"verdict":"fix-first","summary":"first","blocking":[{"file":"a.txt","line":10,"rule":2,"why":"unescaped shell argument"}],"suggestions":[]}'
+  if [ "$passno" = 1 ]; then t='{"verdict":"fix-first","summary":"first","blocking":[{"file":"a.txt","line":10,"rule":2,"why":"unescaped shell argument"}],"suggestions":[]}'
   else t='{"verdict":"merge","summary":"second","blocking":[],"suggestions":[{"file":"a.txt","line":12,"why":"the shell argument is unescaped"}]}'; fi
+fi
+# Passes at the same time: each leaves start and end stamps and records that the other pass had already started.
+# Pass 1 sleeps longer, so the finish order is the reverse of the union's pass order.
+if [ "${OC_REVIEW_STUB:-}" = overlap ]; then
+  ov="${OC_OVERLAP_DIR:?the overlap stand-in needs OC_OVERLAP_DIR}"
+  date +%s%N > "$ov/pass$passno.start"
+  if [ "$passno" = 1 ]; then sleep 0.8; else sleep 0.2; fi
+  date +%s%N > "$ov/pass$passno.end"
+  other=2; [ "$passno" = 2 ] && other=1
+  [ -e "$ov/pass$other.start" ] && : > "$ov/pass$passno.saw"
+  if [ "$passno" = 1 ]; then t='{"verdict":"fix-first","summary":"first","blocking":[{"file":"a.txt","line":10,"rule":2,"why":"first pass"}],"suggestions":[]}'
+  elif [ "$passno" = 2 ]; then t='{"verdict":"do-not-merge","summary":"second","blocking":[{"file":"b.txt","line":20,"rule":1,"why":"second pass"}],"suggestions":[]}'
+  else t='{"verdict":"merge","summary":"third","blocking":[],"suggestions":[]}'; fi
+fi
+# The second pass gives no review: the review stops with no union.
+if [ "${OC_REVIEW_STUB:-}" = passfail ]; then
+  if [ "$passno" = 2 ]; then echo "stand-in pass 2 fails" >&2; exit 3; fi
+  t='{"verdict":"fix-first","summary":"first","blocking":[{"file":"a.txt","line":10,"rule":2,"why":"first pass"}],"suggestions":[]}'
+fi
+# The second pass dies once (a transient server error) and succeeds when the review retries it.
+if [ "${OC_REVIEW_STUB:-}" = passflaky ]; then
+  if [ "$passno" = 2 ] && [ ! -e "${OC_FLAKY_MARK:?the passflaky stand-in needs OC_FLAKY_MARK}" ]; then
+    : > "$OC_FLAKY_MARK"; echo "stand-in pass 2 fails once" >&2; exit 3
+  fi
+  t='{"verdict":"merge","summary":"second","blocking":[],"suggestions":[]}'
 fi
 jq -c --arg t "$t" 'if .type == "text" then .part.text = $t else . end' "$OC_SAMPLE"
 OC
@@ -869,7 +1079,8 @@ OC
   opencode_only_path="$t/bin-opencode:$t/no-claude-host"
   cl="$t/calls.claude"; oc="$t/calls.opencode"
   common=(PATH="$t/bin:$PATH" "CLAUDE_CALLS=$cl" "OC_CALLS=$oc" "OC_SAMPLE=$w/scripts/fixtures/opencode-sample.jsonl"
-    "WS_ZDR_PAGE=$t/go.html" WS_TODAY=2026-10-31 "WS_LESSONS_DIR=$w/lessons" WS_REVIEW_SHADOW= WS_ALLOWANCE_DB= WS_REVIEW_AGENT=)
+    "WS_ZDR_PAGE=$t/go.html" WS_TODAY=2026-10-31 "WS_LESSONS_DIR=$w/lessons" WS_REVIEW_SHADOW= WS_ALLOWANCE_DB= WS_REVIEW_AGENT=
+    WS_REVIEW_PASS_RETRY_DELAY=0)
   # A docs-only branch chooses OpenCode by itself.
   : > "$cl"; : > "$oc"; x=0
   out=$(env "${common[@]}" "$w/scripts/review.sh" --project "$slugx" docsonly 2>&1) || x=$?
@@ -954,13 +1165,13 @@ OC
     && echo "a one-pass review writes one record and no pass files ok" \
     || { echo "one-pass review FAILED (exit $x): $out"; rc=1; }
   # WS_REVIEW_PASSES=2: two fresh calls, each pass kept, and a union of their findings under the strictest verdict.
-  : > "$cl"; : > "$oc"; : > "$t/oc-counter"; x=0
-  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=perpass "OC_COUNTER=$t/oc-counter" \
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=perpass \
     "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
   p1="$rj.pass1.json"; p2="$rj.pass2.json"
   c1=$(grep '"type":"result"' "$p1.raw" 2>/dev/null | tail -1 | jq -r '.total_cost_usd' 2>/dev/null || true)
   c2=$(grep '"type":"result"' "$p2.raw" 2>/dev/null | tail -1 | jq -r '.total_cost_usd' 2>/dev/null || true)
-  { [ "$x" = 1 ] && [ "$(wc -l < "$oc")" -eq 2 ] && [ "$(cat "$t/oc-counter")" = 2 ] \
+  { [ "$x" = 1 ] && [ "$(wc -l < "$oc")" -eq 2 ] \
     && [ -s "$p1" ] && [ -s "$p2" ] && [ -s "$p1.raw" ] && [ -s "$p2.raw" ] \
     && [ -s "$w/runs/$slugx/docsonly.opencode-review.pass1.json" ] && [ -s "$w/runs/$slugx/docsonly.review-prompt.pass2.txt" ] \
     && [ "$(jq -r '.verdict' "$p1")" = fix-first ] && [ "$(jq -r '.verdict' "$p2")" = do-not-merge ] \
@@ -973,24 +1184,71 @@ OC
     && grep -q '^\*\*Verdict: do-not-merge\.\*\*' "$rj.md" && grep -q '^- b.txt:20 (rule 1): second pass$' "$rj.md"; } \
     && echo "two passes union their blocking findings under the strictest verdict, sum the cost and keep each pass ok" \
     || { echo "two-pass review union FAILED (exit $x): $out (calls: $(wc -l < "$oc"); record: $(cat "$rj.json" 2>/dev/null))"; rc=1; }
+  # The passes run at the same time: each starts before the other ends and records that the other had started, pass 1
+  # finishes last, and the union is still written in pass order.
+  local ov="$t/overlap"
+  rm -rf "$ov"; mkdir -p "$ov"
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=overlap "OC_OVERLAP_DIR=$ov" \
+    "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
+  s1=$(cat "$ov/pass1.start" 2>/dev/null || true); e1=$(cat "$ov/pass1.end" 2>/dev/null || true)
+  s2=$(cat "$ov/pass2.start" 2>/dev/null || true); e2=$(cat "$ov/pass2.end" 2>/dev/null || true)
+  { [ "$x" = 1 ] && [ -n "$s1" ] && [ -n "$e1" ] && [ -n "$s2" ] && [ -n "$e2" ] \
+    && [ "$s1" -lt "$e2" ] && [ "$s2" -lt "$e1" ] && [ "$e2" -lt "$e1" ] \
+    && [ -e "$ov/pass1.saw" ] && [ -e "$ov/pass2.saw" ] \
+    && [ "$(jq -r '.passes' "$rj.json")" = 2 ] && [ "$(jq -r '.verdict' "$rj.json")" = do-not-merge ] \
+    && [ "$(jq -c '[.blocking[] | "\(.file):\(.line)"]' "$rj.json")" = '["a.txt:10","b.txt:20"]' ] \
+    && jq -r '.summary' "$rj.json" | grep -qF 'pass 1: fix-first; pass 2: do-not-merge'; } \
+    && echo "review passes run at the same time and union in pass order ok" \
+    || { echo "concurrent review passes FAILED (exit $x): $out (stamps: $s1 $e1 $s2 $e2)"; rc=1; }
+  # Three passes at once: all three records and a union of all three.
+  local ov3="$t/overlap3"
+  rm -rf "$ov3"; mkdir -p "$ov3"
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=overlap "OC_OVERLAP_DIR=$ov3" \
+    "$w/scripts/review.sh" --project "$slugx" --agent opencode --passes 3 docsonly 2>&1) || x=$?
+  { [ "$x" = 1 ] && [ "$(wc -l < "$oc")" -eq 3 ] && [ "$(jq -r '.passes' "$rj.json")" = 3 ] \
+    && [ -s "$rj.pass1.json" ] && [ -s "$rj.pass2.json" ] && [ -s "$rj.pass3.json" ] \
+    && [ "$(jq -c '[.blocking[] | "\(.file):\(.line)"]' "$rj.json")" = '["a.txt:10","b.txt:20"]' ] \
+    && jq -r '.summary' "$rj.json" | grep -qF 'pass 1: fix-first; pass 2: do-not-merge; pass 3: merge'; } \
+    && echo "three concurrent passes union all three ok" \
+    || { echo "three-pass concurrent union FAILED (exit $x): $out (record: $(cat "$rj.json" 2>/dev/null))"; rc=1; }
+  # A failing pass stops the review with exit 2 and writes no union record.
+  rm -f "$rj.json" "$rj.md"
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=passfail \
+    "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
+  { [ "$x" = 2 ] && grep -q 'pass 2 of 2 failed; no union written' <<< "$out" \
+    && [ -s "$rj.pass1.json" ] && [ ! -e "$rj.json" ]; } \
+    && echo "a failing pass exits 2 with no union ok" \
+    || { echo "failing pass FAILED (exit $x): $out (record: $(cat "$rj.json" 2>/dev/null))"; rc=1; }
+  # A pass that fails once is retried after the others finish, and the union is written.
+  rm -f "$rj.json" "$rj.md" "$t/flaky.mark"
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=passflaky "OC_FLAKY_MARK=$t/flaky.mark" \
+    "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
+  { [ "$x" = 0 ] && grep -q 'pass 2 failed; retrying it once' <<< "$out" \
+    && [ "$(jq -r '.verdict' "$rj.json" 2>/dev/null)" = merge ]; } \
+    && echo "a pass that fails once is retried and the union is written ok" \
+    || { echo "pass retry FAILED (exit $x): $out (record: $(cat "$rj.json" 2>/dev/null))"; rc=1; }
   # Two passes naming two different blocking faults 2 lines apart: both survive the union, under the stricter verdict.
-  : > "$cl"; : > "$oc"; : > "$t/oc-counter"; x=0
-  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=faultsdiffer "OC_COUNTER=$t/oc-counter" \
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=faultsdiffer \
     "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
   { [ "$x" = 1 ] && [ "$(jq -r '.verdict' "$rj.json")" = do-not-merge ] \
     && [ "$(jq -c '[.blocking[] | "\(.file):\(.line)"]' "$rj.json")" = '["a.txt:10","a.txt:12"]' ]; } \
     && echo "two different blocking faults within 5 lines both survive the union ok" \
     || { echo "different-fault union FAILED (exit $x): $out (record: $(cat "$rj.json" 2>/dev/null))"; rc=1; }
   # The same blocking fault worded differently 2 lines apart: one survives.
-  : > "$cl"; : > "$oc"; : > "$t/oc-counter"; x=0
-  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=faultssame "OC_COUNTER=$t/oc-counter" \
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=faultssame \
     "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
   { [ "$x" = 1 ] && [ "$(jq -c '[.blocking[] | "\(.file):\(.line)"]' "$rj.json")" = '["a.txt:10"]' ]; } \
     && echo "the same blocking fault worded differently within 5 lines collapses to one ok" \
     || { echo "same-fault union FAILED (exit $x): $out (record: $(cat "$rj.json" 2>/dev/null))"; rc=1; }
   # A blocking finding in the first pass and its suggestion twin in the second: one blocking entry, no suggestion.
-  : > "$cl"; : > "$oc"; : > "$t/oc-counter"; x=0
-  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=faulttwin "OC_COUNTER=$t/oc-counter" \
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_REVIEW_STUB=faulttwin \
     "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
   { [ "$x" = 1 ] && [ "$(jq -c '[.blocking[] | "\(.file):\(.line)"]' "$rj.json")" = '["a.txt:10"]' ] \
     && [ "$(jq -c '[.suggestions[] | "\(.file):\(.line)"]' "$rj.json")" = '[]' ]; } \
@@ -1007,6 +1265,36 @@ OC
   { [ "$x" != 0 ] && [ ! -s "$oc" ] && grep -qF "take 1, 2 or 3, not '4'" <<< "$out"; } \
     && echo "--passes 4 is refused ok" \
     || { echo "--passes 4 refusal FAILED (exit $x): $out"; rc=1; }
+  # --variant reaches `opencode run --variant` for every pass, and an unset variant passes none.
+  local vn="$t/variants"
+  : > "$vn"; : > "$oc"; x=0
+  out=$(env "${common[@]}" OC_VARIANTS="$vn" "$w/scripts/review.sh" --project "$slugx" --agent opencode --variant low docsonly 2>&1) || x=$?
+  { [ "$x" = 0 ] && [ "$(cat "$vn")" = low ]; } \
+    && echo "a one-pass review passes --variant low to opencode run ok" \
+    || { echo "review variant one-pass FAILED (exit $x): $out (variants: $(paste -sd, "$vn"))"; rc=1; }
+  : > "$vn"; : > "$oc"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_VARIANTS="$vn" "$w/scripts/review.sh" --project "$slugx" --agent opencode --variant high docsonly 2>&1) || x=$?
+  { [ "$x" = 0 ] && [ "$(paste -sd, "$vn")" = high,high ]; } \
+    && echo "both passes of a two-pass review pass --variant high to opencode run ok" \
+    || { echo "review variant two-pass FAILED (exit $x): $out (variants: $(paste -sd, "$vn"))"; rc=1; }
+  : > "$vn"; : > "$oc"; x=0
+  out=$(env "${common[@]}" OC_VARIANTS="$vn" "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
+  { [ "$x" = 0 ] && [ "$(cat "$vn")" = unset ]; } \
+    && echo "an unset review variant passes no --variant ok" \
+    || { echo "review variant unset FAILED (exit $x): $out (variants: $(paste -sd, "$vn"))"; rc=1; }
+  # --variant has no meaning on Claude: it is ignored, not refused.
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" "$w/scripts/review.sh" --project "$slugx" --agent claude --variant low scriptsbr 2>&1) || x=$?
+  { [ "$x" = 0 ] && [ -s "$cl" ] && [ ! -s "$oc" ]; } \
+    && echo "a Claude review ignores --variant ok" \
+    || { echo "Claude review variant FAILED (exit $x): $out"; rc=1; }
+  # `ws review` forwards --variant to the same launcher, so the top-level command reaches opencode run.
+  mkdir -p "$w/bin"; cp "$WS/bin/ws" "$w/bin/ws"; chmod +x "$w/bin/ws"
+  : > "$vn"; : > "$oc"; x=0
+  out=$(env "${common[@]}" OC_VARIANTS="$vn" "$w/bin/ws" --project "$slugx" review --agent opencode --variant max docsonly 2>&1) || x=$?
+  { [ "$x" = 0 ] && [ "$(cat "$vn")" = max ]; } \
+    && echo "ws review --variant max reaches opencode run ok" \
+    || { echo "ws review variant FAILED (exit $x): $out (variants: $(paste -sd, "$vn"))"; rc=1; }
   return "$rc"
 }
 # Run only the review-agent cases against the worktree's own scripts.
@@ -1417,7 +1705,10 @@ if [ "${1:-}" = --claude-cap ]; then
   WS_CLAUDE_DAY_CAP=50 "$d/ws/bin/ws" --project demo claude --spent 2>&1 || true
   exit 0
 fi
+# Every `--` case mode above returned before this line, so only a normal suite run takes the one-at-a-time lock.
+acquire_selftest_lock || exit $?
 export WS_AGENT=claude   # the stand-ins below are a claude; a private config that defaults builders to another agent must not change that
+export WS_REVIEW_AGENT= WS_REVIEW_PASSES=1   # likewise for the installation's review client and pass count: the cases below set their own
 export WS_REVIEW_SHADOW=   # shadow reviews are checked here with their own env; a private config must not start them in every review above
 # This machine's real Go spend must not hold or warn on the stand-ins below; the allowance cases point at their own fixture.
 export WS_ALLOWANCE_DB= WS_ALLOWANCE_HOLD=80 WS_ALLOWANCE_STARTS= WS_ALLOWANCE_LIMITS='opencode-go/deepseek-v4.1-flash=20,50,100 opencode-go/deepseek-v4-pro=3,7.5,15'
@@ -1433,6 +1724,8 @@ unset WS_RUN_GRANTS WS_RUN_DENY
 # second instead of ten, and a long wait still ends at its own deadline because bin/ws scales its poll count.
 export WS_WAIT_POLL=0.1 WS_CHAIN_POLL=0.1
 for f in "$WS"/bin/ws "$WS"/scripts/*.sh; do bash -n "$f" && echo "syntax ok  ${f#"$WS"/}"; done
+# The lock's own cases run before the body, on a scratch lock file.
+SL=$(mktemp -d); selftest_lock_cases "$SL" || { rm -rf "$SL"; exit 1; }; rm -rf "$SL"
 # scripts/selftest.sh is left out of shellcheck: on it shellcheck needs 3.6 GB and is OOM-killed at the 4 GB builder cap.
 shellcheck_targets=("$WS"/bin/ws)
 for f in "$WS"/scripts/*.sh; do [ "$f" = "$WS/scripts/selftest.sh" ] || shellcheck_targets+=("$f"); done
@@ -1531,6 +1824,9 @@ jq -e '.share == "disabled"
   and (.instructions | index("lessons/orchestrator.local.md"))' "$WS/opencode.json" >/dev/null \
   && echo "opencode.json loads the private preferences and lessons ok" || { echo "opencode.json FAILED"; exit 1; }
 T=$(mktemp -d); OC=$(mktemp -d); TT=$(mktemp -d); TQ=$(mktemp -d); slug=$(basename "$T" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')
+# Every chain test arms a persistent watchdog timer. Its unit files go under this suite's scratch, never the real
+# user unit directory, where a test slug would keep firing after its runs directory is gone.
+export WS_WAKE_UNIT_DIR="$T/wake-units"
 # Every background check is a subtree, so cleanup signals each tree rather than only its wrapper.
 kill_par_tree() { local pid; for pid in "${par_pids[@]}"; do kill_tree "$pid"; done; }
 # Cleanup runs on every exit (a failed check, a kill, a crash), so the scratch project never outlives the test.
@@ -1551,7 +1847,8 @@ out=$("$WS/bin/ws" init "$T" --dry-run); grep -q 'would write' <<< "$out" && [ "
 printf 'n\n' | "$WS/bin/ws" init "$T" --tests "sh t.sh" --force >/dev/null && grep -q '^SITE_PROJECT="kept-site"' "$cf" && ls "$cf".bak-* >/dev/null 2>&1 && echo "init --force backs up and keeps keys ok" || { echo "init --force FAILED"; exit 1; }
 rm -f "$cf".bak-*
 # The OpenCode reply-time check: one warning when the leading local time is more than two minutes off the clock,
-# none when it matches, when the reply has no leading time, or when the warning itself is read back as a reply.
+# none when it matches, when the reply has no leading time, or when the warning itself is read back as a reply;
+# the reply's own time is still checked when a reply-log banner sits above it.
 rt_script="$WS/scripts/reply-time-check.sh"
 rt_fail=0
 rt_time() { # <now> <reply>: sets rt_out and rt_x
@@ -1581,6 +1878,7 @@ rt_out=$(printf '%s\n' "$rt_live_now — merged" | bash "$rt_script" 2>&1) || rt
 if [ "$rt_x" = 0 ] && [ -z "$rt_out" ]; then echo "reply-time check reads the real clock ok"; else echo "reply-time check reads the real clock FAILED (exit $rt_x): $rt_out"; rt_fail=1; fi
 rt_time 20:14 '20:12 — merged'; rt_ok "reply-time check passes a time exactly two minutes off"
 rt_time 20:22 '20:12 — merged'; rt_warn "reply-time check warns once about a time ten minutes off" "10 minutes"
+rt_time 20:22 $'━━ 20:22 ━━\n\n20:12 — merged'; rt_warn "reply-time check sees the reply's time behind the reply-log banner" "10 minutes"
 rt_time 20:22 "${rt_out:-}"; rt_ok "reply-time check does not read its own warning as a reply"
 rt_time 20:22 'Merged at 20:12; tests pass'; rt_ok "reply-time check passes a reply with no leading time"
 rt_time 20:22 ''; rt_ok "reply-time check passes an empty reply"
@@ -1634,6 +1932,52 @@ if command -v node >/dev/null; then
   fi
 fi
 [ "$rt_fail" = 0 ] || exit 1
+# The OpenCode reply log: one banner and one dated entry per finished reply, none in a builder's run, and the
+# project taken from WS_PROJECT before state/current (scripts/reply-log.test.mjs).
+rep_fail=0
+if command -v node >/dev/null; then
+  if node --test "$WS/scripts/reply-log.test.mjs"; then
+    echo "reply-log plugin writes the banner and one entry per reply ok"
+  else
+    echo "reply-log plugin FAILED"
+    rep_fail=1
+  fi
+fi
+# ws replies: the last N entries, the --since filter, --follow over an appended entry, and the empty and missing log.
+repfile="$WS/runs/$slug/replies.md"
+printf '## 2026-11-09 09:00 MST\nfirst\n\n## 2026-11-09 10:00 MST\nsecond\n\n## 2026-11-08 22:00 MST\nolder\n' > "$repfile"
+rep_out=$("$WS/bin/ws" --project "$slug" replies --last 2 2>&1) && rep_x=0 || rep_x=$?
+{ [ "$rep_x" = 0 ] && grep -q '^## 2026-11-09 10:00 MST' <<< "$rep_out" && grep -q '^second$' <<< "$rep_out" \
+  && grep -q '^## 2026-11-08 22:00 MST' <<< "$rep_out" && grep -q '^older$' <<< "$rep_out" \
+  && ! grep -q '^## 2026-11-09 09:00 MST' <<< "$rep_out"; } \
+  && echo "ws replies prints the last N entries ok" \
+  || { echo "ws replies last FAILED (exit $rep_x): $rep_out"; rep_fail=1; }
+rep_out=$("$WS/bin/ws" --project "$slug" replies --since "2026-11-09 10:00" 2>&1) && rep_x=0 || rep_x=$?
+{ [ "$rep_x" = 0 ] && grep -q '^second$' <<< "$rep_out" && ! grep -q '^first$' <<< "$rep_out" && ! grep -q '^older$' <<< "$rep_out"; } \
+  && echo "ws replies --since filters by the entry time ok" \
+  || { echo "ws replies --since FAILED (exit $rep_x): $rep_out"; rep_fail=1; }
+printf '## 2026-11-09 09:00 MST\nfirst\n' > "$repfile"
+# The follow output goes outside the scratch repo $T: the release cases commit everything under $T, and a log
+# left there joins the demo project.
+repfollow=$(mktemp)
+( sleep 0.5; printf '\n## 2026-11-09 11:00 MST\ntailed\n' >> "$repfile" ) &
+rep_appender=$!
+WS_REPLIES_POLL=0.1 timeout 3 "$WS/bin/ws" --project "$slug" replies --last 1 --follow > "$repfollow" 2>&1 || true
+wait "$rep_appender" 2>/dev/null || true
+grep -q '^tailed$' "$repfollow" && echo "ws replies --follow prints a new entry ok" \
+  || { echo "ws replies --follow FAILED: $(cat "$repfollow")"; rep_fail=1; }
+rm -f "$repfollow"
+: > "$repfile"
+rep_out=$("$WS/bin/ws" --project "$slug" replies 2>&1) && rep_x=0 || rep_x=$?
+[ "$rep_x" = 0 ] && [ "$rep_out" = "no replies for $slug yet" ] && echo "ws replies says an empty log has no replies ok" \
+  || { echo "ws replies empty FAILED (exit $rep_x): $rep_out"; rep_fail=1; }
+rm -f "$repfile"
+rep_out=$("$WS/bin/ws" --project "$slug" replies 2>&1) && rep_x=0 || rep_x=$?
+[ "$rep_x" = 0 ] && [ "$rep_out" = "no replies for $slug yet" ] && echo "ws replies says a missing log has no replies ok" \
+  || { echo "ws replies missing FAILED (exit $rep_x): $rep_out"; rep_fail=1; }
+"$WS/bin/ws" help | grep -q 'ws replies' && echo "ws help lists replies ok" \
+  || { echo "ws help replies FAILED"; rep_fail=1; }
+[ "$rep_fail" = 0 ] || exit 1
 # archive-inflight: the first In flight block stays in the plan, later ones move to the plan's history in order.
 arcd="$WS/plans/$slug/archive-three"; mkdir -p "$arcd"
 printf '# three\n\n**In flight right now (newest):** alpha\n\n**In flight right now (older):** beta\n\n**Decision:** keep\n\n**In flight right now (oldest):** gamma\n\n## Requirements\nkeep\n' > "$arcd/plan.md"
@@ -1937,6 +2281,7 @@ par_start doctor-clients bash "$WS/scripts/doctor-clients-check.sh"
 par_start merge-gates bash "$WS/scripts/merge-gates-check.sh"
 par_start reply-time python3 -I "$WS/scripts/reply-time-check.py" --selftest
 par_start wake bash "$WS/scripts/wake-check.sh"
+par_start chain-watch bash "$WS/scripts/chain-watch-check.sh"
 par_start bg bash "$WS/scripts/bg-check.sh"
 par_start ask bash "$WS/scripts/ask-check.sh"
 par_start chain-resume bash "$WS/scripts/chain-resume-check.sh"
@@ -2249,6 +2594,9 @@ cs=$(PATH="$T/pmbin:$PATH" "$WS/scripts/cold-start.sh" "$slug3" 2>&1)
   && echo "merge post-merge failure records, notifies and shows in cold start ok" \
   || { echo "merge post-merge failure FAILED:"; echo "exit $x"; echo "status: $st"; cat "$T/notify.log" 2>/dev/null; grep -i 'post-merge' <<< "$cs"; exit 1; }
 rm -rf "$M"  # later checks commit everything under $T; a nested repo there would be swept in
+# security scan: the merge gate blocks a committed secret or credential file, flags risky shell spellings without
+# blocking, and reads only the changed lines.
+d=$(mktemp -d); security_scan_cases "$WS" "$d" || { rm -rf "$d"; exit 1; }; rm -rf "$d"
 # bench: WS_BENCH_HOURS gates when a replay may start, across midnight too.
 hrs=$(sed -n '/^in_bench_hours()/,/^}/p' "$WS/scripts/bench.sh")
 bash -c "$hrs"'
@@ -2746,6 +3094,15 @@ out=$(cr "{\"status\":\"done\",$base,\"done_when\":[{\"item\":\"a\",\"status\":\
 { [ "$x" = 0 ] && grep -q 'ok    done-when met (observed): a' <<< "$out"; } && echo "check-result evidence file with a colon ok" || { echo "check-result evidence colon file FAILED"; echo "$out"; crbad=1; }
 out=$(cr "{\"status\":\"done\",$base,\"done_when\":[{\"item\":\"a\",\"status\":\"met\",\"basis\":\"observed\",\"evidence\":\".ws-evidence/missing.md:12,14\"}]}") && x=0 || x=1
 { [ "$x" = 1 ] && grep -q 'evidence .ws-evidence/missing.md is not in the worktree' <<< "$out"; } && echo "check-result missing line-list evidence ok" || { echo "check-result missing line-list evidence FAILED"; echo "$out"; crbad=1; }
+# A test id ("file.py::test_x", "file.py:test_x") names the file before the suffix, as a line number does
+# ("file.py:123"); a missing file still flags whatever suffix follows it.
+mkdir -p "$T/.worktrees/demo/tests/tutor"; printf 'def test_x():\n    pass\n' > "$T/.worktrees/demo/tests/tutor/test_web.py"
+for ev in 'tests/tutor/test_web.py::test_x' 'tests/tutor/test_web.py:test_x' 'tests/tutor/test_web.py:123'; do
+  out=$(cr "{\"status\":\"done\",$base,\"done_when\":[{\"item\":\"a\",\"status\":\"met\",\"basis\":\"observed\",\"evidence\":\"$ev\"}]}") && x=0 || x=1
+  { [ "$x" = 0 ] && grep -q 'ok    done-when met (observed): a' <<< "$out"; } && echo "check-result test id $ev ok" || { echo "check-result test id $ev FAILED"; echo "$out"; crbad=1; }
+done
+out=$(cr "{\"status\":\"done\",$base,\"done_when\":[{\"item\":\"a\",\"status\":\"met\",\"basis\":\"observed\",\"evidence\":\"no/such.py::test_y\"}]}") && x=0 || x=1
+{ [ "$x" = 1 ] && grep -q 'evidence no/such.py is not in the worktree' <<< "$out"; } && echo "check-result missing test id evidence ok" || { echo "check-result missing test id evidence FAILED"; echo "$out"; crbad=1; }
 [ "$crbad" = 0 ] || exit 1
 # Leave a passing result in demo.jsonl for the wait re-check below.
 cr "{\"status\":\"done\",$base,\"done_when\":[{\"item\":\"a\",\"status\":\"met\",\"basis\":\"observed\",\"evidence\":\".ws-evidence/a.md:12,14\"}]}" >/dev/null
@@ -2839,7 +3196,7 @@ case " $* " in *" --model zz-limited "*) echo '{"result":"You have reached your 
   *) echo '{"total_cost_usd":0,"structured_output":{"verdict":"merge","summary":"stand-in","blocking":[],"suggestions":[]}}' ;; esac
 FAKE
 chmod +x "$T/fakebin/claude"
-out=$(PATH="$T/fakebin:$PATH" WS_REVIEW_MODEL_LIGHT=zz-fallback "$WS/bin/ws" --project "$slug" review --model zz-limited demo 2>&1 || true)
+out=$(PATH="$T/fakebin:$PATH" WS_REVIEW_AGENT=claude WS_REVIEW_MODEL_LIGHT=zz-fallback "$WS/bin/ws" --project "$slug" review --model zz-limited demo 2>&1 || true)
 grep -q 'zz-limited is at its usage limit; reviewing on' <<< "$out" && grep -q 'Verdict: merge' <<< "$out" && echo "review limit fallback ok" || { echo "review limit fallback FAILED:"; echo "$out"; exit 1; }
 [ "$("$WS/bin/ws" version)" = "Crafting Guild v$(cat "$WS/VERSION")" ] && echo "version ok" || { echo "version FAILED"; exit 1; }
 "$WS/bin/ws" --project "$slug" runs | grep -q "runs for $slug:" && echo "--project ok"
@@ -4202,6 +4559,95 @@ Z="$T/go.html"; printf '<td>DeepSeek V4.1 Flash</td><td>Not used</td><td>0 days*
 WS_TODAY=2026-10-31 "$WS/scripts/zdr-check.sh" --page "$Z" >/dev/null && "$WS/scripts/zdr-check.sh" --page "$Z" Hy3 >/dev/null \
   && ! WS_TODAY=2026-11-01 "$WS/scripts/zdr-check.sh" --page "$Z" >/dev/null && ! "$WS/scripts/zdr-check.sh" --page "$Z" "Muse Spark 1.3 Contributor" >/dev/null \
   && ! "$WS/scripts/zdr-check.sh" --page "$Z" "Absent Model" >/dev/null && echo "zdr-check ok" || { echo "zdr-check FAILED"; exit 1; }
+# Zen free models: the live Zen page lists each free model as a prose list item; the three names whose provider
+# follows a zero-retention policy with no training pass, and an item whose terms retain data, allow training or
+# say it is a trial fails. A name that is not on the page fails as not found. Inkling's failing item sits before a
+# passing one, so a parser cannot borrow the next item's zero-retention clause.
+ZZ="$T/zen.html"
+cat > "$ZZ" <<'ZEN'
+<h2>Free models</h2>
+<ul>
+<li>Inkling 2 Small Free is free on OpenCode for a limited time. Its provider retains your data for 30 days.</li>
+<li>GLM-5.3-Flash Free is free on OpenCode for a limited time. Its provider follows a zero-retention policy and does not use your data for model training.</li>
+<li>DeepSeek V4.1 Flash Free is free on OpenCode for a limited time. Its provider follows a zero-retention policy and does not use your data for model training.</li>
+<li>MiniMax M3.1 Flash Free is free on OpenCode for a limited time. Its provider follows a zero-retention policy and does not use your data for model training.</li>
+<li>Iceman Free is free on OpenCode for a limited time. Its provider may use your data for model training.</li>
+<li>Big Pickle is free on OpenCode for a limited time. Its provider retains your data for 30 days.</li>
+<li>Beam Free is free on OpenCode for a limited time. Its provider retains your data for 30 days.</li>
+<li>Flint 40B Free is free on OpenCode for a limited time. This is a trial model.</li>
+<li>MiMo-V2.6-Flash Free is free on OpenCode for a limited time. Its provider may use your data for model training.</li>
+<li>Nemotron 3 Nano Free is free on OpenCode for a limited time. This is a trial model.</li>
+</ul>
+ZEN
+zen_free_ok=1
+for zn in "GLM-5.3-Flash Free" "DeepSeek V4.1 Flash Free" "MiniMax M3.1 Flash Free"; do
+  "$WS/scripts/zdr-check.sh" --provider opencode --page "$ZZ" "$zn" >/dev/null || zen_free_ok=0
+done
+zen_training_ok=1
+for zn in "Iceman Free" "Big Pickle" "Inkling 2 Small Free" "Beam Free" "Flint 40B Free" "MiMo-V2.6-Flash Free" "Nemotron 3 Nano Free"; do
+  "$WS/scripts/zdr-check.sh" --provider opencode --page "$ZZ" "$zn" >/dev/null && zen_training_ok=0
+done
+zen_reason=$("$WS/scripts/zdr-check.sh" --provider opencode --page "$ZZ" "Big Pickle" 2>&1) && zen_reason_x=0 || zen_reason_x=$?
+zen_missing=$("$WS/scripts/zdr-check.sh" --provider opencode --page "$ZZ" "Absent Free" 2>&1) && zen_missing_x=0 || zen_missing_x=$?
+{ [ "$zen_free_ok" = 1 ] && [ "$zen_training_ok" = 1 ] && [ "$zen_reason_x" = 1 ] \
+  && grep -q 'Big Pickle' <<< "$zen_reason" && [ "$zen_missing_x" = 1 ] \
+  && grep -q "not found in the Zen page's free-model list" <<< "$zen_missing"; } \
+  && echo "zdr-check passes the Zen free models and refuses training/retention/trial items and a missing name ok" \
+  || { echo "zdr-check zen FAILED: free=$zen_free_ok training=$zen_training_ok reason=$zen_reason_x missing=$zen_missing_x ($zen_missing)"; exit 1; }
+"$WS/scripts/zdr-check.sh" --provider opencode-go --page "$Z" Hy3 >/dev/null \
+  && echo "zdr-check keeps the Go table path with --provider opencode-go ok" \
+  || { echo "zdr-check Go provider FAILED"; exit 1; }
+# zdr-check's cache: a fresh page is reused without a fetch, a stale one is refreshed, a failed refresh falls back
+# to the stale page with a warning, and no cache with a failed fetch fails as before. A stand-in curl records calls.
+ZW="$T/zdr-cache"; mkdir -p "$ZW/scripts" "$ZW/runs" "$ZW/bin"
+cp "$WS/scripts/zdr-check.sh" "$WS/scripts/lib.sh" "$ZW/scripts/"
+cp "$WS/config.sh" "$ZW/config.sh"
+chmod +x "$ZW/scripts/zdr-check.sh"
+cat > "$ZW/bin/curl" <<'ZDRCURL'
+#!/bin/bash
+printf 'called\n' >> "${CURL_LOG:?}"
+out=""; prev=""
+for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
+[ -n "${CURL_FAIL:-}" ] && exit 22
+[ -n "$out" ] && cp "${CURL_BODY:?}" "$out"
+exit 0
+ZDRCURL
+chmod +x "$ZW/bin/curl"
+zrun() { PATH="$ZW/bin:$PATH" CURL_LOG="$ZW/curl.log" "$ZW/scripts/zdr-check.sh" "$@"; }
+printf '<li>GLM-5.3-Flash Free is free on OpenCode for a limited time. Its provider follows a zero-retention policy and does not use your data for model training.</li>' > "$ZW/runs/zdr-page-zen.html"
+: > "$ZW/curl.log"
+zrun --provider opencode "GLM-5.3-Flash Free" >/dev/null 2>&1 && zx=0 || zx=$?
+{ [ "$zx" = 0 ] && [ ! -s "$ZW/curl.log" ]; } \
+  && echo "zdr-check reuses a fresh cached privacy page without a fetch ok" \
+  || { echo "zdr-check fresh cache FAILED (exit $zx): $(cat "$ZW/curl.log")"; exit 1; }
+printf '<li>Old Free is free on OpenCode for a limited time. Its provider follows a zero-retention policy and does not use your data for model training.</li>' > "$ZW/runs/zdr-page-zen.html"
+touch -d '2 days ago' "$ZW/runs/zdr-page-zen.html"
+printf '<li>GLM-5.3-Flash Free is free on OpenCode for a limited time. Its provider follows a zero-retention policy and does not use your data for model training.</li>' > "$T/zdr-new-zen.html"
+: > "$ZW/curl.log"
+CURL_BODY="$T/zdr-new-zen.html" zrun --provider opencode "GLM-5.3-Flash Free" >/dev/null 2>&1 && zx=0 || zx=$?
+{ [ "$zx" = 0 ] && [ -s "$ZW/curl.log" ] && grep -q 'GLM-5.3-Flash Free' "$ZW/runs/zdr-page-zen.html"; } \
+  && echo "zdr-check refreshes a stale cached privacy page ok" \
+  || { echo "zdr-check stale cache FAILED (exit $zx): $(cat "$ZW/curl.log" 2>/dev/null)"; exit 1; }
+printf '<li>GLM-5.3-Flash Free is free on OpenCode for a limited time. Its provider follows a zero-retention policy and does not use your data for model training.</li>' > "$ZW/runs/zdr-page-zen.html"
+touch -d '2 days ago' "$ZW/runs/zdr-page-zen.html"
+: > "$ZW/curl.log"
+zout=$(CURL_FAIL=1 zrun --provider opencode "GLM-5.3-Flash Free" 2>&1) && zx=0 || zx=$?
+{ [ "$zx" = 0 ] && grep -q 'cannot refresh' <<< "$zout" && grep -q 'using the cached page' <<< "$zout"; } \
+  && echo "zdr-check falls back to a stale cached page with a warning when the refresh fails ok" \
+  || { echo "zdr-check stale fallback FAILED (exit $zx): $zout"; exit 1; }
+rm -f "$ZW/runs/zdr-page-go.html"
+: > "$ZW/curl.log"
+zout=$(CURL_FAIL=1 zrun --provider opencode-go "GLM-5.3-Flash Free" 2>&1) && zx=0 || zx=$?
+{ [ "$zx" = 1 ] && grep -q 'cannot read' <<< "$zout"; } \
+  && echo "zdr-check fails when there is no cached page and the fetch fails ok" \
+  || { echo "zdr-check no cache failure FAILED (exit $zx): $zout"; exit 1; }
+# A measurement sets a model's display name in its own environment: lib.sh re-applies it after config.sh and
+# config.local.sh, so an arm needs no edit to either.
+env_names="opencode/glm-5.3-flash-free=GLM-5.3-Flash Free"
+got_names=$(WS_OPENCODE_MODEL_NAMES="$env_names" bash -c '. "$1/scripts/lib.sh"; printf "%s\n" "${WS_OPENCODE_MODEL_NAMES[@]}"' _ "$WS" 2>&1)
+[ "$got_names" = "$env_names" ] \
+  && echo "a model display name from the environment wins over config.sh and config.local.sh ok" \
+  || { echo "model display name env override FAILED: got '$got_names'"; exit 1; }
 # A malformed result shape is read without the repair turn, and a repair turn leaves its marker.
 result_format_cases "$WS" "$T/result-format" || { echo "result format FAILED"; exit 1; }
 # OpenCode builders: a stand-in opencode first on PATH replays a real OpenCode log (one bash call, two step costs, a
@@ -5546,6 +5992,34 @@ grep -q 'dated marker v2' <<< "$cs" || bok=false
 grep -q 'exact marker' <<< "$cs" || bok=false
 grep -q 'reports/brief.md' <<< "$cs" || bok=false
 grep -q '6 waiting on you' <<< "$cs" || bok=false
+# The question-prompt setting prints one line in both briefs: structured prompts on by default and for any value
+# other than 0, plain chat for 0. The on line names the value when it is not 1.
+grep -q '^questions: structured prompts on (WS_ASK_PROMPTS=1; set 0 in config.local.sh for plain chat)$' <<< "$out" || bok=false
+grep -q '^questions: structured prompts on (WS_ASK_PROMPTS=1; set 0 in config.local.sh for plain chat)$' <<< "$cs" || bok=false
+qd_b=$(env -u WS_ASK_PROMPTS "$BW/bin/ws" brief 2>&1) || bok=false
+qd_c=$(env -u WS_ASK_PROMPTS "$BW/scripts/cold-start.sh" --brief brief-a 2>&1) || true
+grep -q '^questions: structured prompts on (WS_ASK_PROMPTS=1; ' <<< "$qd_b" || bok=false
+grep -q '^questions: structured prompts on (WS_ASK_PROMPTS=1; ' <<< "$qd_c" || bok=false
+q1_b=$(WS_ASK_PROMPTS=1 "$BW/bin/ws" brief 2>&1) || bok=false
+q1_c=$(WS_ASK_PROMPTS=1 "$BW/scripts/cold-start.sh" --brief brief-a 2>&1) || true
+grep -q '^questions: structured prompts on (WS_ASK_PROMPTS=1; set 0 in config.local.sh for plain chat)$' <<< "$q1_b" || bok=false
+grep -q '^questions: structured prompts on (WS_ASK_PROMPTS=1; set 0 in config.local.sh for plain chat)$' <<< "$q1_c" || bok=false
+q0_b=$(WS_ASK_PROMPTS=0 "$BW/bin/ws" brief 2>&1) || bok=false
+q0_c=$(WS_ASK_PROMPTS=0 "$BW/scripts/cold-start.sh" --brief brief-a 2>&1) || true
+grep -q '^questions: plain chat (WS_ASK_PROMPTS=0; set 1 in config.local.sh for structured prompts)$' <<< "$q0_b" || bok=false
+grep -q '^questions: plain chat (WS_ASK_PROMPTS=0; set 1 in config.local.sh for structured prompts)$' <<< "$q0_c" || bok=false
+qx_b=$(WS_ASK_PROMPTS=yes "$BW/bin/ws" brief 2>&1) || bok=false
+qx_c=$(WS_ASK_PROMPTS=yes "$BW/scripts/cold-start.sh" --brief brief-a 2>&1) || true
+grep -q '^questions: structured prompts on (WS_ASK_PROMPTS=yes; set 0 in config.local.sh for plain chat)$' <<< "$qx_b" || bok=false
+grep -q '^questions: structured prompts on (WS_ASK_PROMPTS=yes; set 0 in config.local.sh for plain chat)$' <<< "$qx_c" || bok=false
+# The environment wins over config.local.sh, as ws_env re-applies it after both config files: an environment 0 is
+# plain chat even when config.local.sh says 1, so dropping WS_ASK_PROMPTS from ws_env's list fails this case.
+printf 'WS_ASK_PROMPTS=1\n' > "$BW/config.local.sh"
+qprec_b=$(WS_ASK_PROMPTS=0 "$BW/bin/ws" brief 2>&1) || bok=false
+qprec_c=$(WS_ASK_PROMPTS=0 "$BW/scripts/cold-start.sh" --brief brief-a 2>&1) || true
+grep -q '^questions: plain chat (WS_ASK_PROMPTS=0; set 1 in config.local.sh for structured prompts)$' <<< "$qprec_b" || bok=false
+grep -q '^questions: plain chat (WS_ASK_PROMPTS=0; set 1 in config.local.sh for structured prompts)$' <<< "$qprec_c" || bok=false
+rm -f "$BW/config.local.sh"
 # A PROJECT_BRANCH that does not resolve must not hide waiting work: every candidate stays listed and the brief
 # names the misconfiguration instead of dropping the runs whose branch is gone.
 BC="$T/brief-c"; mkdir -p "$BC" "$BW/runs/brief-c"
@@ -5581,6 +6055,29 @@ grep -q 'disable --now ws-brief.timer' "$T/systemctl.log" || bok=false
 : > "$T/systemctl.log"
 as status || bok=false
 grep -q 'list-units.*ws-brief.timer' "$T/systemctl.log" || bok=false
+# runs/maintenance.last drives one reminder line in both briefs: a missing or stale file prints it, a fresh one
+# does not. Neither brief keeps its own timer; the check rides along.
+rm -f "$BW/runs/maintenance.last"
+mdue=$("$BW/bin/ws" brief 2>&1) || bok=false
+grep -qx 'maintenance due: last run never; run `ws maintenance`' <<< "$mdue" || bok=false
+mdue=$("$BW/scripts/cold-start.sh" --brief brief-a 2>&1) || true
+grep -qx 'maintenance due: last run never; run `ws maintenance`' <<< "$mdue" || bok=false
+printf '2020-01-01 00:00 UTC\n' > "$BW/runs/maintenance.last"
+mdue=$("$BW/bin/ws" brief 2>&1) || bok=false
+grep -qx 'maintenance due: last run 2020-01-01 00:00 UTC; run `ws maintenance`' <<< "$mdue" || bok=false
+mdue=$("$BW/scripts/cold-start.sh" --brief brief-a 2>&1) || true
+grep -qx 'maintenance due: last run 2020-01-01 00:00 UTC; run `ws maintenance`' <<< "$mdue" || bok=false
+printf '%s\n' "$(date '+%Y-%m-%d %H:%M %Z')" > "$BW/runs/maintenance.last"
+mdue=$("$BW/bin/ws" brief 2>&1) || bok=false
+grep -q '^maintenance due:' <<< "$mdue" && bok=false
+mdue=$("$BW/scripts/cold-start.sh" --brief brief-a 2>&1) || true
+grep -q '^maintenance due:' <<< "$mdue" && bok=false
+# A non-whole-number WS_MAINTENANCE_DAYS warns once and falls back to 7, so the reminder still appears.
+printf '2020-01-01 00:00 UTC\n' > "$BW/runs/maintenance.last"
+mdue=$(WS_MAINTENANCE_DAYS=abc "$BW/bin/ws" brief 2>&1) || bok=false
+grep -qx "ws: WS_MAINTENANCE_DAYS='abc' is not a whole number; using 7" <<< "$mdue" || bok=false
+grep -qx 'maintenance due: last run 2020-01-01 00:00 UTC; run `ws maintenance`' <<< "$mdue" || bok=false
+printf '%s\n' "$(date '+%Y-%m-%d %H:%M %Z')" > "$BW/runs/maintenance.last"
 $bok && echo "ws brief sections, diff, cold start pointer and timer ok" \
   || { echo "ws brief FAILED"; printf '%s\n' "$out" | sed -n 1,40p; cat "$T/systemd-analyze.log" 2>/dev/null; exit 1; }
 # Plan decisions written in plans wait on the operator too: the newest matching line per plan file, its sentence
@@ -6129,7 +6626,283 @@ cp "$IW/scripts/lib.sh" "$NG/scripts/lib.sh"; cp "$IW/config.sh" "$NG/config.sh"
 x=0; out=$(WS_TOOL_COMMITS=on bash -c '. "$1/scripts/lib.sh"; commit_new_file "$1/x.md" "plans: x"' _ "$NG" 2>&1) || x=$?
 [ "$x" = 0 ] && grep -q 'not a git repo; left' <<< "$out" \
   && echo "commit_new_file leaves a non-git workspace alone ok" || cfail "non-git workspace" "$out"
+# ws models: a stand-in opencode prints the list named by MODELS_LIST; the snapshot lives in the scratch workspace's
+# runs/, so the real one is untouched. --save records the list, a later run names additions and removals and marks a
+# free addition, a default run leaves the snapshot alone, a no-change run says so, and a missing opencode exits 2.
+# The C-order cases use ids that sort differently under C and the host locale, so a comm run outside C shows up as a
+# `comm:` line; a headerless snapshot dates itself from its mtime, and a header-only snapshot still loads.
+MW="$T/models-ws"; make_ws "$MW"
+MB="$T/models-bin"; mkdir -p "$MB"
+cat > "$MB/opencode" <<'MODELS_STUB'
+#!/usr/bin/env bash
+case " $* " in *" models "*) cat "$MODELS_LIST" ;; esac
+MODELS_STUB
+chmod +x "$MB/opencode"
+printf 'opencode-go/alpha\nopencode-go/beta-free\n' > "$T/models-1.txt"
+x=0; out=$(PATH="$MB:$PATH" MODELS_LIST="$T/models-1.txt" "$MW/bin/ws" models --save 2>&1) || x=$?
+msnap="$MW/runs/models.snapshot"
+{ [ "$x" = 0 ] && grep -qE '^# ws models snapshot [0-9]{4}-[0-9]{2}-[0-9]{2} ' "$msnap" \
+  && grep -qx 'opencode-go/alpha' "$msnap" && grep -qx 'opencode-go/beta-free' "$msnap"; } \
+  && echo "ws models --save writes the snapshot with a date header ok" || cfail "models save" "$out
+snapshot: $(cat "$msnap" 2>/dev/null)"
+before=$(sha256sum "$msnap" | cut -d' ' -f1)
+printf 'opencode-go/alpha\nopencode-go/gamma-free\nopencode-go/delta\n' > "$T/models-2.txt"
+x=0; out=$(PATH="$MB:$PATH" MODELS_LIST="$T/models-2.txt" "$MW/bin/ws" models 2>&1) || x=$?
+after=$(sha256sum "$msnap" | cut -d' ' -f1)
+{ [ "$x" = 0 ] && grep -q 'opencode-go/gamma-free \[free\]' <<< "$out" \
+  && grep -q 'added opencode-go/delta' <<< "$out" && ! grep -q 'delta \[free\]' <<< "$out" \
+  && grep -q 'removed opencode-go/beta-free' <<< "$out" && [ "$before" = "$after" ]; } \
+  && echo "ws models names additions and removals, marks a free addition, and saves only with --save ok" \
+  || cfail "models diff" "$out"
+x=0; out=$(PATH="$MB:$PATH" MODELS_LIST="$T/models-1.txt" "$MW/bin/ws" models 2>&1) || x=$?
+[ "$x" = 0 ] && grep -q '^no change since ' <<< "$out" \
+  && echo "ws models says no change when the list matches the snapshot ok" || cfail "models no change" "$out"
+# `-` sorts before `.` in C but not in the host locale, so a snapshot sorted with LC_ALL=C must be diffed under
+# LC_ALL=C; otherwise comm prints "not in sorted order" and its output cannot be trusted.
+printf 'opencode-go/deepseek-v4-pro\nopencode-go/deepseek-v4.1-flash\n' > "$T/models-c.txt"
+x=0; out=$(PATH="$MB:$PATH" MODELS_LIST="$T/models-c.txt" "$MW/bin/ws" models --save 2>&1) || x=$?
+[ "$x" = 0 ] && ! grep -q 'comm:' <<< "$out" \
+  && echo "ws models saves C-sorted ids without a comm order warning ok" || cfail "models C save" "$out"
+x=0; out=$(PATH="$MB:$PATH" MODELS_LIST="$T/models-c.txt" "$MW/bin/ws" models 2>&1) || x=$?
+[ "$x" = 0 ] && ! grep -q 'comm:' <<< "$out" && grep -q '^no change since ' <<< "$out" \
+  && echo "ws models diffs C-sorted ids without a comm order warning ok" || cfail "models C no change" "$out"
+printf 'opencode-go/deepseek-v4-pro\nopencode-go/deepseek-v4.1-flash\nopencode-go/zeta-free\n' > "$T/models-c2.txt"
+x=0; out=$(PATH="$MB:$PATH" MODELS_LIST="$T/models-c2.txt" "$MW/bin/ws" models 2>&1) || x=$?
+{ [ "$x" = 0 ] && ! grep -q 'comm:' <<< "$out" && grep -q 'added opencode-go/zeta-free \[free\]' <<< "$out" \
+  && ! grep -q 'removed ' <<< "$out"; } \
+  && echo "ws models names an addition beside C-sorted ids without a comm order warning ok" || cfail "models C addition" "$out"
+# A snapshot with no header cannot date itself, so the date comes from the file's mtime.
+printf 'opencode-go/alpha\nopencode-go/beta-free\n' > "$msnap"
+touch -d '2026-01-02 03:04' "$msnap"
+x=0; out=$(PATH="$MB:$PATH" MODELS_LIST="$T/models-1.txt" "$MW/bin/ws" models 2>&1) || x=$?
+[ "$x" = 0 ] && grep -q '^no change since 2026-01-02 03:04' <<< "$out" \
+  && echo "ws models dates a headerless snapshot from its mtime ok" || cfail "models headerless date" "$out"
+# A header-only snapshot (a --save of an empty list) has no model lines; stripping the header must not fail.
+printf '# ws models snapshot 2026-01-02 03:04\n' > "$msnap"
+x=0; out=$(PATH="$MB:$PATH" MODELS_LIST="$T/models-1.txt" "$MW/bin/ws" models 2>&1) || x=$?
+[ "$x" = 0 ] && grep -q 'added opencode-go/alpha' <<< "$out" \
+  && echo "ws models loads a header-only snapshot ok" || cfail "models header-only" "$out"
+# The missing-opencode path only needs the tools bin/ws and lib.sh call before the check: run it on a PATH with
+# those commands but no opencode, so a real install on the host cannot hide the branch.
+MT="$T/models-tools"; mkdir -p "$MT"
+for c in bash dirname readlink sed; do p=$(command -v "$c" 2>/dev/null) || continue; ln -sf "$p" "$MT/$c"; done
+x=0; out=$(env -u MODELS_LIST PATH="$MT" "$MW/bin/ws" models 2>&1) || x=$?
+[ "$x" = 2 ] && [ "$(printf '%s\n' "$out" | grep -c '[^[:space:]]')" = 1 ] && grep -q 'opencode is not on PATH' <<< "$out" \
+  && echo "ws models exits 2 with one line when opencode is missing ok" || cfail "models no opencode (exit $x)" "$out"
+# ws maintenance: a scratch workspace with fixtures for the npm versions, model list, both privacy pages and the
+# Node index, so no check reaches the network or the real data directory. The clean fixture has no decision, each
+# drift case names its finding, and a model-list probe for a non-1.x opencode runs with a throwaway XDG_DATA_HOME.
+MWT="$T/maint-ws"; make_ws "$MWT"
+cat > "$MWT/config.local.sh" <<'MAINTCONF'
+WS_OPENCODE_MODEL_NAMES=("opencode-go/deepseek-v4.1-flash=DeepSeek V4.1 Flash")
+WS_ALLOWANCE_LIMITS="opencode-go/deepseek-v4.1-flash=20,50,100"
+MAINTCONF
+git -C "$MWT" add config.local.sh
+git -C "$MWT" -c user.name=t -c user.email=t@t commit -qm "maintenance fixtures"
+printf 'opencode-go/deepseek-v4.1-flash\nopencode-go/foo-free\nopencode/glm-5.3-flash-free\n' > "$T/maint-models.txt"
+printf '<td>DeepSeek V4.1 Flash</td><td>Not used</td><td>0 days</td> <td>Foo Free</td><td>Not used</td><td>0 days</td>' > "$T/maint-go.html"
+cat > "$T/maint-zen.html" <<'ZEN'
+<h2>Free models</h2>
+<ul>
+<li>GLM-5.3-Flash Free is free on OpenCode for a limited time. Its provider follows a zero-retention policy and does not use your data for model training.</li>
+<li>Big Pickle is free on OpenCode for a limited time. Its provider retains your data for 30 days.</li>
+</ul>
+ZEN
+printf '[{"version":"v99.0.1","lts":false},{"version":"%s","lts":"Jod"}]\n' "$(node --version)" > "$T/maint-index.json"
+decisions() { awk '/^## Needs a decision/{on=1;next} /^## /{on=0} on && /^- /' "$1"; }
+maint_run() { # <report> <installed> <npm-1x> <npm-2x> <models-file|"">
+  WS_MAINTENANCE_OPENCODE_VERSION="$2" \
+  WS_MAINTENANCE_NPM_1X_VERSION="$3" \
+  WS_MAINTENANCE_NPM_2X_VERSION="$4" \
+  WS_MAINTENANCE_MODELS="$5" \
+  WS_ALLOWANCE_LIMITS="opencode-go/deepseek-v4.1-flash=20,50,100" \
+  WS_AGENT=opencode WS_REVIEW_AGENT="" \
+  WS_MAINTENANCE_GO_PAGE="$T/maint-go.html" \
+  WS_MAINTENANCE_ZEN_PAGE="$T/maint-zen.html" \
+  WS_MAINTENANCE_NODE_INDEX="$T/maint-index.json" \
+  "$MWT/bin/ws" maintenance --report "$1" 2>&1
+}
+x=0; out=$(maint_run "$T/maint-first.md" 2.2.7 1.9.9 2.2.7 "$T/maint-models.txt") || x=$?
+{ [ "$x" = 0 ] && [ -f "$MWT/runs/models.snapshot" ] && [ -f "$T/maint-first.md" ] \
+  && grep -q '^# ws models snapshot ' "$MWT/runs/models.snapshot" \
+  && [ "$(decisions "$T/maint-first.md")" = "- none" ]; } \
+  && echo "ws maintenance writes a model snapshot, reports no drift on the first run ok" || cfail "maintenance first run" "$out
+decisions: $(decisions "$T/maint-first.md")"
+snap_before=$(sha256sum "$MWT/runs/models.snapshot" | cut -d' ' -f1)
+x=0; out=$(maint_run "$T/maint-clean.md" 2.2.7 1.9.9 2.2.7 "$T/maint-models.txt") || x=$?
+snap_after=$(sha256sum "$MWT/runs/models.snapshot" | cut -d' ' -f1)
+{ [ "$x" = 0 ] && [ "$(decisions "$T/maint-clean.md")" = "- none" ] && [ "$snap_before" = "$snap_after" ] \
+  && [ -f "$MWT/runs/maintenance.last" ] && [ -z "$(git -C "$MWT" status --porcelain --untracked-files=no)" ] \
+  && grep -q '^Free models with no training and 0 days: Foo Free, Glm 5.3 Flash Free$' "$T/maint-clean.md" \
+  && grep -q '| Glm 5.3 Flash Free | Not used | 0 days | zen |' "$T/maint-clean.md" \
+  && grep -q "Node's newest Current release is 99.0.1" "$T/maint-clean.md" \
+  && grep -qx 'maintenance: no drift' <<< "$out"; } \
+  && echo "ws maintenance prints no drift for a clean fixture (Go free row by display name, Zen free item in prose, Node LTS vs Current) and changes only its own state ok" \
+  || cfail "maintenance clean" "$out
+decisions: $(decisions "$T/maint-clean.md")"
+x=0; out=$(maint_run "$T/maint-behind.md" 1.0.0 1.2.0 2.2.7 "$T/maint-models.txt") || x=$?
+behind=$(decisions "$T/maint-behind.md")
+{ [ "$x" = 0 ] && grep -q 'update OpenCode: installed 1.0.0 is behind' <<< "$behind" \
+  && grep -q '1.x latest 1.2.0' <<< "$behind" && grep -q '2.x latest 2.2.7' <<< "$behind"; } \
+  && echo "ws maintenance flags an installed OpenCode behind both lines ok" || cfail "maintenance behind" "$behind"
+printf 'opencode-go/deepseek-v4.1-flash\nopencode-go/foo-free\nopencode-go/brand-new-free\n' > "$T/maint-models.txt"
+x=0; out=$(maint_run "$T/maint-newfree.md" 2.2.7 1.9.9 2.2.7 "$T/maint-models.txt") || x=$?
+freefind=$(decisions "$T/maint-newfree.md")
+{ [ "$x" = 0 ] && grep -q 'new free model opencode-go/brand-new-free is listed' <<< "$freefind"; } \
+  && echo "ws maintenance flags a new free model ok" || cfail "maintenance new free" "$freefind"
+printf 'opencode-go/foo-free\n' > "$T/maint-models.txt"
+x=0; out=$(maint_run "$T/maint-missing.md" 2.2.7 1.9.9 2.2.7 "$T/maint-models.txt") || x=$?
+missing=$(decisions "$T/maint-missing.md")
+{ [ "$x" = 0 ] && grep -q 'retired pin: opencode-go/deepseek-v4.1-flash disappeared' <<< "$missing"; } \
+  && echo "ws maintenance flags a used model missing from the list ok" || cfail "maintenance missing pin" "$missing"
+printf 'opencode-go/deepseek-v4.1-flash\nopencode-go/foo-free\n' > "$T/maint-models.txt"
+printf '<td>DeepSeek V4.1 Flash</td><td>Not used</td><td>0 days</td> <td>Foo Free</td><td>Not used</td><td>0 days</td>' > "$T/maint-go.html"
+x=0; out=$(maint_run "$T/maint-change.md" 2.2.7 1.9.9 2.2.7 "$T/maint-models.txt") || x=$?
+[ "$x" = 0 ] && [ "$(decisions "$T/maint-change.md")" = "- none" ] || cfail "maintenance privacy baseline" "$out"
+printf '<td>DeepSeek V4.1 Flash</td><td>Yes</td><td>30 days</td> <td>Foo Free</td><td>Not used</td><td>0 days</td>' > "$T/maint-go.html"
+x=0; out=$(maint_run "$T/maint-change.md" 2.2.7 1.9.9 2.2.7 "$T/maint-models.txt") || x=$?
+changed=$(decisions "$T/maint-change.md")
+{ [ "$x" = 0 ] && grep -q 'privacy row for DeepSeek V4.1 Flash changed since the previous report: Not used/0 days -> Yes/30 days' <<< "$changed"; } \
+  && echo "ws maintenance flags a changed privacy row ok" || cfail "maintenance privacy change" "$changed"
+printf '<td>Someone Else</td><td>Not used</td><td>0 days</td>' > "$T/maint-go.html"
+x=0; out=$(maint_run "$T/maint-norow.md" 2.2.7 1.9.9 2.2.7 "$T/maint-models.txt") || x=$?
+norow=$(decisions "$T/maint-norow.md")
+{ [ "$x" = 0 ] && grep -q 'used model DeepSeek V4.1 Flash has no privacy row' <<< "$norow"; } \
+  && echo "ws maintenance flags a used model with no privacy row ok" || cfail "maintenance no privacy row" "$norow"
+printf '<td>DeepSeek V4.1 Flash</td><td>Not used</td><td>0 days</td> <td>Foo Free</td><td>Not used</td><td>0 days</td>' > "$T/maint-go.html"
+# maintenance refreshes zdr-check's cached privacy pages when it fetches them.
+CSTUB="$T/maint-curl"; mkdir -p "$CSTUB"
+cat > "$CSTUB/curl" <<'MAINTCURL'
+#!/bin/bash
+url=""; out=""; prev=""
+for a in "$@"; do
+  [ "$prev" = "-o" ] && out="$a"
+  case "$a" in http*) url="$a" ;; esac
+  prev="$a"
+done
+case "$url" in
+  */docs/zen) cp "$MAINT_ZEN" "$out" ;;
+  */docs/go) cp "$MAINT_GO" "$out" ;;
+  *) exit 1 ;;
+esac
+MAINTCURL
+chmod +x "$CSTUB/curl"
+rm -f "$MWT/runs/zdr-page-go.html" "$MWT/runs/zdr-page-zen.html"
+x=0; out=$(PATH="$CSTUB:$PATH" MAINT_GO="$T/maint-go.html" MAINT_ZEN="$T/maint-zen.html" \
+  WS_MAINTENANCE_OPENCODE_VERSION=2.2.7 WS_MAINTENANCE_NPM_1X_VERSION=1.9.9 WS_MAINTENANCE_NPM_2X_VERSION=2.2.7 \
+  WS_MAINTENANCE_MODELS="$T/maint-models.txt" WS_ALLOWANCE_LIMITS="opencode-go/deepseek-v4.1-flash=20,50,100" \
+  WS_AGENT=opencode WS_REVIEW_AGENT="" WS_MAINTENANCE_NODE_INDEX="$T/maint-index.json" \
+  "$MWT/bin/ws" maintenance --report "$T/maint-zdr-cache.md" 2>&1) || x=$?
+{ [ "$x" = 0 ] && [ -f "$MWT/runs/zdr-page-go.html" ] && [ -f "$MWT/runs/zdr-page-zen.html" ] \
+  && grep -q 'DeepSeek V4.1 Flash' "$MWT/runs/zdr-page-go.html" && grep -q 'GLM-5.3-Flash Free' "$MWT/runs/zdr-page-zen.html"; } \
+  && echo "ws maintenance refreshes zdr-check's cached privacy pages ok" \
+  || cfail "maintenance zdr cache" "$out
+$(ls "$MWT/runs" 2>/dev/null)"
+# A binary that answers nothing is installed; it is not absent.
+x=0; out=$(maint_run "$T/maint-oc-unknown.md" dev 1.9.9 2.2.7 "$T/maint-models.txt") || x=$?
+ocunknown=$(decisions "$T/maint-oc-unknown.md")
+{ [ "$x" = 0 ] && grep -q 'OpenCode is installed, version unknown' <<< "$ocunknown" \
+  && grep -q '| installed | installed, version unknown |' "$T/maint-oc-unknown.md"; } \
+  && echo "ws maintenance reports an unreadable installed version as installed, version unknown ok" \
+  || cfail "maintenance version unknown" "$ocunknown"
+# The update check follows the newest LTS entry, while the newest Current release is only a note.
+printf '[{"version":"v99.0.1","lts":false},{"version":"v99.0.0","lts":"Jod"},{"version":"%s","lts":false}]\n' "$(node --version)" > "$T/maint-index.json"
+x=0; out=$(maint_run "$T/maint-node-lts.md" 2.2.7 1.9.9 2.2.7 "$T/maint-models.txt") || x=$?
+nodedec=$(decisions "$T/maint-node-lts.md")
+{ [ "$x" = 0 ] && grep -q 'update Node: installed .* is behind the latest LTS 99.0.0' <<< "$nodedec" \
+  && ! grep -q '99.0.1' <<< "$nodedec"; } \
+  && echo "ws maintenance compares Node with the newest LTS, not the Current line ok" || cfail "maintenance Node LTS" "$nodedec"
+printf '[{"version":"v99.0.1","lts":false},{"version":"%s","lts":"Jod"}]\n' "$(node --version)" > "$T/maint-index.json"
+# A parser that exits non-zero or prints nothing is a finding, not an empty privacy section.
+PYB="$T/maint-pybin"; mkdir -p "$PYB"
+printf '#!/usr/bin/env bash\n[ "${PY_EMPTY:-}" = 1 ] && exit 0\nexit 1\n' > "$PYB/python3"
+chmod +x "$PYB/python3"
+for pmode in exit empty; do
+  pmenv=""; [ "$pmode" = empty ] && pmenv=1
+  x=0
+  out=$(PATH="$PYB:$PATH" PY_EMPTY="$pmenv" \
+    WS_MAINTENANCE_OPENCODE_VERSION=2.2.7 WS_MAINTENANCE_NPM_1X_VERSION=1.9.9 WS_MAINTENANCE_NPM_2X_VERSION=2.2.7 \
+    WS_MAINTENANCE_MODELS="$T/maint-models.txt" WS_ALLOWANCE_LIMITS="opencode-go/deepseek-v4.1-flash=20,50,100" \
+    WS_AGENT=opencode WS_REVIEW_AGENT="" \
+    WS_MAINTENANCE_GO_PAGE="$T/maint-go.html" WS_MAINTENANCE_ZEN_PAGE="$T/maint-zen.html" \
+    WS_MAINTENANCE_NODE_INDEX="$T/maint-index.json" \
+    "$MWT/bin/ws" maintenance --report "$T/maint-parser-$pmode.md" 2>&1) || x=$?
+  pdec=$(decisions "$T/maint-parser-$pmode.md")
+  { [ "$x" = 0 ] && grep -q 'privacy parser \(failed\|returned no rows\)' <<< "$pdec"; } \
+    && echo "ws maintenance reports a failed ($pmode) privacy parser ok" || cfail "maintenance privacy parser $pmode" "$pdec"
+done
+MSTUB="$T/maint-bin"; mkdir -p "$MSTUB"
+cat > "$MSTUB/opencode" <<'MAINTSTUB'
+#!/usr/bin/env bash
+case " $* " in
+  *" models "*)
+    case "${STUB_FAIL:-}" in
+      exit) exit 1 ;;
+      empty) exit 0 ;;
+    esac
+    cat "$STUB_MODELS" 2>/dev/null; printf '%s\n' "${XDG_DATA_HOME:-}" >> "$STUB_XDG_LOG" ;;
+  *" --version "*) echo "2.2.7" ;;
+esac
+MAINTSTUB
+chmod +x "$MSTUB/opencode"
+printf 'opencode-go/deepseek-v4.1-flash\n' > "$T/maint-stub-models.txt"
+safety_ok=1; safety_out=""
+for sver in 2.2.7 dev; do
+  : > "$T/maint-xdg.log"
+  x=0
+  out=$(PATH="$MSTUB:$PATH" STUB_MODELS="$T/maint-stub-models.txt" STUB_XDG_LOG="$T/maint-xdg.log" \
+    WS_MAINTENANCE_OPENCODE_VERSION="$sver" WS_MAINTENANCE_NPM_1X_VERSION=1.9.9 WS_MAINTENANCE_NPM_2X_VERSION=2.2.7 \
+    WS_MAINTENANCE_GO_PAGE="$T/maint-go.html" WS_MAINTENANCE_ZEN_PAGE="$T/maint-zen.html" \
+    WS_MAINTENANCE_NODE_INDEX="$T/maint-index.json" \
+    "$MWT/bin/ws" maintenance --report "$T/maint-safety.md" 2>&1) || x=$?
+  xdg=$(head -n1 "$T/maint-xdg.log" 2>/dev/null)
+  xdg_ok=0
+  case "$xdg" in "${TMPDIR:-/tmp}"/*) xdg_ok=1 ;; esac
+  { [ "$x" = 0 ] && [ "$xdg_ok" = 1 ] && [ "$xdg" != "$HOME/.local/share/opencode" ] \
+    && ! grep -q "$HOME/.local/share" "$T/maint-xdg.log" \
+    && grep -q 'opencode-go/deepseek-v4.1-flash' "$T/maint-safety.md"; } \
+    || { safety_ok=0; safety_out="version $sver: $out
+xdg: ${xdg:-<none>}"; }
+done
+[ "$safety_ok" = 1 ] && echo "a model-list probe for a non-1.x opencode uses a throwaway data dir ok" \
+  || cfail "maintenance non-1.x data dir" "$safety_out"
+# A probe that exits non-zero or prints nothing must not read as every snapshot model removed and every pin retired.
+unavail_ok=1; unavail_out=""
+for umode in exit empty; do
+  : > "$T/maint-xdg.log"
+  x=0
+  out=$(PATH="$MSTUB:$PATH" STUB_FAIL="$umode" STUB_MODELS="" STUB_XDG_LOG="$T/maint-xdg.log" \
+    WS_MAINTENANCE_OPENCODE_VERSION=2.2.7 WS_MAINTENANCE_NPM_1X_VERSION=1.9.9 WS_MAINTENANCE_NPM_2X_VERSION=2.2.7 \
+    WS_MAINTENANCE_GO_PAGE="$T/maint-go.html" WS_MAINTENANCE_ZEN_PAGE="$T/maint-zen.html" \
+    WS_MAINTENANCE_NODE_INDEX="$T/maint-index.json" \
+    "$MWT/bin/ws" maintenance --report "$T/maint-unavailable-$umode.md" 2>&1) || x=$?
+  udec=$(decisions "$T/maint-unavailable-$umode.md")
+  { [ "$x" = 0 ] && grep -q 'model list unavailable' <<< "$udec" \
+    && ! grep -q 'removed' <<< "$udec" && ! grep -q 'retired pin' <<< "$udec"; } \
+    || { unavail_ok=0; unavail_out="mode $umode: $udec"; }
+done
+[ "$unavail_ok" = 1 ] && echo "ws maintenance reports a failed or empty model-list probe without removals or retired pins ok" \
+  || cfail "maintenance model list unavailable" "$unavail_out"
+# A chain test must arm its watchdog under the scratch unit dir, never the real user unit directory: a leftover
+# timer there keeps firing five-minute checks for a slug whose runs directory is gone. The scratch dir must exist
+# (a chain armed), and no chain test may leave a timer, service or wants link of its own in the real directory. A
+# slug may be a glob: the check scripts name their project after a random mktemp directory, so the suite knows only
+# their prefix.
+chain_watch_leak_cases() { # <unit-dir> <slug-or-glob>...
+  local dir="$1" real="$HOME/.config/systemd/user" s leaked="" f
+  shift
+  [ -d "$dir" ] || { echo "chain watchdog leak FAILED: $dir was never created by a chain arm"; return 1; }
+  for s in "$@"; do
+    for f in "$real/ws-chain-watch-"$s".timer" "$real/ws-chain-watch-"$s".service" \
+      "$real/timers.target.wants/ws-chain-watch-"$s".timer"; do
+      [ -e "$f" ] && leaked+=" $f"
+    done
+  done
+  [ -z "$leaked" ] || { echo "chain watchdog leak FAILED:$leaked"; return 1; }
+  echo "chain tests keep their watchdog units out of the real user unit dir ok"
+}
 par_wait
+chain_watch_leak_cases "$T/wake-units" "$slug" "$slug3" demo 'mgate-*' 'wk-*' 'ck-*' 'cr-*' 'cw-*' || exit 1
 [ "$cf" = 0 ] || exit 1
 [ "$par_fail" = 0 ] || exit 1
 if [ -n "${WS_SELFTEST_TIMES:-}" ]; then

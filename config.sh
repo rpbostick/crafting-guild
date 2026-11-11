@@ -6,6 +6,8 @@ WS_BENCH_OUTSIDE="${WS_BENCH_OUTSIDE-half}"        # outside WS_BENCH_HOURS: "ha
 WS_MERGE_TEST_TIMEOUT="${WS_MERGE_TEST_TIMEOUT-1800}"  # seconds the merge gate's test run (and merge.sh --test-only) may take before it is killed and the merge undone; a runner that never exits after its tests would otherwise hold the merge lock
 WS_DEFAULT_BUDGET="10"         # dollars, --max-budget-usd for a builder run
 WS_REVIEW_BUDGET="8"            # dollars, for a review run
+WS_REVIEW_PASS_RETRY="${WS_REVIEW_PASS_RETRY:-1}"     # a failed review pass is retried once, after the others finish
+WS_REVIEW_PASS_RETRY_DELAY="${WS_REVIEW_PASS_RETRY_DELAY:-5}"  # seconds before that retry
 # Independent reviews per branch (1-3), their blocking findings unioned and the strictest verdict kept; ws review
 # --passes overrides. An OpenCode-only install sets 2 in config.local.sh, so every script review runs two OpenCode
 # passes and their blocking findings are unioned. Each pass costs a whole review, so on Claude the cost multiplies.
@@ -21,6 +23,9 @@ WS_SERVE_MEM="3G"               # memory cap for a `ws serve` preview and everyt
 WS_OC_PORT="${WS_OC_PORT:-4096}"                     # ws oc starts the session's server on the first free port from here up (runs/<slug>/oc.port)
 WS_WAKE_URL="${WS_WAKE_URL:-}"                        # the server ws wake sends to: --url, else this when set, else http://127.0.0.1:<runs/<slug>/oc.port>, else http://127.0.0.1:4096
 WS_WAKE_TIMEOUT="${WS_WAKE_TIMEOUT:-900}"             # seconds ws wake waits for the session's first event before it records a failure
+WS_WAKE_ATTEMPTS="${WS_WAKE_ATTEMPTS:-3}"             # delivery attempts for one wake before it gives up (a timeout is not retried)
+WS_WAKE_RETRY_DELAY="${WS_WAKE_RETRY_DELAY:-20}"       # seconds between those attempts
+WS_WAKE_BACKSTOP="${WS_WAKE_BACKSTOP:-600}"            # seconds: one more attempt on a timer after they fail; 0 = none
 WS_PREVIEW_PORT="8801"          # ws serve <worktree> without a port
 WS_PREVIEW_PORT_MAIN="8800"     # ws serve main without a port
 WS_TUTOR_PROJECT="${WS_TUTOR_PROJECT-}"   # ws tutor: the course project the tutor tab opens
@@ -29,6 +34,7 @@ WS_BENCH_AUTOSTART="${WS_BENCH_AUTOSTART-0}"   # ws autostart: 1 resumes the ben
 WS_BENCH_AUTOSTART_CMD="${WS_BENCH_AUTOSTART_CMD-}"   # the bench command file ws-bench.service runs (relative to the workspace or absolute)
 WS_BROWSER_CMD="firefox --new-tab"   # ws serve prints "open it: <this> <url>"; empty = print nothing
 WS_SUITE_WARN_S="300"           # ws merge warns when the project's suite takes longer than this many seconds
+WS_SELFTEST_LOCK_WAIT="${WS_SELFTEST_LOCK_WAIT:-900}"  # seconds a second `bash scripts/selftest.sh`, in the main checkout or a worktree, waits for the one running before it exits 3
 WS_CHAIN_FIX_ROUNDS="1"          # ws chain: automatic fix rounds per step before it stops for the orchestrator
 # A usage limit's reset can be days away. A wait longer than WS_LIMIT_PROBE_AFTER seconds wakes every
 # WS_LIMIT_PROBE_EVERY seconds and makes one cheap probe call through the same agent and model; the first success
@@ -53,7 +59,7 @@ WS_OPENCODE_MODEL="opencode-go/deepseek-v4.1-flash"   # builder model for --agen
 WS_MIN_OPENCODE="1.19.1"        # oldest OpenCode whose SDK/plugin API the launchers use: the parity probe's server json_schema output and the plugins' hooks
 WS_ASK_MODEL="${WS_ASK_MODEL-}"   # provider/model for ws ask research jobs; empty = the builder model (WS_OPENCODE_MODEL), resolved in scripts/ask.sh
 WS_ASK_BUDGET="${WS_ASK_BUDGET:-0.50}"              # dollars, for one ws ask research job
-# OpenCode model IDs and the names OpenCode's Go page gives them in its privacy table, which zdr-check reads: a model
+# OpenCode model IDs and the names its Go or Zen page gives them in its privacy table, which zdr-check reads: a model
 # not listed here is refused, since its retention cannot be checked.
 WS_BROWSER_MCP_VERSION="0.0.84"   # @playwright/mcp, exact: npx would otherwise fetch whatever is newest into the orchestrator session
 WS_OPENCODE_MODEL_NAMES=("opencode-go/deepseek-v4.1-flash=DeepSeek V4.1 Flash")
@@ -70,8 +76,17 @@ WS_ALLOWANCE_STARTS="${WS_ALLOWANCE_STARTS-}"   # <5h-epoch>,<7d-epoch>,<30d-epo
 WS_ALLOWANCE_DB="${WS_ALLOWANCE_DB-$HOME/.local/share/opencode/opencode.db}"   # OpenCode's database, read-only; empty = the meter is off and nothing is held
 WS_WEB_MAX_MB="${WS_WEB_MAX_MB:-20}"  # ws web refuses a file larger than this many MB (the environment may set it for one call)
 WS_LESSONS_CAP="40"            # cold-start warns when a lessons/ file (shared or .local.md) passes this many lines
+# Days between maintenance reports. When runs/maintenance.last is older than this, cold-start --brief and ws brief
+# print one "maintenance due" line; the report itself runs only when someone runs `ws maintenance` (no timer).
+WS_MAINTENANCE_DAYS="${WS_MAINTENANCE_DAYS-7}"
+# Days zdr-check reuses a fetched privacy page (runs/zdr-page-go.html, runs/zdr-page-zen.html) before fetching it
+# again; a failed refresh still falls back to the stale page. 0 always fetches when it has no --page.
+WS_ZDR_CACHE_DAYS="${WS_ZDR_CACHE_DAYS-1}"
 WS_MEMORY_DIR="${WS_MEMORY_DIR-}"   # absolute path of a memory directory (MEMORY.md plus one file per memory) an OpenCode orchestrator loads; set it in config.local.sh; empty = no memory
 WS_MEMORY_CAP="${WS_MEMORY_CAP-24000}"   # characters of the memory index and bodies in a session's system text, not counting the header and notes; what does not fit is dropped and named there
+# 1: every question to the operator goes through the question tool with labelled options and a free-text box;
+# 0: plain chat questions. On by default; set 0 in config.local.sh to turn it off.
+WS_ASK_PROMPTS="${WS_ASK_PROMPTS-1}"
 # A line in a plan that says a decision waits on the operator (an ERE; empty lists none). config.local.sh may
 # override it, and the environment may for one call.
 WS_WAITING_RE="${WS_WAITING_RE-[Ww]aiting on (the operator|you)}"

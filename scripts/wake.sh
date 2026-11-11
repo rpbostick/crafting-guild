@@ -161,7 +161,20 @@ schedule() {
 fail_delivery() { # <id> <recurring> <session> <url> <reason> <message>
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(now_local)" "$1" "$3" "$4" "$(one_line "$5")" "$(one_line "$6")" >> "$FAILED"
   # A recurring job keeps its files so the timer fires again; only a one-shot is finished by a failure.
-  if [ "$2" != true ]; then rm -f "$WAKE_DIR/$1.job" "$WAKE_DIR/$1.msg"; fi
+  if [ "$2" != true ]; then rm -f "$WAKE_DIR/$1.job" "$WAKE_DIR/$1.msg" "$WAKE_DIR/$1.backstop"; fi
+}
+
+# One more delivery on a timer after the in-process attempts run out, so a failure that outlasts them (a server
+# restart) still lands. The .backstop marker keeps a failed backstop from scheduling another.
+schedule_backstop() { # <id>
+  local id="$1" unit env_args=("--setenv=PATH=$PATH") var
+  unit="$(unit_of "$id")-backstop"
+  for var in OPENCODE_SERVER_PASSWORD OPENCODE_SERVER_USERNAME; do
+    if [ -n "${!var:-}" ]; then env_args+=("--setenv=$var"); fi
+  done
+  systemd-run --user --quiet --collect --unit="$unit" --description="ws wake $SLUG $id retry" \
+    --working-directory="$WS" --timer-property=AccuracySec=1s --on-active="${WS_WAKE_BACKSTOP}s" \
+    "${env_args[@]}" "$WS/scripts/wake.sh" --project "$SLUG" fire "$id" >/dev/null 2>&1
 }
 
 fire() {
@@ -181,36 +194,63 @@ fire() {
     [ -f "$job" ] || exit 0
     message+=$'\n\nThe chain for '"$SLUG stopped. ${status:-status: none recorded}"
   fi
-  # `--` keeps a message that starts with a dash from being read as a flag.
-  opencode run --attach "$url" --session "$session" --format json -- "$message" > "$output" 2>&1 < /dev/null &
-  local pid=$! deadline=$(( $(date +%s) + WS_WAKE_TIMEOUT )) delivered=false timed_out=false code
-  sent() { grep -qE '^\{"type":"(step_start|text|tool_use)"' "$output"; }
-  # pid is this shell's own background opencode child ($!), not a pid read from a file.
-  while kill -0 "$pid" 2>/dev/null; do
-    if sent; then delivered=true; break; fi
-    if [ "$(date +%s)" -ge "$deadline" ]; then timed_out=true; kill "$pid" 2>/dev/null; break; fi
-    sleep 1
+  local attempt=1 reason code timed_out delivered pid deadline
+  # A provider error (APIError) comes after the user message is created, so the session has it: retrying would
+  # duplicate the message. A server error (UnknownError, e.g. a locked database) or a client error means it did not.
+  sent() {
+    grep -qE '^\{"type":"(step_start|step_finish|text|tool_use|tool_result)"' "$output" && return 0
+    grep -qE '^\{"type":"error"' "$output" && grep -qE '"name":"APIError"' "$output" && return 0
+    return 1
+  }
+  while :; do
+    : > "$output"
+    # `--` keeps a message that starts with a dash from being read as a flag.
+    opencode run --attach "$url" --session "$session" --format json -- "$message" > "$output" 2>&1 < /dev/null &
+    pid=$!; deadline=$(( $(date +%s) + WS_WAKE_TIMEOUT )); delivered=false; timed_out=false
+    # pid is this shell's own background opencode child ($!), not a pid read from a file.
+    while kill -0 "$pid" 2>/dev/null; do
+      if sent; then delivered=true; break; fi
+      if [ "$(date +%s)" -ge "$deadline" ]; then timed_out=true; kill "$pid" 2>/dev/null; break; fi
+      sleep 1
+    done
+    if ! $delivered && ! $timed_out && sent; then delivered=true; fi
+    if $delivered; then
+      if [ "$recurring" != true ]; then rm -f "$job" "$WAKE_DIR/$id.msg" "$WAKE_DIR/$id.backstop"; fi
+      echo "$(now_local) $id delivered to $session" >> "$WAKE_LOG"
+      # The session's turn is still running: the client stays attached until it ends, so a kill cannot cut it short.
+      wait "$pid"; code=$?
+      echo "$(now_local) $id turn ended, exit $code" >> "$WAKE_LOG"
+      rm -f "$output"
+      exit 0
+    fi
+    wait "$pid" 2>/dev/null; code=$?
+    if $timed_out; then
+      reason="no reply in $WS_WAKE_TIMEOUT s; a busy session may still have it queued"
+    else
+      # OpenCode 1.19.1 prints "Session not found" for a closed port too, so the reason keeps both readings.
+      reason="opencode run exit $code: $(sed 's/\x1b\[[0-9;]*m//g' "$output" | grep . | tail -n1 | cut -c1-200) (server down, or the session is unknown to it)"
+    fi
+    # A timeout is not retried: the message may be queued in the session, and a second copy would repeat it.
+    if ! $timed_out && [ "$attempt" -lt "${WS_WAKE_ATTEMPTS:-1}" ]; then
+      echo "$(now_local) $id attempt $attempt failed: $reason; retrying in ${WS_WAKE_RETRY_DELAY:-20}s" >> "$WAKE_LOG"
+      sleep "${WS_WAKE_RETRY_DELAY:-20}"
+      attempt=$((attempt + 1))
+      continue
+    fi
+    break
   done
-  if ! $delivered && ! $timed_out && sent; then delivered=true; fi
-  if $delivered; then
-    if [ "$recurring" != true ]; then rm -f "$job" "$WAKE_DIR/$id.msg"; fi
-    echo "$(now_local) $id delivered to $session" >> "$WAKE_LOG"
-    # The session's turn is still running: the client stays attached until it ends, so a kill cannot cut it short.
-    wait "$pid"; code=$?
-    echo "$(now_local) $id turn ended, exit $code" >> "$WAKE_LOG"
-    rm -f "$output"
-    exit 0
-  fi
-  wait "$pid" 2>/dev/null; code=$?
-  local reason
-  if $timed_out; then reason="no reply in $WS_WAKE_TIMEOUT s; a busy session may still have it queued"
-  else
-    # OpenCode 1.19.1 prints "Session not found" for a closed port too, so the reason keeps both readings.
-    reason="opencode run exit $code: $(sed 's/\x1b\[[0-9;]*m//g' "$output" | grep . | tail -n1 | cut -c1-200) (server down, or the session is unknown to it)"
+  # One more try on a timer, so a failure that outlasts the in-process attempts (a server restart) is not lost.
+  if ! $timed_out && [ "$recurring" != true ] && [ "${WS_WAKE_BACKSTOP:-0}" -gt 0 ] && [ ! -f "$WAKE_DIR/$id.backstop" ]; then
+    if schedule_backstop "$id"; then
+      : > "$WAKE_DIR/$id.backstop"
+      echo "$(now_local) $id FAILED after $attempt attempt(s), backstop in ${WS_WAKE_BACKSTOP}s: $reason" >> "$WAKE_LOG"
+      rm -f "$output"
+      exit 0
+    fi
   fi
   fail_delivery "$id" "$recurring" "$session" "$url" "$reason" "$message"
   echo "$(now_local) $id FAILED: $reason" >> "$WAKE_LOG"
-  rm -f "$output"
+  rm -f "$output" "$WAKE_DIR/$id.backstop"
   exit 1
 }
 
@@ -245,7 +285,8 @@ cancel_wake() {
     # Either unit may be gone already: a fired timer, or a reboot.
     systemctl --user stop "$unit.timer" "$unit.service" 2>/dev/null || true
   fi
-  rm -f "$WAKE_DIR/$id.job" "$WAKE_DIR/$id.msg" "$WAKE_DIR/$id.out"
+  systemctl --user stop "$(unit_of "$id")-backstop" >/dev/null 2>&1 || true
+  rm -f "$WAKE_DIR/$id.job" "$WAKE_DIR/$id.msg" "$WAKE_DIR/$id.out" "$WAKE_DIR/$id.backstop"
   echo "wake $id cancelled"
 }
 

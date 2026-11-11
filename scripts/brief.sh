@@ -149,6 +149,9 @@ allowance=$(allowance_lines)
   echo "# Crafting Guild brief"
   echo
   echo "$(now_local). Waiting on you: ${nw:-0} · running: ${nr:-0} · in flight: ${ni:-0} · open branches: ${nb:-0} · recent: ${nrec:-0} · workspace: ${nws:-0}"
+  ask_prompts_line
+  due=$(maintenance_due_line)
+  [ -n "$due" ] && printf '%s\n' "$due"
   echo
   echo "## Waiting on you"
   if [ "${nw:-0}" -gt 0 ]; then sed 's/^/- /' "$tmp/waiting"; else echo "- none"; fi

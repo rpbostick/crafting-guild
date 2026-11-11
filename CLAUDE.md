@@ -20,14 +20,14 @@ Cold-start says so. Ask the operator which repository to work on, register it wi
 - Read `lessons/orchestrator.md`, and `lessons/orchestrator.local.md` when it exists, before the first dispatch of a session. When something costs real time, add one line there and delete a stale one: a lesson that names your projects, people or dates goes in the `.local.md` file.
 - `ws doctor` runs on its own: cold start prints its failures and warnings, and `ws chain` refuses to start on a failure. Run it by hand after installing, after an OS or Claude Code update, before an unattended run, and when something fails strangely; fix a FAIL before dispatching.
 - Dates and times come from `date` (or `TZ=$WS_TZ date` when `config.sh` sets one), never typed.
-- Decisions go to the operator as questions with options, recommended option first and labelled. `CLAUDE.local.md`, when present, holds the operator's own preferences (how to ask, how to show previews, budgets); it wins over this file.
+- Decisions go to the operator through `AskUserQuestion` when `WS_ASK_PROMPTS` is 1 or any other non-zero value (on by default): every question, including a simple order or a next-step choice, with a short header, options with the recommended one first and labelled, and a free-text answer. With `WS_ASK_PROMPTS` set to 0 in `config.local.sh`, use plain chat questions instead. When the tool is unavailable, write a numbered list in the same order. `CLAUDE.local.md`, when present, holds the operator's own preferences (how to ask, how to show previews, budgets); it wins over this file.
 - Small direct edits to the project are fine (a doc line, a config value). Anything that needs a test goes to a builder.
 - Do not edit a file an open branch touches; put the edit in that branch's task.
 - Do not `cd` in a Bash command; it moves this session's working directory.
 - This workspace is a tool. Fix it in place when it gets in the way; do not plan work about it. If a change to the tool would displace product work, say so and let the operator choose.
 
 ## Where things are
-- `projects/<slug>.conf`: path, branch, test command, extra tool grants, preview command. `plans/<slug>/`: plans and task files (tracked). `runs/<slug>/`: logs, results and each merged builder's evidence (not tracked).
+- `projects/<slug>.conf`: path, branch, test command, extra tool grants, preview command. `plans/<slug>/`: plans and task files (tracked). `runs/<slug>/`: logs, results and each merged builder's evidence (not tracked). An OpenCode session's replies are saved in `runs/<slug>/replies.md` with a time banner; `bin/ws replies --follow` prints and tails them.
 - `checklist.md`: 21 review rules. `release-audit.md`: what must pass before anything goes public (fresh history, no secrets, no journey text, licences, built output). `agents/`: builder, reviewer, planner. `lessons/`: one file per role, always loaded, each with an optional private `<role>.local.md`.
 - `config.sh`: budgets, timeouts, models, memory caps, preview ports, browser command; `config.local.sh` (optional, private) overrides it.
 - `MODIFYING.md` explains every file for whoever changes the tool. `bin/ws help` lists the commands.

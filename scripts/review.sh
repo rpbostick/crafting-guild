@@ -3,25 +3,28 @@
 # Claude or in the prompt to OpenCode. With WS_REVIEW_AGENT empty it runs on the only installed client, or picks by
 # the changed files when both are, so a single-client install needs no setting.
 # Usage: review.sh [--project slug] [--budget USD] [--model M|provider/model] [--agent claude|opencode]
-#                  [--passes N] [--print-prompt] <name>
+#                  [--passes N] [--variant <name>] [--print-prompt] <name>
+# --variant is OpenCode's model variant (its reasoning effort); every pass gets it. It has no meaning on Claude, so
+# a Claude review ignores it.
 # --print-prompt prints the reviewer's whole prompt and stops before running the reviewer.
 # --passes N (1-3, default WS_REVIEW_PASSES) runs N independent reviews and writes their union: every pass's blocking
 # findings and suggestions, deduped by file and a line within 5 for the same fault (blocking) or by line alone
-# (suggestions), a suggestion dropped when a blocking finding names the same fault, and the strictest verdict. Each
-# pass keeps its own files beside the record (<record>.pass<i>.json and its .raw). Every record carries `passes`: 1
-# for a one-pass review,
+# (suggestions), a suggestion dropped when a blocking finding names the same fault, and the strictest verdict. Two or
+# three passes run at the same time and are unioned in pass order. Each pass keeps its own files beside the record
+# (<record>.pass<i>.json and its .raw). Every record carries `passes`: 1 for a one-pass review,
 # so a reader can tell its count apart from a review written before the field existed. A review written beside a record
 # (--out) runs one pass unless --passes says otherwise, so a shadow or a comparison stays one review per arm.
 # --worktree, --base and --out are used by review-compare: review another checkout and write beside the record.
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
-slug="" budget="$WS_REVIEW_BUDGET" model="$WS_REVIEW_MODEL" model_flag="" show_prompt=false
+slug="" budget="$WS_REVIEW_BUDGET" model="$WS_REVIEW_MODEL" model_flag="" variant="" show_prompt=false
 agent="${WS_REVIEW_AGENT:-}" agent_reason=""
 [ -n "$agent" ] && agent_reason="WS_REVIEW_AGENT"
 wt_override="" base_override="" out_base="" passes="" passes_flag=""
 while [ $# -gt 0 ]; do case "$1" in
   --passes) passes="$2"; passes_flag=1; shift 2 ;;
   --project) slug="$2"; shift 2 ;; --budget) budget="$2"; shift 2 ;; --model) model="$2"; model_flag=1; shift 2 ;;
+  --variant) variant="$2"; shift 2 ;;
   --agent) agent="$2"; agent_reason="--agent"; shift 2 ;; --worktree) wt_override="$2"; shift 2 ;; --base) base_override="$2"; shift 2 ;;
   --out) out_base="$2"; shift 2 ;; --print-prompt) show_prompt=true; shift ;; *) break ;; esac; done
 name="${1:?usage: review.sh [flags] <name>}"
@@ -163,7 +166,9 @@ run_pass() { # <raw> <err> <opencode config> <opencode prompt>
     python3 -I "$WS/scripts/opencode_run.py" config --read-only > "$cfg" || die "could not build the OpenCode review config"
     printf '%s\n\n# The diff\n%s\n' "$prompt" "$diff" > "$pf"
     cmd=("$WS/scripts/opencode-review.sh" --model "$model" --budget "$budget" --config "$cfg"
-      --log "$raw" --name "ws:$SLUG:review:$name" "$pf")
+      --log "$raw" --name "ws:$SLUG:review:$name")
+    [ -n "$variant" ] && cmd+=(--variant "$variant")
+    cmd+=("$pf")
     ( cd "$wt" && timeout --kill-after=30s 30m "${cmd[@]}" ) < /dev/null > "$raw" 2>"$err" || true
     result_line=$(grep '"type":"result"' "$raw" | tail -1)
     so=$(printf '%s' "$result_line" | jq -c '.structured_output // empty' 2>/dev/null)
@@ -192,17 +197,59 @@ run_pass() { # <raw> <err> <opencode config> <opencode prompt>
   fi
   if [ "$agent" = opencode ]; then pass_cost=$(printf '%s' "$result_line" | jq -r '.total_cost_usd // "?"' 2>/dev/null); else pass_cost=$(jq -r '.total_cost_usd // "?"' "$raw" 2>/dev/null); fi
 }
+# One pass in its own subshell: run it, write its record, then leave its cost and status in files keyed by the pass.
+# The passes share no state beyond these files, so they can run at the same time without overwriting each other's
+# `so`, `result_line` and `pass_cost`.
+run_pass_job() { # <i> <status file> <cost file> <raw> <err> <opencode config> <opencode prompt>
+  local i="$1" status="$2" costf="$3" pass_out
+  pass_out="${out%.json}.pass$i.json"
+  run_pass "$4" "$5" "$6" "$7" || { echo "fail" > "$status"; return 2; }
+  jq -n --arg sha "$tip" --arg when "$(now_local)" --argjson r "$so" '{reviewed_sha:$sha, when:$when} + $r' > "$pass_out" \
+    || { echo "fail" > "$status"; return 2; }
+  printf '%s\n' "$pass_cost" > "$costf"
+  echo "ok" > "$status"
+}
 if [ "$passes" -eq 1 ]; then
   run_pass "$out.raw" "$errf" "$oc_config" "$oc_prompt" || exit 2
   cost="$pass_cost"
 else
   [ "$agent" = claude ] && note "$passes passes on claude: this review costs $passes Claude reviews"
+  pass_pids=()
+  for i in $(seq 1 "$passes"); do
+    pass_out="${out%.json}.pass$i.json"
+    status="${out%.json}.pass$i.status"; costf="${out%.json}.pass$i.cost"
+    : > "$status"; : > "$costf"
+    ( run_pass_job "$i" "$status" "$costf" "$pass_out.raw" "${errf%.err}.pass$i.err" \
+        "${oc_config%.json}.pass$i.json" "${oc_prompt%.txt}.pass$i.txt" ) >> "${errf%.err}.pass$i.err" 2>&1 &
+    pass_pids+=($!)
+  done
+  for pid in "${pass_pids[@]}"; do wait "$pid" || true; done
+  # A pass that dies on a transient OpenCode server error is retried once, after the other passes finish, so one bad
+  # pass no longer fails a whole review. A usage-limit pass fails again at once and the chain's limit path takes over.
+  if [ "${WS_REVIEW_PASS_RETRY:-1}" -gt 0 ]; then
+    for i in $(seq 1 "$passes"); do
+      status="${out%.json}.pass$i.status"
+      [ "$(cat "$status" 2>/dev/null)" != "ok" ] || continue
+      note "pass $i failed; retrying it once"
+      sleep "${WS_REVIEW_PASS_RETRY_DELAY:-5}"
+      : > "$status"
+      run_pass_job "$i" "$status" "${out%.json}.pass$i.cost" "${out%.json}.pass$i.json.raw" "${errf%.err}.pass$i.err" \
+        "${oc_config%.json}.pass$i.json" "${oc_prompt%.txt}.pass$i.txt" >> "${errf%.err}.pass$i.err" 2>&1 || true
+    done
+  fi
+  failed=0
+  for i in $(seq 1 "$passes"); do
+    if [ "$(cat "${out%.json}.pass$i.status" 2>/dev/null)" != "ok" ]; then
+      echo "pass $i of $passes failed; no union written"
+      grep -m1 '^review failed:' "${errf%.err}.pass$i.err" 2>/dev/null || true
+      failed=1
+    fi
+  done
+  [ "$failed" = 0 ] || exit 2
   union_args=()
   for i in $(seq 1 "$passes"); do
     pass_out="${out%.json}.pass$i.json"
-    run_pass "$pass_out.raw" "${errf%.err}.pass$i.err" "${oc_config%.json}.pass$i.json" "${oc_prompt%.txt}.pass$i.txt" \
-      || { echo "pass $i of $passes failed; no union written"; exit 2; }
-    jq -n --arg sha "$tip" --arg when "$(now_local)" --argjson r "$so" '{reviewed_sha:$sha, when:$when} + $r' > "$pass_out"
+    pass_cost=$(cat "${out%.json}.pass$i.cost")
     union_args+=("$pass_out" "$pass_cost")
     note "pass $i of $passes: $(jq -r '.verdict' "$pass_out"), $(jq '.blocking | length' "$pass_out") blocking"
   done

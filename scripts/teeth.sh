@@ -159,8 +159,9 @@ echo "exit $rc" >> "$log"
 if [ "$rc" -eq 0 ]; then
   finish 1 "teeth: toothless" "$testline" "$revline"
 fi
-if grep -qE '^[[:space:]]*(FAIL|FAILED|not ok|✕|✗)([[:space:]:]|$)' "$log" \
+if grep -qE '^[[:space:]]*(FAIL|FAILED|not ok|✕|✖|✗)([[:space:]:]|$)' "$log" \
   || grep -qiE '(^|[^[:alnum:]_])[1-9][0-9]*[[:space:]]+(failed|failing|failures?)([^[:alnum:]_]|$)' "$log" \
+  || grep -qE '^[[:space:]]*ℹ[[:space:]]+(fail|failed|failures)[[:space:]]+[1-9][0-9]*' "$log" \
   || grep -qiE 'test result: FAILED' "$log" \
   || grep -qiE '^--- FAIL:' "$log"; then
   finish 0 "teeth: ok" "$testline" "$revline"

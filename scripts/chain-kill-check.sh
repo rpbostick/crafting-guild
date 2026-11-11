@@ -8,6 +8,8 @@ set -uo pipefail
 repo=$(mktemp -d)
 slug="ck-$(basename "$repo" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-')"
 slug="${slug%-}"
+# The chain arms a persistent watchdog; keep its units under this case's scratch, never the real user unit directory.
+export WS_WAKE_UNIT_DIR="$repo/wake-units"
 runs="$WS/runs/$slug"
 conf="$WS/projects/$slug.conf"
 chainpid=""

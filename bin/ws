@@ -22,6 +22,14 @@ ws allowance                    OpenCode Go spend, one shared weighted pool, in 
                                 against each model's limit (WS_ALLOWANCE_LIMITS, WS_ALLOWANCE_STARTS), all estimates;
                                 past WS_ALLOWANCE_HOLD percent of the summed window total ws bench run waits, ws
                                 review-compare stops and shadow reviews are skipped; chains and dispatches warn
+ws models [--save]              OpenCode models added to or removed from runs/models.snapshot, the -free ones
+                                marked; each addition points at the OpenCode Go privacy table to check and a
+                                `ws bench run <slug> --arm` to run before use; --save writes the current list
+                                with a date header
+ws maintenance [--report <path>] [--project <slug>]   the weekly drift report: installed and latest OpenCode lines,
+                                tool versions, model-list changes, privacy rows and pins; read-only apart from the
+                                report, runs/maintenance.last and the first run's runs/models.snapshot, and exits 0 so
+                                a scripted run reads the report
 ws dispatch [flags] <name> <task-file>   run a builder (see scripts/dispatch.sh for flags); --agent opencode runs it
                                 through OpenCode on a zero-retention model (--model provider/model, WS_OPENCODE_MODEL);
                                 --effort E is then a model variant ("opencode run --variant", e.g. high or max), checked
@@ -31,9 +39,12 @@ ws dispatch [flags] <name> <task-file>   run a builder (see scripts/dispatch.sh 
 ws wait <name> [minutes]        block until the run finishes; exit 0 if its result checks out
 ws tail <name>                  follow a run's log as readable lines
 ws runs [slug]                  runs and their results
+ws replies [--project slug] [--last N] [--follow] [--since <time>]   the last replies saved in
+                                runs/<slug>/replies.md (default 5); --follow tails new entries
 ws review [--agent claude|opencode] [flags] <name>   review the branch; prints the verdict and the SHA to merge
                                 --agent opencode runs the review on OpenCode (--model provider/model, WS_REVIEW_AGENT)
                                 --passes N (1-3, WS_REVIEW_PASSES) runs N reviews and unions their findings
+                                --variant <name> runs an OpenCode review at that model variant (its reasoning effort)
                                 auto routing uses whichever client is installed (the changed files decide when both
                                 are); an OpenCode-only install also sets WS_AGENT=opencode and reviews on OpenCode,
                                 two passes unioned when WS_REVIEW_PASSES=2. Set WS_REVIEW_AGENT only to force a client
@@ -73,6 +84,8 @@ ws stop-note <step> handled|re-explained "<note>"   record how the newest unnote
 ws chain <queue-file>           run a queue of steps: dispatch, wait, review (one automatic fix round), merge, next;
                                 stops on a failure, a gate or a judgment call (run it under run_in_background)
 ws chain-wait                   wait on the project's running chain (from any session) and print where it stopped;
+ws chain-watch [--arm|--disarm|--status]   the stop watchdog: a persistent timer that wakes the session when a
+                                chain stops while no turn is watching (armed by ws chain; no model call while running)
                                 exit 5 when a running/waiting status has no live chain (DEAD: re-run ws chain <queue>)
 ws wake <session|current> "<message>" [--at <time>|--when-chain-stops|--every <OnCalendar> [--until YYYY-MM-DD]] [--url <server>]
                                 send one message into an idle OpenCode session from a systemd timer: now, at a time,
@@ -240,6 +253,8 @@ case "$cmd" in
   allowance)
     [ -n "$WS_ALLOWANCE_DB" ] || die "the allowance meter is off: WS_ALLOWANCE_DB is empty"
     allowance_py report "$@" ;;
+  models) exec "$WS/scripts/models.sh" "$@" ;;
+  maintenance) "$WS/scripts/maintenance.sh" ${proj:+--project "$proj"} "$@" ;;
   dispatch) "$WS/scripts/dispatch.sh" ${proj:+--project "$proj"} "$@" ;;
   review) "$WS/scripts/review.sh" ${proj:+--project "$proj"} "$@" ;;
   review-compare) "$WS/scripts/review-compare.sh" ${proj:+--project "$proj"} "$@" ;;
@@ -328,6 +343,8 @@ case "$cmd" in
     for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f "$RUNS/chain.status" ] && break; sleep 1; done
     echo "chain started for $SLUG on $q (log runs/$SLUG/chain.log)"
     exec "$WS/bin/ws" --project "$SLUG" chain-wait ;;
+  chain-watch)
+    load_project "$proj"; shift; exec "$WS/scripts/chain-watch.sh" --project "$SLUG" "$@" ;;
   chain-wait)
     # Block until the chain stops; print its status and the log's milestones. Exit 0 done, 4 gate, 1 stopped, and
     # 5 when the status still says running or waiting but the pid file is gone: that chain died without recording it.
@@ -388,6 +405,7 @@ case "$cmd" in
       elif .type=="result" then "DONE cost=$" + ((.total_cost_usd // 0)|tostring) + " " + ((.structured_output.status // .subtype // "")|tostring)
       elif .type=="system" and .subtype=="permission_denied" then "DENIED " + ((.tool_input.command // .tool_name // "")|tostring|.[0:120])
       else empty end' 2>/dev/null ;;
+  replies) exec "$WS/scripts/replies.sh" ${proj:+--project "$proj"} "$@" ;;
   runs)
     load_project "${1:-$proj}"; echo "runs for $SLUG:"
     # shellcheck disable=SC2045  # newest first; run names have no spaces

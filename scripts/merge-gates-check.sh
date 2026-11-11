@@ -6,6 +6,9 @@ set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 repo=$(mktemp -d); slug="mgate-$(basename "$repo" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/-*$//')"
 runs="$WS/runs/$slug"; conf="$WS/projects/$slug.conf"
+# The chain arms a persistent watchdog; keep its units under this case's scratch, never the real user unit directory,
+# where an mgate unit would keep firing after its runs directory is gone.
+export WS_WAKE_UNIT_DIR="$repo/wake-units"
 trap 'rm -rf "$repo" "$runs" "$WS/plans/$slug"; rm -f "$conf"' EXIT
 fail() { echo "merge-gates check FAILED: $1"; printf '%s\n' "${out:-}"; exit 1; }
 ok() { echo "$1 ok"; }
@@ -203,4 +206,12 @@ out=$("$WS/bin/ws" --project "$slug" orchestrator-record 2>&1) || fail "orchestr
 grep -qE 'visible merges since the first look \(.*\): 1 with a look \(after1\), 1 without \(after2\); earlier: [1-9][0-9]* not recorded' <<< "$out" || fail "visible merge counts"
 grep -qE '^   visible merges 1 with a look, 1 without, [1-9][0-9]* earlier not recorded' <<< "$out" || fail "visible merge total"
 ok "orchestrator-record prints reasons, the --no-look count and visible merges"
+# Run directly, outside the suite's own WS_WAKE_UNIT_DIR, the chain must still keep its watchdog units in this case's
+# scratch dir. A leftover mgate unit in the real user unit directory would keep firing after this case's runs are gone.
+for f in "$HOME/.config/systemd/user"/ws-chain-watch-mgate-*.timer \
+  "$HOME/.config/systemd/user"/ws-chain-watch-mgate-*.service \
+  "$HOME/.config/systemd/user"/timers.target.wants/ws-chain-watch-mgate-*.timer; do
+  [ -e "$f" ] && fail "running directly left a watchdog unit in the real user unit dir: $f"
+done
+ok "running directly keeps its watchdog units out of the real user unit dir"
 echo "merge-gates check ok"

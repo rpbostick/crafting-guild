@@ -67,7 +67,7 @@ if [ -z "$display" ]; then
   echo "ask-run: refused: $reason"
   exit 1
 fi
-if ! zdr=$("$WS/scripts/zdr-check.sh" ${WS_ZDR_PAGE:+--page "$WS_ZDR_PAGE"} "$display" 2>&1); then
+if ! zdr=$("$WS/scripts/zdr-check.sh" --provider "${model%%/*}" ${WS_ZDR_PAGE:+--page "$WS_ZDR_PAGE"} "$display" 2>&1); then
   write_out "model: $model  cost: \$0  minutes: 0  exit: 1 (refused)" "refused: $zdr"
   echo "ask-run: refused: $zdr"
   exit 1

@@ -2,6 +2,20 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.8.3
+
+- Reviews run their independent passes at the same time and union them in pass order; a failed pass is retried once, and `ws review --variant <name>` runs a pass at a chosen reasoning effort.
+- `WS_ASK_PROMPTS` makes the question-prompt structure the default: every question goes through the question tool with labelled options and a free-text box (1, or any non-zero value), while 0 uses plain chat; `config.sh`, `AGENTS.md`, `CLAUDE.md` and both briefs state it.
+- `ws maintenance` prints a read-only weekly drift report: installed versus latest OpenCode lines, tool versions, the model list and its free models, the privacy rows for the models in use, and pin drift. It writes the report, `runs/maintenance.last` and (on the first run) `runs/models.snapshot`; cold start and `ws brief` say when the last run is stale. No timer.
+- `ws models` diffs the OpenCode model list against `runs/models.snapshot` and marks the free models, with the privacy-table pointer and the bench arm to run before use.
+- The merge gate runs a deterministic security scan for secrets and common unsafe patterns on the changed files.
+- A replies log: each finished reply gets a local-time banner and an entry in `runs/<slug>/replies.md`, and `ws replies [--follow]` reads it; a reply whose leading time is more than two minutes off gets a warning.
+- `ws chain-watch` is a persistent five-minute shell watchdog that wakes the session when a chain stops with no live turn; `ws chain` arms it and disarms it on completion. Wake deliveries retry (3 attempts, 20 s apart) and arm a 10-minute backstop; a provider error after the message was created counts as delivered.
+- `zdr-check` reads both privacy pages: the Go table for `opencode-go/` models and the Zen free-model list for `opencode/` ones. The pages are cached under `runs/zdr-page-<go|zen>.html` and refreshed after a day, so a DNS blip does not refuse a review.
+- The selftest takes one lock across the main checkout and every worktree, so two suites cannot corrupt the shared scratch state; a second run waits and then exits 3. The chain tests keep their temporary watchdog units under a scratch `WS_WAKE_UNIT_DIR`, and the suite checks that no test slug leaves one in the real unit directory.
+- `chain.notified` records the status file's mtime with its text, so a repeated stop with the same text but a newer status wakes again.
+- `check-result` accepts a test id (`::name` or `:test_name`) as evidence, and `teeth` recognises node's `✖` and `ℹ fail N` output.
+
 ## 2.8.2
 
 - `WS_REVIEW_PASSES` and `ws review --passes N` run N independent reviews of the same branch and write one union: blocking findings deduped by fault and by line within 5, the strictest verdict when the passes disagree, the cost summed, and `passes` in the record.

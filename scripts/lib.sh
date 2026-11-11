@@ -4,7 +4,10 @@ WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # The settings config.sh lets the environment override (written there as ${VAR-default}): a value set in the
 # environment wins over config.sh and config.local.sh alike, so a test can run with the bench hours off or on
 # the agent it expects.
-ws_env=$(declare -p WS_BENCH_HOURS WS_BENCH_OUTSIDE WS_MERGE_TEST_TIMEOUT WS_AGENT WS_REVIEW_SHADOW WS_ASK_MODEL WS_ASK_BUDGET WS_WAITING_RE WS_ORCHESTRATOR_OPENCODE WS_MEMORY_DIR WS_MEMORY_CAP WS_ALLOWANCE_LIMITS WS_ALLOWANCE_HOLD WS_ALLOWANCE_STARTS WS_ALLOWANCE_DB WS_CLAUDE_DAY_CAP 2>/dev/null | sed 's/^declare -[a-z-]*/declare -gx/' || true)
+ws_env=$(declare -p WS_BENCH_HOURS WS_BENCH_OUTSIDE WS_MERGE_TEST_TIMEOUT WS_AGENT WS_REVIEW_AGENT WS_REVIEW_PASSES WS_REVIEW_SHADOW WS_ASK_MODEL WS_ASK_BUDGET WS_ASK_PROMPTS WS_WAITING_RE WS_ORCHESTRATOR_OPENCODE WS_MEMORY_DIR WS_MEMORY_CAP WS_ALLOWANCE_LIMITS WS_ALLOWANCE_HOLD WS_ALLOWANCE_STARTS WS_ALLOWANCE_DB WS_CLAUDE_DAY_CAP 2>/dev/null | sed 's/^declare -[a-z-]*/declare -gx/' || true)
+# The model-name list is an array: a scalar assignment to it would replace only its first entry, so the environment's
+# value is captured whole and replaces the array after both config files (a measurement sets its own arms this way).
+env_model_names=$(declare -p WS_OPENCODE_MODEL_NAMES 2>/dev/null || true)
 # shellcheck source=../config.sh
 . "$WS/config.sh"
 # Private overrides (your own names for WS_ATTRIBUTION_RE, a different browser): kept out of a published copy.
@@ -14,6 +17,11 @@ ws_env=$(declare -p WS_BENCH_HOURS WS_BENCH_OUTSIDE WS_MERGE_TEST_TIMEOUT WS_AGE
 # workspace (plans/<slug>/... is written workspace-relative), so a command run from another folder finds it.
 ws_path() { if [ -e "$1" ]; then echo "$1"; elif [ -e "$WS/$1" ]; then echo "$WS/$1"; else echo "$1"; fi; }
 [ -n "$ws_env" ] && eval "$ws_env"; unset ws_env
+if [ -n "$env_model_names" ]; then
+  unset WS_OPENCODE_MODEL_NAMES
+  eval "${env_model_names/declare -/declare -g}"
+fi
+unset env_model_names
 # The lessons directory; the selftest points it at a scratch copy.
 WS_LESSONS_DIR="${WS_LESSONS_DIR:-$WS/lessons}"
 die() { echo "ws: $*" >&2; exit 1; }
@@ -104,11 +112,52 @@ allowance_lines() {
   [ -n "$WS_ALLOWANCE_DB" ] || return 0
   allowance_py past 2>&1 || true
 }
+# One line both briefs print for the question-prompt setting: whether questions go through the question tool with
+# labelled options and a free-text box, and how to change it. Any value other than 0 counts as on, so a typo never
+# silently drops the structured prompts.
+ask_prompts_line() {
+  local value="${WS_ASK_PROMPTS:-1}"
+  if [ "$value" = 0 ]; then
+    printf 'questions: plain chat (WS_ASK_PROMPTS=0; set 1 in config.local.sh for structured prompts)\n'
+  elif [ "$value" = 1 ]; then
+    printf 'questions: structured prompts on (WS_ASK_PROMPTS=1; set 0 in config.local.sh for plain chat)\n'
+  else
+    printf 'questions: structured prompts on (WS_ASK_PROMPTS=%s; set 0 in config.local.sh for plain chat)\n' "$value"
+  fi
+}
 now_local() { if [ -n "${WS_TZ:-}" ]; then TZ="$WS_TZ" date "+%Y-%m-%d %H:%M %Z"; else date "+%Y-%m-%d %H:%M %Z"; fi; }
 # date(1) in the workspace's zone: WS_TZ when set, else this machine's local time (an empty TZ would mean UTC).
 ws_date() { if [ -n "${WS_TZ:-}" ]; then TZ="$WS_TZ" date "$@"; else date "$@"; fi; }
 # The local calendar date the Claude ledger and the cap use: the workspace's zone when WS_TZ is set.
 today_local() { ws_date +%F; }
+# The weekly maintenance reminder. runs/maintenance.last holds the local date and time of the last run; when it
+# is missing, unreadable or older than WS_MAINTENANCE_DAYS, one line says the report is due. A fresh run prints
+# nothing. The check stays in the existing briefs; there is no timer and no background process.
+maintenance_due_line() {
+  local file="$WS/runs/maintenance.last" days="${WS_MAINTENANCE_DAYS:-7}" last epoch now
+  case "$days" in
+    ''|*[!0-9]*)
+      if [ -z "${_ws_maintenance_days_warned:-}" ]; then
+        note "WS_MAINTENANCE_DAYS='$days' is not a whole number; using 7"
+        _ws_maintenance_days_warned=1
+      fi
+      days=7 ;;
+  esac
+  if [ ! -f "$file" ]; then
+    printf 'maintenance due: last run never; run `ws maintenance`\n'
+    return 0
+  fi
+  last=$(head -n1 "$file" 2>/dev/null)
+  if [ -z "$last" ]; then
+    printf 'maintenance due: last run never; run `ws maintenance`\n'
+    return 0
+  fi
+  epoch=$(date -d "$last" +%s 2>/dev/null) || epoch=""
+  now=$(date +%s)
+  if [ -z "$epoch" ] || [ $(( now - epoch )) -gt $(( days * 86400 )) ]; then
+    printf 'maintenance due: last run %s; run `ws maintenance`\n' "$last"
+  fi
+}
 # The sum of today's cost in every runs/*/claude-jobs.tsv, in the workspace's zone. A row is
 # date<TAB>slug<TAB>name<TAB>kind<TAB>cost<TAB>status. A row whose cost is not a number is skipped and counted
 # on stderr, so a broken ledger never reads as cheap.

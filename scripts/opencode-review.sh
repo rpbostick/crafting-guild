@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Run one review through OpenCode (`opencode run`), read-only; review.sh launches it.
 # Usage: opencode-review.sh --model provider/model --budget USD --config <opencode.json> --log <raw .log>
-#                           --name <title> <prompt-file>
+#                           --name <title> [--variant <name>] <prompt-file>
 # Stdout is the run's log (OpenCode's JSON events); this script appends the Claude-shaped result line review.sh
 # reads. The prompt file review.sh writes already holds the builder's report, including its edge_cases answers, so
 # this launcher passes it through unchanged. The model must pass scripts/zdr-check.sh first (WS_ZDR_PAGE: a saved
 # copy of the page, for tests).
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
-model="" budget="" config="" log="" title=""
+model="" budget="" config="" log="" title="" variant=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --model) model="$2"; shift 2 ;;
@@ -16,6 +16,7 @@ while [ $# -gt 0 ]; do
     --config) config="$2"; shift 2 ;;
     --log) log="$2"; shift 2 ;;
     --name) title="$2"; shift 2 ;;
+    --variant) variant="$2"; shift 2 ;;
     -*) die "unknown flag $1" ;;
     *) break ;;
   esac
@@ -38,7 +39,7 @@ if [ -z "$display" ]; then
   reason="no display name for $model in WS_OPENCODE_MODEL_NAMES (config.sh), so zdr-check cannot read its privacy row"
   echo "opencode-review: refused: $reason"; finish --refused "$reason"; exit 1
 fi
-if ! zdr=$("$WS/scripts/zdr-check.sh" ${WS_ZDR_PAGE:+--page "$WS_ZDR_PAGE"} "$display" 2>&1); then
+if ! zdr=$("$WS/scripts/zdr-check.sh" --provider "${model%%/*}" ${WS_ZDR_PAGE:+--page "$WS_ZDR_PAGE"} "$display" 2>&1); then
   echo "opencode-review: refused: $zdr"; finish --refused "$zdr"; exit 1
 fi
 echo "opencode-review: $zdr"
@@ -55,7 +56,9 @@ pid=""
 trap '[ -n "$pid" ] && kill -- "-$pid" 2>/dev/null; exit 143' TERM INT
 # One OpenCode call with the budget watched across the whole log; stdin closed, or `opencode run` waits on it.
 run() {
-  setsid opencode run --pure --format json --model "$model" --title "$title" "$@" < /dev/null &
+  local -a varargs=()
+  [ -n "$variant" ] && varargs=(--variant "$variant")
+  setsid opencode run --pure --format json "${varargs[@]}" --model "$model" --title "$title" "$@" < /dev/null &
   pid=$!
   python3 -I "$helper" watch "$log" "$budget" "$pid" & watcher=$!
   wait "$pid"; pid=""

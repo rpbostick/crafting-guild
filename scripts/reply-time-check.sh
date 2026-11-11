@@ -2,6 +2,8 @@
 # Flags a reply whose leading local time is more than two minutes off the clock. Reads the reply on stdin and
 # prints one warning line when it begins with HH:MM (an optional zone word and a dash may follow) and that time is
 # that far from the current time. A matching time, a reply with no leading time, and an empty reply print nothing.
+# A leading `━━ HH:MM ━━` banner is skipped first: the reply-log plugin and `ws replies` put it before the reply
+# text, and its clock time is not the time the reply claims.
 # Always exits 0: this is a warning on a finished reply, never a gate on it.
 # Deliberate: WS_NOW overrides the clock so the selftest can exercise the tolerance and the midnight wrap.
 . "$(dirname "$0")/lib.sh"
@@ -9,6 +11,13 @@
 reply=$(cat)
 if [ -z "$reply" ]; then
   exit 0
+fi
+
+# Skip the banner line the reply carries when it has one, so the reply's own leading time is what gets checked.
+banner='^[[:space:]]*━+[[:space:]]+[0-9]{1,2}:[0-9]{2}[[:space:]]+━+[[:space:]]*$'
+first=${reply%%$'\n'*}
+if [[ "$first" =~ $banner ]]; then
+  reply=${reply#*$'\n'}
 fi
 
 now="${WS_NOW:-}"

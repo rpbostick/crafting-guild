@@ -16,6 +16,8 @@ mkdir -p "$runs" "$bin" "$log"
 cat > "$bin/systemd-run" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >> "$STANDIN_LOG/systemd-run.args"
+case "$*" in *_backstop*) exit 0 ;; esac
+case "$*" in *-backstop*) exit 0 ;; esac
 [ "${STANDIN_RUN:-fire}" = refuse ] && { echo "Failed to start transient timer unit" >&2; exit 1; }
 [ "${STANDIN_RUN:-fire}" = hold ] && exit 0
 while [ $# -gt 0 ] && [[ $1 == -* ]]; do shift; done
@@ -43,17 +45,26 @@ EOF
 cat > "$bin/opencode" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$STANDIN_LOG/opencode.args"
+printf 'x\n' >> "$STANDIN_LOG/oc.calls"
 printf '%s' "${OPENCODE_SERVER_PASSWORD:-}" > "$STANDIN_LOG/opencode.password"
 case "${STANDIN_OC:-ok}" in
   ok) echo '{"type":"step_start","sessionID":"ses_x"}' ;;
   # OpenCode 1.19.1 prints this line for a closed port as well as for an unknown session.
   down) printf '\033[91mError: \033[0mSession not found\n' >&2; exit 1 ;;
+  # A server that is down for the first call and healthy after: the wake must retry, not fail.
+  flaky) n=$(( $(cat "$STANDIN_LOG/oc.count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STANDIN_LOG/oc.count"
+         if [ "$n" -le "${STANDIN_OC_FAILS:-1}" ]; then printf 'Error: server down\n' >&2; exit 1; fi
+         echo '{"type":"step_start","sessionID":"ses_x"}' ;;
   silent) exec sleep 30 ;;
+  # A provider error arrives after the user message exists, so the message was delivered.
+  apierror) echo '{"type":"error","sessionID":"ses_x","error":{"name":"APIError","data":{"message":"Cannot connect to API"}}}' ;;
 esac
 EOF
 chmod +x "$bin/systemd-run" "$bin/systemctl" "$bin/systemd-analyze" "$bin/opencode"
 export PATH="$bin:$PATH" STANDIN_LOG="$log" WS_PROJECT="$slug"
 export WS_WAKE_URL=http://127.0.0.1:1
+# retries are real but instant here; the down case disables them.
+export WS_WAKE_RETRY_DELAY=0
 export WS_WAKE_UNIT_DIR="$repo/systemd"; mkdir -p "$WS_WAKE_UNIT_DIR"
 unset OPENCODE_SERVER_PASSWORD OPENCODE_SERVER_USERNAME
 ws() { "$WS/bin/ws" "$@"; }
@@ -172,7 +183,7 @@ echo "ws wake refuses a bad session, time, chain or url ok"
 unset STANDIN_RUN
 
 # An unreachable server: the message is kept in wake.failed and cold start says so, until it is cleared.
-export STANDIN_OC=down
+export STANDIN_OC=down WS_WAKE_ATTEMPTS=1 WS_WAKE_BACKSTOP=0
 out=$(ws wake ses_abc123 $'keep this\nmessage' 2>&1) || fail "scheduling failed"
 grep -q 'ses_abc123.*Session not found.*keep this message' "$runs/wake.failed" || fail "wake.failed: $(cat "$runs/wake.failed" 2>/dev/null)"
 [ -z "$(ls "$runs/wake" 2>/dev/null)" ] || fail "a failed wake left files"
@@ -184,6 +195,41 @@ out=$(ws wake failed --clear 2>&1) || fail "clear"
 out=$("$WS/scripts/cold-start.sh" --brief "$slug" 2>&1)
 grep -q 'WAKE FAILED' <<< "$out" && fail "cold start still shows a cleared failure"
 echo "an unreachable server leaves wake.failed and a cold-start line ok"
+unset WS_WAKE_ATTEMPTS WS_WAKE_BACKSTOP
+
+# A server down for the first attempt and healthy after: the wake retries and lands, nothing failed.
+: > "$log/opencode.args"; rm -f "$log/oc.count" "$runs/wake.failed"
+export STANDIN_OC=flaky WS_WAKE_ATTEMPTS=3 WS_WAKE_BACKSTOP=0
+out=$(ws wake ses_abc123 "second time lucky" 2>&1) || fail "a flaky server failed the wake: $out"
+sleep 1
+[ "$(cat "$log/oc.count" 2>/dev/null)" = 2 ] || fail "the wake was not retried: $(cat "$log/oc.count" 2>/dev/null) calls"
+grep -q 'attempt 1 failed' "$runs/wake.log" || fail "no retry line in wake.log"
+[ ! -f "$runs/wake.failed" ] || fail "a delivered retry left wake.failed"
+echo "a wake retries a transient server failure and lands ok"
+
+# A failure that outlasts the attempts schedules one backstop and keeps the job, rather than giving up.
+: > "$log/systemd-run.args"; rm -f "$runs/wake.failed"
+export STANDIN_OC=down WS_WAKE_ATTEMPTS=1 WS_WAKE_BACKSTOP=60
+out=$(ws wake ses_abc123 "backstop later" 2>&1) || fail "scheduling failed: $out"
+grep -q -- '--on-active=60s' "$log/systemd-run.args" || fail "no backstop timer: $(cat "$log/systemd-run.args")"
+grep -q -- '-backstop' "$log/systemd-run.args" || fail "the backstop unit is not named"
+grep -q 'backstop in 60s' "$runs/wake.log" || fail "no backstop line in wake.log"
+[ -f "$runs/wake.failed" ] && fail "a backstop was scheduled but wake.failed was written too"
+bid=$(basename "$(ls "$runs"/wake/*.job)" .job)
+ws wake cancel "$bid" >/dev/null 2>&1 || fail "cancel the backstop wake"
+unset STANDIN_OC WS_WAKE_ATTEMPTS WS_WAKE_BACKSTOP
+echo "a lasting failure schedules a backstop instead of giving up ok"
+
+# A provider error after the message was created counts as delivered: retrying would duplicate the message.
+: > "$log/oc.calls"; rm -f "$runs/wake.failed"
+export STANDIN_OC=apierror WS_WAKE_ATTEMPTS=3 WS_WAKE_BACKSTOP=0
+out=$(ws wake ses_abc123 "provider down" 2>&1) || fail "a provider error failed the wake: $out"
+sleep 1
+[ "$(wc -l < "$log/oc.calls")" = 1 ] || fail "a provider error was retried: $(wc -l < "$log/oc.calls") calls"
+[ ! -f "$runs/wake.failed" ] || fail "a delivered message with a provider error left wake.failed"
+grep -q 'delivered' "$runs/wake.log" || fail "no delivered line after a provider error"
+unset STANDIN_OC WS_WAKE_ATTEMPTS WS_WAKE_BACKSTOP
+echo "a provider error after delivery is not retried ok"
 
 # No sign of the message reaching the session within the limit is a failure, not a hang.
 export STANDIN_OC=silent WS_WAKE_TIMEOUT=2

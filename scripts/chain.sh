@@ -57,6 +57,10 @@ running() { pid_file_alive "$RUNS/$1.pid"; }
 # word a chain gets from the hold.
 dispatch_lines() { awk '/this work is not held/ { print } { last = $0 } END { print last }'; }
 max_fix="${WS_CHAIN_FIX_ROUNDS:-1}"
+# A shell watchdog on a persistent timer wakes the orchestrator if this chain stops while no turn is watching;
+# it costs no model call while the chain runs and repeats the notice after a suspend or reboot.
+"$WS/scripts/chain-watch.sh" --project "$SLUG" --arm >/dev/null 2>&1 \
+  || log "chain-watch: the watchdog is not armed (a stop will not wake the session on its own)"
 
 # A broken setup (a missing tool, an old Claude Code, a bad conf) would fail hours in; find out now.
 if ! doc=$("$WS/scripts/doctor.sh" --project "$SLUG" 2>&1); then
@@ -183,4 +187,5 @@ for i in "${!steps[@]}"; do
     fi
   fi
 done
+"$WS/scripts/chain-watch.sh" --project "$SLUG" --disarm >/dev/null 2>&1 || true
 status "done" "all steps in $queue merged"; log "chain done: $queue"

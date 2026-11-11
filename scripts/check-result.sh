@@ -95,8 +95,16 @@ if [ "$(printf '%s' "$so" | jq 'has("done_when")')" = true ]; then
     path=${ev%% *}; path=${path//\`/}; while [[ "$path" == *[,:\;.\)] ]]; do path=${path%?}; done
     # A cited line ("reports/a.md:345", "a.md:12-20", "a.md:11,13,16") names the file before the colon,
     # unless the word already names a file: a real file called "x:1" stays itself.
+    # A test id ("file.py::test_x", "file.py:test_x") names the file before the suffix, as a line number does
+    # ("file.py:123"). The full word is tried first; a stripped name that is still missing flags below.
+    if [ ! -e "$wt/$path" ] && [ ! -e "$wt/.ws-evidence/$path" ]; then
+      case "$path" in ?*::*) path="${path%%::*}" ;; esac
+    fi
     if [ ! -e "$wt/$path" ] && [ ! -e "$wt/.ws-evidence/$path" ]; then
       [[ "$path" =~ ^(.+):[0-9]+(-[0-9]+)?(,[0-9]+(-[0-9]+)?)*$ ]] && path=${BASH_REMATCH[1]}
+    fi
+    if [ ! -e "$wt/$path" ] && [ ! -e "$wt/.ws-evidence/$path" ]; then
+      [[ "$path" =~ ^(.+):[Tt]est[A-Za-z0-9_]*$ ]] && path=${BASH_REMATCH[1]}
     fi
     if [[ "$path" == */* || "$path" == *.log || "$path" == *.png || "$path" == *.txt ]] && [[ "$path" != http* ]] && [ ! -e "$wt/$path" ] && [ ! -e "$wt/.ws-evidence/$path" ] && ! git -C "$wt" cat-file -e "${path}^{commit}" 2>/dev/null; then
       flag "$line: evidence $path is not in the worktree"

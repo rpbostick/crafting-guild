@@ -13,9 +13,20 @@ bin/ws                  the command. Subcommands call the scripts below; `ws <sl
                         whose leading time is more than two minutes off the clock.
 scripts/reply-time-check.sh  the reply-time check the OpenCode plugin calls: reads a reply on stdin and prints a
                         warning when its leading local time is more than two minutes off.
+scripts/replies.sh      `ws replies [--project slug] [--last N] [--follow] [--since <time>]`: the replies the
+                        reply-log plugin saved in runs/<slug>/replies.md, oldest first; --follow tails new entries.
+scripts/models.sh       `ws models [--save]`: OpenCode models added to or removed from runs/models.snapshot, with
+                        each -free one marked and a privacy-table and `ws bench run <slug> --arm` pointer per
+                        addition; --save records the current list with a date header. It prints no privacy or
+                        quality verdict.
+scripts/maintenance.sh  `ws maintenance [--report <path>] [--project <slug>]`: the weekly drift report; installed
+                        and latest OpenCode lines, tool versions against Node's newest LTS, model-list changes,
+                        privacy rows and pins. Read-only apart from the report, runs/maintenance.last and the first
+                        run's runs/models.snapshot.
 CLAUDE.md               what the orchestrator session reads. Under 60 lines on purpose.
 config.sh               defaults: budgets, timeout, memory caps, models, timezone, lessons cap, preview ports,
-                        browser command, attribution words, whether builder shells run in a sandbox.
+                        browser command, attribution words, whether builder shells run in a sandbox, and whether
+                        questions go through the question tool with options or plain chat (`WS_ASK_PROMPTS`).
 config.local.sh         optional private overrides, sourced after config.sh (your own names for WS_ATTRIBUTION_RE).
 CLAUDE.local.md         optional private orchestrator preferences; Claude Code loads it beside CLAUDE.md.
 AGENTS.md               the same orchestrator brief for OpenCode, with OpenCode's wait, question and session-start
@@ -29,6 +40,8 @@ opencode.json           OpenCode project config: loads CLAUDE.local.md, operator
                         scripts/memory-settings.sh hands it the two settings; scripts/cold-start-memory.test.mjs tests it.
 .opencode/plugins/reply-time.js  OpenCode's reply hook: runs scripts/reply-time-check.sh on a finished reply and
                         appends its warning; a headless builder skips it.
+.opencode/plugins/reply-log.js  OpenCode's reply log: prepends the local-time banner to a finished reply and appends
+                        it to runs/<slug>/replies.md; a headless builder skips it.
 docs/opencode-orchestrator.md    which OpenCode pages back each substitution, and how the two briefs avoid drift.
 scripts/lib.sh          shared helpers; loads projects/<slug>.conf into variables. `commit_new_file <path> <message>`
                         commits one file a tool just wrote, that path only (`git commit --only`), in the workspace
@@ -93,7 +106,7 @@ scripts/sandbox-binds-check.sh  the binds and PATH the wrapper hands a stand-in 
                         tool root at or above the worktree) and what `--check` reports on them; the selftest runs it.
 scripts/fixtures/       a real OpenCode log the selftest's stand-in opencode replays, and the generated OpenCode
                         config with the builder shell sandbox off (WS_SANDBOX empty).
-scripts/zdr-check.sh    whether an OpenCode Go model is zero-retention with no training, from OpenCode's Go page.
+scripts/zdr-check.sh    whether an OpenCode model is zero-retention with no training, from its Go or Zen privacy page.
 scripts/check-result.sh reads the run's final JSON and checks its claims against the branch: commits, test logs,
                         each done-when item (a `done` with an item not met fails; observed evidence must exist), the
                         four `edge_cases` answers (a full-track run missing one fails; a light-track run warns), and
@@ -192,6 +205,11 @@ scripts/merge.sh        pinned-SHA merge, test gate, push, post-merge chore, cle
                         `--no-look "<reason>"`, whose reason follows the review text in the subject as
                         `; --no-look: <reason>` (no override reason may hold that text; a --no-look that was not needed is not
                         recorded). A merge of the SHA the chain stopped at for a gate writes that look itself.
+scripts/security-scan.sh  the deterministic scan of a branch's added lines: a private-key header, an AWS, GitHub,
+                        OpenAI or Slack token, or a committed .env/credential file prints BLOCK and exits 1; a
+                        curl or wget piped to a shell, a variable rm -rf, or sudo in scripts/, bin/ or a *.sh file
+                        prints FLAG and does not block. merge.sh runs it before the merge commit; selftest.sh
+                        covers it (`--security-scan` runs those cases alone).
 scripts/merge-gates-check.sh  the --no-review and --no-look reasons, the look refusal and the look records on a throwaway project; selftest.sh runs it.
 scripts/look.sh         `ws look <name> "<what they said>"`: appends epoch, time, tip, source and note to
                         runs/<slug>/<name>.look. It records only; merge.sh and orchestrator-record.sh read it.
