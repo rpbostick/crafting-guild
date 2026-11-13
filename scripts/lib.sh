@@ -26,6 +26,19 @@ unset env_model_names
 WS_LESSONS_DIR="${WS_LESSONS_DIR:-$WS/lessons}"
 die() { echo "ws: $*" >&2; exit 1; }
 note() { echo "ws: $*" >&2; }
+# The installed OpenCode major line: WS_OPENCODE_LINE when a config or a test sets it, else read from
+# `opencode --version`. A missing or quiet binary prints nothing, so callers stay line-neutral.
+opencode_line() {
+  if [ -n "${WS_OPENCODE_LINE:-}" ]; then printf '%s\n' "$WS_OPENCODE_LINE"; return 0; fi
+  if [ -n "${_ws_opencode_line:-}" ]; then printf '%s\n' "$_ws_opencode_line"; return 0; fi
+  command -v opencode >/dev/null 2>&1 || return 0
+  local version major
+  version=$(timeout 15 opencode --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) || return 0
+  major=${version%%.*}
+  case "$major" in
+    1|2) _ws_opencode_line=$major; printf '%s\n' "$major" ;;
+  esac
+}
 # Sampling settings reach OpenCode's build agent as plain decimals: temperature 0-2, top_p over 0 but at most 1.
 # The setting's own name is in each error, since a bad number came from that flag or arm key.
 sampling_decimal() { # <name> <value>
@@ -664,10 +677,15 @@ home_path_leaks() {
   git -C "$1" diff -U0 "$2...$3" -- . "${exempt[@]}" | grep -E '^\+[^+]' | grep -nF -e "$HOME" -e "-of-$USER" -e "/$USER/" | head -5 || true
 }
 # A role's lessons as pasted into its prompt: lessons/<role>.md, then lessons/<role>.local.md when it exists
-# (private, operator-specific lessons that a published copy leaves out).
-lessons_for() {
+# (private, operator-specific lessons that a published copy leaves out). The OpenCode line lesson names that
+# client's surface, so it is pasted only when <agent> is opencode.
+lessons_for() { # <role> <agent>
   cat "$WS_LESSONS_DIR/$1.md"
   if [ -f "$WS_LESSONS_DIR/$1.local.md" ]; then echo; cat "$WS_LESSONS_DIR/$1.local.md"; fi
+  [ "${2:-}" = opencode ] || return 0
+  local line
+  line=$(opencode_line)
+  if [ -n "$line" ] && [ -f "$WS_LESSONS_DIR/opencode-$line.md" ]; then echo; cat "$WS_LESSONS_DIR/opencode-$line.md"; fi
 }
 worktree_dir() { worktree_of "$PROJECT_PATH" "$1"; }
 # A replay's tree: check <base> out at <wt> on branch <br>, apply <patch>, commit it, then put the run's kept

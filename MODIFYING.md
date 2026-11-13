@@ -233,6 +233,9 @@ scripts/web.sh          `ws web`: the web sources a run asked for (`web_requests
                         (the files, the denials, the original's Commands) and re-dispatches the same name. The ledger is
                         runs/<slug>/<name>.web.tsv. check-result.sh prints each request; chain.sh stops on them.
 scripts/precheck.sh     the checklist rules a script can check; review.sh runs it and puts the result in the prompt.
+scripts/evidence-claims.sh  the done-when items whose observed evidence path is missing, or whose failing-before
+                        log has no failure marker, as candidates for the reviewer; a run with no usable result says
+                        why instead of printing none. `ws evidence-claims` runs it alone.
 scripts/teeth.sh        `ws teeth`: checks the branch tip out in a scratch worktree, puts every non-test file the
                         branch changed back to its merge base (removing files it added), keeps the branch's test
                         files (`TEST_GLOBS`, default covering the usual names) and runs `TEETH_CMD` (or `TEST_CMD`).
@@ -350,7 +353,32 @@ runs/<slug>/            logs, results, reviews, server pids, and evidence/<name>
 VERSION, CHANGELOG.md   the version `ws version` prints, and the notes for each one.
 state/current           the last project opened with `ws <slug>`; what a terminal acts on. Not tracked. A session is
                         pinned to its own project by WS_PROJECT (set by `ws <slug>`), which wins over this file.
+docs/opencode-2-api.md  the 1.x-to-2.x map: one row per mechanism in docs/opencode-orchestrator.md, the plugin, server,
+                        CLI, config-cache and database rows, and every unresolved row with its source.
+docs/opencode-1x.md, docs/opencode-2x.md  the line's shell tool, flags, hooks and server paths.
+lessons/opencode-<line>.md  the short line text appended to a builder's and reviewer's prompt by lessons_for.
+.opencode/plugins/deny-guard-2x.js  the 2.x shell deny guard: registers ctx.tool.hook("execute.before") and rejects the
+                        same commands scripts/opencode-plugins/deny-guard.js rejects. The 1.x file stays unchanged.
+.opencode/plugins/run-events-2x.js  the 2.x event record: ctx.event.subscribe() maps permission.asked/replied,
+                        session.retry.scheduled, session.execution.failed and the tool/compaction events onto the
+                        records scripts/opencode_run.py and scripts/check-result.sh read.
+scripts/opencode-2x-check.mjs  the scripted check for both 2.x plugins; selftest.sh runs it.
 ```
+
+## The OpenCode line
+
+OpenCode 1.x and 2.x cannot share a plugin, a shell-tool name or most CLI flags. Every change that names an OpenCode
+mechanism states its line, or stays version-neutral:
+
+- `WS_OPENCODE_LINE` (config.sh, or the environment) is `1` or `2`; empty means `scripts/lib.sh`'s `opencode_line`
+  reads the major from `opencode --version` and caches it for the process.
+- `lessons_for` appends `lessons/opencode-<line>.md` to the builder's and reviewer's prompt, beside their own lessons.
+  Those files are short; the detail stays in `docs/opencode-1x.md` and `docs/opencode-2x.md`.
+- A branch that touches a plugin, the shell tool, the server paths or the launcher flags says which line it targets and
+  keeps the other line working or explicitly out of scope. The 1.x files under `scripts/opencode-plugins/` are not
+  rewritten for 2.x; the 2.x prototypes live under `.opencode/plugins/` with a `-2x` name.
+- `docs/opencode-2-api.md` is the map: update its row when a line-specific mechanism moves, and move a row out of
+  "Unresolved rows" only with a probe log or a page that settles it.
 
 ## Where to change what
 

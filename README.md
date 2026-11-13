@@ -125,6 +125,7 @@ The orchestrator itself runs under OpenCode too: start `opencode` in this folder
 | `ws wait <name>`, `ws tail <name>`, `ws runs`, `ws stop <name>` | wait for, watch, list, stop runs |
 | `ws serve <name\|main> [port]`, `ws serve stop [name\|main]`, `ws serve list` | preview server from a worktree or the main checkout |
 | `ws review [--agent claude\|opencode] <name>`, `ws precheck <name>` | review the branch (prints the verdict and the SHA to merge); the mechanical checks alone |
+| `ws evidence-claims <name>` | the done-when evidence claims a script can check (the evidence-claim input to `ws review`) |
 | `ws review-compare <name>...` | run an OpenCode review beside the recorded Claude one: verdicts, blocking counts, matched findings; never merges |
 | `ws merge [--no-review "<reason>"] [--no-look "<reason>"] <name> <sha>` | merge a reviewed branch, run the tests, push on green, clean up |
 | `ws chain <queue>`, `ws chain-wait` | run a queue of steps unattended; wait on a running chain (exit 5 when a running status has no live chain) |

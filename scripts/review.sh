@@ -89,6 +89,16 @@ tq_args=(--project "$SLUG"); [ -n "$wt_override" ] && tq_args+=(--worktree "$wt_
 tq=$("$WS/scripts/test-quality.sh" "${tq_args[@]}" "$name" 2>&1)
 tq_file="$RUNS/$name.test-quality.txt"; [ -n "$out_base" ] && tq_file="$out_base.test-quality.txt"
 printf '%s\n' "$tq" > "$tq_file"
+# Evidence claims: a done-when item that reports met on observed evidence is suspect when the path it names is
+# missing, or when it claims a failing-before run and the named log holds no failure marker. Whether the cited
+# evidence really backs the item is the reviewer's call.
+ec_args=(--project "$SLUG"); [ -n "$wt_override" ] && ec_args+=(--worktree "$wt_override")
+ec=$("$WS/scripts/evidence-claims.sh" "${ec_args[@]}" "$name" 2>&1)
+ec_file="$RUNS/$name.evidence-claims.txt"; [ -n "$out_base" ] && ec_file="$out_base.evidence-claims.txt"
+printf '%s\n' "$ec" > "$ec_file"
+ec_note=""
+[ "$ec" = none ] || ec_note="Evidence-claim check (scripts/evidence-claims.sh, already run on this run's report; candidates, not verdicts; judge each FLAG: a done-when item whose observed evidence is missing, or whose failing-before log has no failure marker, may be unbacked):
+$ec"
 # ws teeth's verdict, only when it was run at this SHA: a toothless test is a blocking finding the reviewer must
 # judge (the model that wrote the test does not get the last word). A result for another SHA is stale and omitted.
 teeth_note=""
@@ -117,7 +127,7 @@ prompt="You are the reviewer for branch $br of project $SLUG, working directory 
 $(cat "$WS/agents/reviewer.md")
 
 # Lessons
-$(lessons_for reviewer)
+$(lessons_for reviewer "$agent")
 
 # Checklist
 $(cat "$WS/checklist.md")
@@ -145,6 +155,7 @@ Claims in the diff (scripts/claims.sh, already run on this branch; candidates, n
 $claims
 Test-quality check (scripts/test-quality.sh, already run on this branch; these are candidates, not verdicts. Judge each FLAG: a test that cannot fail is blocking under rule 2, one that names no changed path may still exercise it through an entrypoint, a false alarm is not a finding):
 $tq
+${ec_note:+$(printf '\n%s\n' "$ec_note")}
 In the JSON, \`blocking\` and \`suggestions\` are always arrays: write \`[]\`, never \`false\` or \`true\`, and never a second key for the findings; \`rule\` is a number or a short string. Each \`blocking\` item is \`{\"file\", \"line\", \"rule\", \"why\"}\` and each \`suggestions\` item is \`{\"file\", \"line\", \"why\"}\`: \`why\` carries the finding text, never \`finding\`, \`message\` or \`reason\`, and \`file\` and \`line\` are required.
 
 The full diff is $diff_where $capped. Read any changed file in full with Read when you need context. Logs and renders the builder saved are under .ws-evidence/ in the worktree (untracked, so not in the diff); read them there."

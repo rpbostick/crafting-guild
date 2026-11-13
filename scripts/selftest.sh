@@ -660,6 +660,84 @@ PATCH
   rm -rf "$work"
   [ "$fails" = 0 ]
 }
+# review-compare checks a branch out in a scratch worktree when its builder worktree is gone, and that checkout has
+# no .ws-evidence/ of its own: the kept evidence must be restored there, or the evidence-claim input flags a backed
+# done-when item as missing. The stand-in review runs the real evidence-claims.sh on the worktree it is handed and
+# records its output, which is the block review.sh puts in the reviewer prompt. <root> holds scripts/ and config.sh,
+# so the same case can be pointed at a pre-change review-compare. Prints one line and returns 1 when it fails.
+review_compare_evidence_cases() { # <root>
+  local root="$1" work ws proj tip out x ecout fails=0
+  work=$(mktemp -d)
+  ws="$work/ws"
+  mkdir -p "$ws/scripts" "$ws/projects" "$ws/plans/demo" "$ws/runs/demo/evidence/ev"
+  cp "$root/scripts/lib.sh" "$ws/scripts/lib.sh"
+  cp "$root/config.sh" "$ws/config.sh"
+  cp "$root/scripts/review-compare.sh" "$ws/scripts/review-compare.sh"
+  cp "$WS/scripts/evidence-claims.sh" "$ws/scripts/evidence-claims.sh"
+  cp "$WS/scripts/review_match.py" "$ws/scripts/review_match.py"
+  cp "$WS/scripts/lessons-check.py" "$ws/scripts/lessons-check.py"
+  chmod +x "$ws/scripts/review-compare.sh" "$ws/scripts/evidence-claims.sh"
+  cat > "$ws/scripts/review.sh" <<'EVIDENCESTUB'
+#!/bin/sh
+out="" wt="" name=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --out|--worktree|--base|--project|--model|--budget|--agent)
+      case "$1" in --out) out="$2" ;; --worktree) wt="$2" ;; esac
+      shift 2 ;;
+    *) name="$1"; shift ;;
+  esac
+done
+"$(dirname "$0")/evidence-claims.sh" --project demo --worktree "$wt" "$name" > "${WS_EC_OUT:?}"
+printf '{"reviewed_sha":"%s","verdict":"merge","summary":"stand-in","blocking":[],"suggestions":[]}\n' "$(git -C "$wt" rev-parse HEAD)" > "$out.json"
+printf '# Review\n\n**Verdict: merge.** stand-in\n' > "$out.md"
+EVIDENCESTUB
+  chmod +x "$ws/scripts/review.sh"
+  proj="$work/proj"; mkdir -p "$proj"
+  git -C "$proj" init -q -b main
+  echo a > "$proj/a.txt"; git -C "$proj" add a.txt
+  git -C "$proj" -c user.name=t -c user.email=t@t commit -qm one
+  git -C "$proj" checkout -q -b agent/ev
+  echo ev > "$proj/ev.txt"; git -C "$proj" add ev.txt
+  git -C "$proj" -c user.name=t -c user.email=t@t commit -qm "evidence branch"
+  tip=$(git -C "$proj" rev-parse HEAD)
+  printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$proj" > "$ws/projects/demo.conf"
+  # The builder's worktree is gone, as after a merge; its kept evidence is the copy review-shadow also reads. The
+  # done-when cites that path under .ws-evidence/, and the run is recorded as a merged review at the branch tip.
+  printf 'mirror probe passed\nexit 0\n' > "$ws/runs/demo/evidence/ev/mirror.log"
+  printf '# Evidence task\n\n## Done when\n- the widget renders\n' > "$ws/plans/demo/ev.md"
+  printf 'task=%s\n' "$ws/plans/demo/ev.md" > "$ws/runs/demo/ev.task.txt"
+  printf '{"type":"result","total_cost_usd":0.1,"duration_ms":60000,"usage":{},"permission_denials":[],"structured_output":{"status":"done","done_when":[{"item":"The widget renders","status":"met","basis":"observed","evidence":".ws-evidence/mirror.log, exit 0"}]}}\n' > "$ws/runs/demo/ev.jsonl"
+  jq -n --arg sha "$tip" '{reviewed_sha:$sha, when:"2026-10-31 10:00 UTC", verdict:"merge", summary:"recorded", blocking:[], suggestions:[]}' > "$ws/runs/demo/ev.review.json"
+  ecout="$work/evidence-claims.txt"
+  out=$(WS_ALLOWANCE_DB= WS_EC_OUT="$ecout" "$ws/scripts/review-compare.sh" --project demo --model opencode-go/deepseek-v4.1-flash ev 2>&1) && x=0 || x=$?
+  if [ "$x" = 0 ] && grep -q '^ev' "$ws/runs/demo/review-compare.tsv" \
+    && [ "$(cat "$ecout" 2>/dev/null)" = none ] \
+    && ! grep -q 'is not in the worktree' "$ecout" 2>/dev/null; then
+    echo "review-compare restores kept evidence into a scratch checkout ok"
+  else
+    echo "review-compare scratch evidence FAILED (exit $x): $out"
+    echo "evidence-claim input: $(cat "$ecout" 2>/dev/null)"
+    fails=$((fails + 1))
+  fi
+  # The fix-first path checks the reviewed SHA out in its own scratch worktree and must restore the same kept
+  # evidence there: a chain log and a fix task are all recall_fix_first needs to reach that checkout.
+  printf '# Fix round 1\n\n## Blocking findings\n- `a.txt:1` (rule 3): a finding\n' > "$ws/plans/demo/ev-fix.md"
+  printf '2026-10-31 10:00 UTC  ev: review at %s: fix-first\n2026-10-31 10:00 UTC  ev: fix-first; automatic fix round 1 (%s)\n' \
+    "$tip" "$ws/plans/demo/ev-fix.md" > "$ws/runs/demo/chain.log"
+  ecout2="$work/evidence-claims-fix-first.txt"
+  out=$(WS_ALLOWANCE_DB= WS_EC_OUT="$ecout2" "$ws/scripts/review-compare.sh" --project demo --model opencode-go/deepseek-v4.1-flash --fix-first ev 2>&1) && x=0 || x=$?
+  if [ "$x" = 0 ] && [ "$(cat "$ecout2" 2>/dev/null)" = none ] \
+    && ! grep -q 'is not in the worktree' "$ecout2" 2>/dev/null; then
+    echo "review-compare restores kept evidence into a fix-first scratch checkout ok"
+  else
+    echo "review-compare fix-first scratch evidence FAILED (exit $x): $out"
+    echo "evidence-claim input: $(cat "$ecout2" 2>/dev/null)"
+    fails=$((fails + 1))
+  fi
+  rm -rf "$work"
+  [ "$fails" = 0 ]
+}
 # normalize() reads the malformed result shapes models write instead of the schema's. Each fixture is a shortened
 # copy of a real first reply from reports/builder-repair-rate-2026-11-06.md, and an already valid result must come
 # back unchanged. <root> holds scripts/ and schema/, <scratch> holds the fixtures. Prints one line per case and
@@ -914,11 +992,31 @@ if [ "${1:-}" = --review-compare-before ]; then
   git -C "$WS" show "$ref:config.sh" > "$d/ws/config.sh" || { echo "no config.sh at $ref"; exit 1; }
   review_compare_filter_cases "$d/ws"; f=$?
   review_compare_cache_cases "$d/ws" || f=1
+  review_compare_evidence_cases "$d/ws" || f=1
   exit "$f"
 fi
 # Run only the review-compare cache cases against the worktree's own script.
 if [ "${1:-}" = --review-compare-cache ]; then
   review_compare_cache_cases "$WS"
+  exit $?
+fi
+# Run only the scratch-checkout evidence case, against the worktree's own script or another revision's so it can be
+# shown failing on the code before it: --review-compare-evidence [-before <git-ref>].
+if [ "${1:-}" = --review-compare-evidence ] || [ "${1:-}" = --review-compare-evidence-before ]; then
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  mkdir -p "$d/ws/scripts"
+  if [ "${1:-}" = --review-compare-evidence-before ]; then
+    ref="${2:?usage: selftest.sh --review-compare-evidence-before <git-ref>}"
+    for f in review-compare lib; do
+      git -C "$WS" show "$ref:scripts/$f.sh" > "$d/ws/scripts/$f.sh" || { echo "no scripts/$f.sh at $ref"; exit 1; }
+    done
+    git -C "$WS" show "$ref:config.sh" > "$d/ws/config.sh" || { echo "no config.sh at $ref"; exit 1; }
+  else
+    cp "$WS/scripts/review-compare.sh" "$d/ws/scripts/review-compare.sh"
+    cp "$WS/scripts/lib.sh" "$d/ws/scripts/lib.sh"
+    cp "$WS/config.sh" "$d/ws/config.sh"
+  fi
+  review_compare_evidence_cases "$d/ws"
   exit $?
 fi
 # Run the doctor browser and task-guard cases against another revision's doctor, so the new guard can be shown
@@ -948,7 +1046,7 @@ review_agent_cases() { # <review.sh> <config.sh> <scratch> [<lib.sh>] [<review_m
   cp "$rv" "$w/scripts/review.sh"
   cp "$cfg" "$w/config.sh"
   cp "$lib" "$w/scripts/lib.sh"
-  for f in precheck.sh claims.sh claims.py opencode-review.sh opencode_run.py zdr-check.sh lessons-check.py; do
+  for f in precheck.sh claims.sh claims.py test-quality.sh test_quality.py evidence-claims.sh opencode-review.sh opencode_run.py zdr-check.sh lessons-check.py; do
     cp "$WS/scripts/$f" "$w/scripts/$f"
   done
   cp "$match" "$w/scripts/review_match.py"
@@ -1595,6 +1693,126 @@ CLMTEST
     || { echo "review prompt claims wiring removal FAILED (exit $x):"; echo "$out" | head -40; fails=$((fails + 1)); }
   return "$fails"
 }
+# The evidence-claim cases in their own scratch workspace: a missing observed-evidence path and a failing-before
+# claim whose log holds no failure marker are flagged; a backed claim prints none; the review prompt carries the
+# candidate block when the check has something to report, and the run's copy is saved under runs/<slug>/. <source-root> holds
+# scripts/, config.sh, agents/, lessons/ and checklist.md; <scratch> is a fresh directory.
+evidence_claims_cases() { # <source-root> <scratch>
+  local src="$1" t="$2" w="$2/ws" p="$2/proj" slugx out x wt conf fails=0
+  mkdir -p "$w/scripts" "$w/projects" "$w/plans" "$w/runs" "$w/agents" "$w/lessons" "$t"
+  cp -a "$src/scripts/." "$w/scripts/"
+  cp "$src/config.sh" "$w/config.sh"
+  if [ -f "$src/VERSION" ]; then cp "$src/VERSION" "$w/VERSION"; fi
+  cp -a "$src/agents/." "$w/agents/"
+  cp -a "$src/lessons/." "$w/lessons/"
+  cp "$src/checklist.md" "$w/checklist.md"
+  if [ -d "$src/bin" ]; then cp -a "$src/bin" "$w/bin"; else cp -a "$WS/bin" "$w/bin"; fi
+  chmod +x "$w/scripts/"*.sh
+  p="$t/proj"; mkdir -p "$p"
+  git -C "$p" init -q -b main
+  printf '.worktrees\n.ws-evidence\n' > "$p/.git/info/exclude"
+  printf 'base\n' > "$p/base.txt"
+  git -C "$p" add base.txt
+  git -C "$p" -c user.name=t -c user.email=t@t commit -qm base
+  slugx=$(basename "$p" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')
+  conf="$w/projects/$slugx.conf"
+  printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$p" > "$conf"
+  wt="$p/.worktrees/demo"
+  git -C "$p" worktree add -q -b agent/demo "$wt" main
+  mkdir -p "$wt/.ws-evidence" "$w/runs/$slugx"
+  printf '# evidence task\n\n## Done when\n- the widget renders\n' > "$t/task.md"
+  printf 'task=%s\n' "$t/task.md" > "$w/runs/$slugx/demo.task.txt"
+  ec_run() { printf '{"type":"result","total_cost_usd":0.1,"duration_ms":60000,"usage":{},"permission_denials":[],"structured_output":%s}\n' "$1" > "$w/runs/$slugx/demo.jsonl"; "$w/scripts/evidence-claims.sh" --project "$slugx" --worktree "$wt" demo 2>&1; }
+  # A met, observed item whose evidence path does not exist is a FLAG.
+  out=$(ec_run '{"status":"done","done_when":[{"item":"The widget renders","status":"met","basis":"observed","evidence":".ws-evidence/missing.log, exit 0"}]}') && x=0 || x=1
+  { [ "$x" = 1 ] && grep -qF 'FLAG' <<< "$out" && grep -qF 'evidence .ws-evidence/missing.log is not in the worktree' <<< "$out"; } \
+    && echo "evidence-claims flags a missing observed-evidence path ok" \
+    || { echo "evidence-claims missing path FAILED (exit $x):"; echo "$out"; fails=$((fails + 1)); }
+  # A before claim whose named log holds no failure marker is a FLAG.
+  printf 'mirror probe passed\nexit 0\n' > "$wt/.ws-evidence/mirror.log"
+  out=$(ec_run '{"status":"done","done_when":[{"item":"The new case failed before the change","status":"met","basis":"observed","evidence":".ws-evidence/mirror.log, exit 0"}]}') && x=0 || x=1
+  { [ "$x" = 1 ] && grep -qF 'FLAG' <<< "$out" && grep -qF 'claims a failing-before run' <<< "$out" && grep -qF 'has no failure marker' <<< "$out"; } \
+    && echo "evidence-claims flags a failing-before claim with no failure marker ok" \
+    || { echo "evidence-claims no marker FAILED (exit $x):"; echo "$out"; fails=$((fails + 1)); }
+  # A before claim whose named log shows the failure is backed: no FLAG.
+  printf 'test_x FAILED\nexit 1\n' > "$wt/.ws-evidence/before.log"
+  out=$(ec_run '{"status":"done","done_when":[{"item":"The new case failed before the change (log kept in .ws-evidence/before.log)","status":"met","basis":"observed","evidence":".ws-evidence/before.log: exit 1"}]}') && x=0 || x=1
+  { [ "$x" = 0 ] && [ "$out" = none ]; } \
+    && echo "evidence-claims prints none for a backed claim ok" \
+    || { echo "evidence-claims backed claim FAILED (exit $x):"; echo "$out"; fails=$((fails + 1)); }
+  # `ws evidence-claims` reaches the same check through the launcher.
+  out=$("$w/bin/ws" --project "$slugx" evidence-claims --worktree "$wt" demo 2>&1) && x=0 || x=$?
+  { [ "$x" = 0 ] && [ "$out" = none ]; } \
+    && echo "ws evidence-claims runs the check through the launcher ok" \
+    || { echo "ws evidence-claims launcher FAILED (exit $x):"; echo "$out"; fails=$((fails + 1)); }
+  # A marker anywhere but the last line: the exit code the evidence runner writes is read case-insensitively and
+  # for any non-zero number, not just `exit 1`.
+  printf 'suite done\nexit 2\n' > "$wt/.ws-evidence/exit2.log"
+  out=$(ec_run '{"status":"done","done_when":[{"item":"The new case failed before the change","status":"met","basis":"observed","evidence":".ws-evidence/exit2.log"}]}') && x=0 || x=1
+  { [ "$x" = 0 ] && [ "$out" = none ]; } \
+    && echo "evidence-claims reads an exit N footer as a failure marker ok" \
+    || { echo "evidence-claims exit N marker FAILED (exit $x):"; echo "$out"; fails=$((fails + 1)); }
+  # A path that names a directory is not a log to read: it gets its own FLAG instead of passing as present.
+  mkdir -p "$wt/.ws-evidence/logs"
+  out=$(ec_run '{"status":"done","done_when":[{"item":"The widget logs a line","status":"met","basis":"observed","evidence":".ws-evidence/logs/"}]}') && x=0 || x=1
+  { [ "$x" = 1 ] && grep -qF 'names a directory, not a log file' <<< "$out"; } \
+    && echo "evidence-claims flags a directory-shaped evidence path ok" \
+    || { echo "evidence-claims directory path FAILED (exit $x):"; echo "$out"; fails=$((fails + 1)); }
+  # A run with no result line, an unparseable result line and a null structured result each say so instead of a
+  # bare none, and the parse failure is named apart from a missing structured result.
+  printf '{"type":"step_start","part":{}}\n' > "$w/runs/$slugx/demo.jsonl"
+  out=$("$w/scripts/evidence-claims.sh" --project "$slugx" --worktree "$wt" demo 2>&1) && x=0 || x=$?
+  { [ "$x" = 0 ] && grep -qF 'no result line' <<< "$out" && [ "$out" != none ]; } \
+    && echo "evidence-claims names a run with no result line ok" \
+    || { echo "evidence-claims no result line FAILED (exit $x):"; echo "$out"; fails=$((fails + 1)); }
+  printf '{"type":"result","structured_output":\n' > "$w/runs/$slugx/demo.jsonl"
+  out=$("$w/scripts/evidence-claims.sh" --project "$slugx" --worktree "$wt" demo 2>&1) && x=0 || x=$?
+  { [ "$x" = 0 ] && grep -qF 'unparseable result line' <<< "$out" && [ "$out" != none ]; } \
+    && echo "evidence-claims names an unparseable result line ok" \
+    || { echo "evidence-claims unparseable result FAILED (exit $x):"; echo "$out"; fails=$((fails + 1)); }
+  printf '{"type":"result","structured_output":null}\n' > "$w/runs/$slugx/demo.jsonl"
+  out=$("$w/scripts/evidence-claims.sh" --project "$slugx" --worktree "$wt" demo 2>&1) && x=0 || x=$?
+  { [ "$x" = 0 ] && grep -qF 'no structured result' <<< "$out" && [ "$out" != none ]; } \
+    && echo "evidence-claims names a null structured result ok" \
+    || { echo "evidence-claims null structured result FAILED (exit $x):"; echo "$out"; fails=$((fails + 1)); }
+  # A done_when present but not an array of objects is malformed: say why instead of reading it as a clean none.
+  ec_run '{"status":"done","done_when":"the widget renders"}' >/dev/null || true
+  out=$("$w/scripts/evidence-claims.sh" --project "$slugx" --worktree "$wt" demo 2>&1) && x=0 || x=$?
+  { [ "$x" = 0 ] && grep -qF 'not an array of objects' <<< "$out" && [ "$out" != none ]; } \
+    && echo "evidence-claims names a malformed done_when ok" \
+    || { echo "evidence-claims malformed done_when FAILED (exit $x):"; echo "$out"; fails=$((fails + 1)); }
+  # The reviewer prompt carries the candidate block when the check has something to report, and the run's copy is
+  # saved.
+  printf 'x\n' > "$wt/x.txt"; git -C "$wt" add x.txt
+  git -C "$wt" -c user.name=t -c user.email=t@t commit -qm "a change to review"
+  ec_run '{"status":"done","done_when":[{"item":"The widget renders","status":"met","basis":"observed","evidence":".ws-evidence/missing.log, exit 0"}]}' >/dev/null || true
+  out=$(WS_REVIEW_SHADOW= WS_ALLOWANCE_DB= "$w/scripts/review.sh" --project "$slugx" --agent claude --print-prompt demo 2>&1) && x=0 || x=$?
+  { [ "$x" = 0 ] && grep -q 'Evidence-claim check (scripts/evidence-claims.sh' <<< "$out" \
+    && grep -qF 'evidence .ws-evidence/missing.log is not in the worktree' <<< "$out" \
+    && [ -f "$w/runs/$slugx/demo.evidence-claims.txt" ]; } \
+    && echo "the review prompt carries the evidence-claim input ok" \
+    || { echo "review prompt evidence-claim input FAILED (exit $x):"; echo "$out" | head -40; fails=$((fails + 1)); }
+  # A backed claim prints none, so the reviewer prompt carries no evidence-claim block at all.
+  ec_run '{"status":"done","done_when":[{"item":"The new case failed before the change","status":"met","basis":"observed","evidence":".ws-evidence/before.log: exit 1"}]}' >/dev/null || true
+  out=$(WS_REVIEW_SHADOW= WS_ALLOWANCE_DB= "$w/scripts/review.sh" --project "$slugx" --agent claude --print-prompt demo 2>&1) && x=0 || x=$?
+  { [ "$x" = 0 ] && ! grep -q 'Evidence-claim check' <<< "$out"; } \
+    && echo "the review prompt omits the evidence-claim block for a backed claim ok" \
+    || { echo "review prompt backed claim omission FAILED (exit $x):"; echo "$out" | head -40; fails=$((fails + 1)); }
+  # A flagged claim puts the block in the prompt, so removing the ${ec_note:+...} wiring must drop it: with the
+  # backed-claim case above the guard test could not fail, because that run prints none either way.
+  ec_run '{"status":"done","done_when":[{"item":"The widget renders","status":"met","basis":"observed","evidence":".ws-evidence/missing.log, exit 0"}]}' >/dev/null || true
+  out=$(WS_REVIEW_SHADOW= WS_ALLOWANCE_DB= "$w/scripts/review.sh" --project "$slugx" --agent claude --print-prompt demo 2>&1) && x=0 || x=$?
+  { [ "$x" = 0 ] && grep -q 'Evidence-claim check' <<< "$out"; } \
+    && echo "the review prompt carries the evidence-claim block for a flagged claim ok" \
+    || { echo "review prompt flagged claim block FAILED (exit $x):"; echo "$out" | head -40; fails=$((fails + 1)); }
+  grep -v 'ec_note:+' "$w/scripts/review.sh" > "$t/review-removed.sh"
+  cp "$t/review-removed.sh" "$w/scripts/review.sh"
+  out=$(WS_REVIEW_SHADOW= WS_ALLOWANCE_DB= "$w/scripts/review.sh" --project "$slugx" --agent claude --print-prompt demo 2>&1) && x=0 || x=$?
+  { [ "$x" = 0 ] && ! grep -q 'Evidence-claim check' <<< "$out"; } \
+    && echo "the review prompt evidence-claim guard fails when its section is removed ok" \
+    || { echo "review prompt evidence-claim removal FAILED (exit $x):"; echo "$out" | head -40; fails=$((fails + 1)); }
+  return "$fails"
+}
 # Run only the claims cases against the worktree's own scripts.
 if [ "${1:-}" = --claims ]; then
   d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
@@ -1647,6 +1865,34 @@ if [ "${1:-}" = --test-quality-before ]; then
   git -C "$WS" show "$ref:scripts/test_quality.py" > "$d/src/scripts/test_quality.py" || { echo "no scripts/test_quality.py at $ref"; exit 1; }
   chmod +x "$d/src/scripts/"*.sh
   test_quality_cases "$d/src" "$d/case"
+  exit $?
+fi
+# Run only the evidence-claim cases against the worktree's own scripts.
+if [ "${1:-}" = --evidence-claims ]; then
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  evidence_claims_cases "$WS" "$d/case"
+  exit $?
+fi
+# Run only the evidence-claim cases against another revision's scripts, so the cases can be shown failing on the
+# code before them: scripts/selftest.sh --evidence-claims-before <git-ref>.
+if [ "${1:-}" = --evidence-claims-before ]; then
+  ref="${2:?usage: selftest.sh --evidence-claims-before <git-ref>}"
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  mkdir -p "$d/src/scripts"
+  cp -a "$WS/scripts/." "$d/src/scripts/"
+  cp "$WS/config.sh" "$d/src/config.sh"
+  if [ -f "$WS/VERSION" ]; then cp "$WS/VERSION" "$d/src/VERSION"; fi
+  cp -a "$WS/agents" "$d/src/agents"
+  cp -a "$WS/lessons" "$d/src/lessons"
+  cp "$WS/checklist.md" "$d/src/checklist.md"
+  git -C "$WS" show "$ref:scripts/review.sh" > "$d/src/scripts/review.sh" || { echo "no scripts/review.sh at $ref"; exit 1; }
+  if git -C "$WS" cat-file -e "$ref:scripts/evidence-claims.sh" 2>/dev/null; then
+    git -C "$WS" show "$ref:scripts/evidence-claims.sh" > "$d/src/scripts/evidence-claims.sh"
+  else
+    rm -f "$d/src/scripts/evidence-claims.sh"
+  fi
+  chmod +x "$d/src/scripts/"*.sh
+  evidence_claims_cases "$d/src" "$d/case"
   exit $?
 fi
 # Run only the usage-limit and chain-limit cases, against the worktree's own scripts by default, so a change there
@@ -2957,6 +3203,7 @@ grep -q 'timeout: 120m' <<< "$out" && echo "full-track timeout ok"
 A0="$T/arm-plain"; mkdir -p "$A0/agents" "$A0/lessons"
 cp "$WS/agents/builder.md" "$A0/agents/builder.md"; cp "$WS/lessons/builder.md" "$A0/lessons/builder.md"
 [ ! -f "$WS/lessons/builder.local.md" ] || cp "$WS/lessons/builder.local.md" "$A0/lessons/builder.local.md"
+for f in "$WS"/lessons/opencode-*.md; do [ -f "$f" ] && cp "$f" "$A0/lessons/"; done
 base_prompt=$("$WS/scripts/dispatch.sh" --project "$slug" --print-prompt demo "$T/task.md" 2>&1)
 # A file an earlier arm left must not survive the next instructions dispatch: the folder is rebuilt every time.
 mkdir -p "$T/.worktrees/demo/.ws-evidence/given/arm"; printf '# stale\n' > "$T/.worktrees/demo/.ws-evidence/given/arm/stale.md"
@@ -2995,6 +3242,13 @@ printf -- '- o\n' > "$L/orchestrator.md"; printf -- '- p\n- q\n' > "$L/orchestra
 out=$(WS_LESSONS_DIR="$L" "$WS/scripts/dispatch.sh" --project "$slug" --print-prompt demo "$T/task.md" 2>&1)
 [ "$(grep -o '[a-z]* lesson marker' <<< "$out" | paste -sd,)" = "shared lesson marker,local lesson marker" ] && echo "local lessons in prompt ok" || { echo "local lessons FAILED:"; grep -n 'lesson' <<< "$out"; exit 1; }
 out=$(WS_LESSONS_DIR="$L" "$WS/scripts/cold-start.sh" "$slug" 2>&1); grep -q 'and lessons/orchestrator.local.md (2 lines)' <<< "$out" && echo "cold-start names local lessons ok" || { echo "cold-start local lessons FAILED"; exit 1; }
+# The OpenCode line lesson names that client's surface, so only an OpenCode builder prompt carries it.
+LL=$(mktemp -d); cp -a "$L/." "$LL/"; printf -- '- line lesson marker\n' > "$LL/opencode-2.md"
+out=$(WS_OPENCODE_LINE=2 WS_LESSONS_DIR="$LL" "$WS/scripts/dispatch.sh" --project "$slug" --print-prompt --agent claude demo "$T/task.md" 2>&1)
+! grep -q 'line lesson marker' <<< "$out" && echo "claude builder prompt has no OpenCode line lesson ok" || { echo "claude builder line lesson FAILED"; exit 1; }
+out=$(WS_OPENCODE_LINE=2 WS_LESSONS_DIR="$LL" "$WS/scripts/dispatch.sh" --project "$slug" --print-prompt --agent opencode demo "$T/task.md" 2>&1)
+grep -q 'line lesson marker' <<< "$out" && echo "opencode builder prompt carries the line lesson ok" || { echo "opencode builder line lesson FAILED"; exit 1; }
+rm -rf "$LL"
 # review picks the light-track model from the task file that task.txt names, not from task.txt itself.
 mkdir -p "$WS/runs/$slug"; printf 'task=%s\nbudget=5\n' "$T/light.md" > "$WS/runs/$slug/lt.task.txt"; printf 'task=%s\n' "$T/task.md" > "$WS/runs/$slug/ft.task.txt"
 ( . "$WS/scripts/lib.sh"; load_project "$slug"; task_is_light lt && ! task_is_light ft && ! task_is_light nosuch ) && echo "light-track review model ok"
@@ -3846,10 +4100,20 @@ test_quality_cases "$WS" "$TQ/case" || exit 1
 # claims: a comment and a docstring claim with file:line, a test claim skipped, no claim word and no added prose
 # give "none", and the review prompt carries the section. Its scratch is outside $T for the same reason.
 claims_cases "$WS" "$TQ/claims" || exit 1
+# evidence claims: a missing observed-evidence path and a failing-before log with no failure marker are flagged,
+# a backed claim prints none, and the review prompt carries the candidate block. Its scratch is outside $T too.
+evidence_claims_cases "$WS" "$TQ/evidence-claims" || exit 1
 # review: the reviewer's .local.md lessons reach its prompt after the shared file.
 printf -- '- shared reviewer marker\n' > "$L/reviewer.md"; printf -- '- local reviewer marker\n' > "$L/reviewer.local.md"
 out=$(WS_LESSONS_DIR="$L" "$WS/scripts/review.sh" --project "$slug" --print-prompt demo 2>&1 || true)
 [ "$(grep -o '[a-z]* reviewer marker' <<< "$out" | paste -sd,)" = "shared reviewer marker,local reviewer marker" ] && echo "local reviewer lessons in prompt ok" || { echo "local reviewer lessons FAILED:"; head -n 20 <<< "$out"; exit 1; }
+# The OpenCode line lesson names that client's surface, so only an OpenCode reviewer prompt carries it.
+LL=$(mktemp -d); cp -a "$L/." "$LL/"; printf -- '- line lesson marker\n' > "$LL/opencode-2.md"
+out=$(WS_OPENCODE_LINE=2 WS_LESSONS_DIR="$LL" "$WS/scripts/review.sh" --project "$slug" --print-prompt --agent claude demo 2>&1 || true)
+! grep -q 'line lesson marker' <<< "$out" && echo "claude reviewer prompt has no OpenCode line lesson ok" || { echo "claude reviewer line lesson FAILED"; exit 1; }
+out=$(WS_OPENCODE_LINE=2 WS_LESSONS_DIR="$LL" "$WS/scripts/review.sh" --project "$slug" --print-prompt --agent opencode demo 2>&1 || true)
+grep -q 'line lesson marker' <<< "$out" && echo "opencode reviewer prompt carries the line lesson ok" || { echo "opencode reviewer line lesson FAILED"; exit 1; }
+rm -rf "$LL"
 # ws-run: runs a granted command and records its exit code; refuses one outside the grants.
 printf '%s\n' 'true' 'false *' > "$T/grants"; rm -f "$W/.ws-evidence/runs.tsv"
 ( cd "$W" && WS_RUN_GRANTS="$T/grants" "$WS/bin/ws-run" ok-run true >/dev/null && ! WS_RUN_GRANTS="$T/grants" "$WS/bin/ws-run" bad-run false x >/dev/null \
@@ -4278,6 +4542,8 @@ arm-files/stages/build/context.md
 arm-plain/agents/builder.md
 arm-plain/lessons/builder.local.md
 arm-plain/lessons/builder.md
+arm-plain/lessons/opencode-1.md
+arm-plain/lessons/opencode-2.md
 b.txt
 bench-hold.out
 bt.md
@@ -4658,19 +4924,21 @@ of=0; ofail() { echo "$1 FAILED:"; printf '%s\n' "${2:-}" | sed -n 1,25p; of=1; 
 stopped() { local stat; stat=$(ps -o stat= -p "$1" 2>/dev/null); [ -z "$stat" ] || [ "${stat:0:1}" = Z ]; }
 mkdir -p "$T/ocbin"; cat > "$T/ocbin/opencode" <<'STUB'
 #!/bin/bash
-case " $* " in *" --version "*) echo "1.19.1"; exit 0 ;; esac
+# The subcommand and flags are read from argv, never from the prompt: a prompt that quotes a command name
+# must still reach the sample reply.
+case "$1" in --version) echo "1.19.1"; exit 0 ;; esac
 # dispatch asks for a model's variants before it starts; the file is the listing that command prints.
-case " $* " in *" models "*) cat "${OC_MODELS:-/dev/null}" 2>/dev/null; exit 0 ;; esac
-case " $* " in *" --session "*) call=continue ;; *) call=first ;; esac
+case "$1" in models) cat "${OC_MODELS:-/dev/null}" 2>/dev/null; exit 0 ;; esac
 # -f/--file is a yargs array option: --file a b takes both as files, --file=a takes one and, with
 # greedy-arrays on, keeps taking the words after it; every other flag ends the array.
-file=""; msg=""; variant=""; in_file=0; skip=0; want=""
+file=""; msg=""; variant=""; in_file=0; skip=0; want=""; call=first
 for arg in "$@"; do
   if [ "$skip" = 1 ]; then [ "$want" = variant ] && variant="$arg"; skip=0; want=""; continue; fi
   case "$arg" in
     --file=*|-f=*) file="${arg#*=}"; in_file=1 ;;
     --file|-f) in_file=1 ;;
-    --format|--model|--title|--session) skip=1; in_file=0 ;;
+    --session) call=continue; skip=1; in_file=0 ;;
+    --format|--model|--title) skip=1; in_file=0 ;;
     --variant) skip=1; want=variant; in_file=0 ;;
     -*) in_file=0 ;;
     *) if [ "$in_file" = 1 ]; then file="$arg"; else msg="$arg"; fi ;;
@@ -5054,6 +5322,11 @@ RUNEVENTSTEST
 node "$T/run-events-plugin.test.mjs" "$WS/scripts/opencode-plugins/run-events.js" "$T" \
   && echo "run-events plugin writes permission and retry events ok" \
   || { echo "run-events plugin FAILED"; exit 1; }
+# The 2.x prototypes load through the V2 default-definition shape, register their hooks and write records
+# scripts/opencode_run.py reads. They are separate files, so the 1.x plugin above is unchanged.
+node "$WS/scripts/opencode-2x-check.mjs" "$WS/.opencode/plugins/deny-guard-2x.js" "$WS/.opencode/plugins/run-events-2x.js" \
+  && echo "opencode 2.x plugins load and write records the tool reads ok" \
+  || { echo "opencode 2.x plugins FAILED"; exit 1; }
 # A headless review passes --pure, so no external plugin loads. A builder names its run-events plugin in its
 # inline config; the workspace cold-start plugin returns early when WS_RUN_EVENTS is set, so the builder never
 # receives the orchestrator's brief. The inline config is checked on a real dispatch below.
@@ -5080,6 +5353,17 @@ res=$(cat "$ocr/ocrun.result.txt" 2>/dev/null || true)
 $res
 $(tail -3 "$ocr/ocrun.jsonl" 2>/dev/null)"
 git -C "$T" worktree remove --force "$T/.worktrees/ocrun" 2>/dev/null; git -C "$T" branch -q -D agent/ocrun 2>/dev/null || true
+# The stand-in branches on its argv, not on the prompt text: a prompt that quotes the model-list command still
+# replays the sample reply and records the call, rather than printing the model list.
+printf '# task\nCheck the variants with `opencode models <provider> --verbose` first.\n' > "$T/ocmodels.md"
+rm -f "$T/oc-calls"
+ocb valid ocmodels 1 "$T/ocmodels.md"
+line=$(cat "$T/oc-calls" 2>/dev/null || true)
+so=$(grep '"type":"result"' "$ocr/ocmodels.jsonl" | tail -1 | jq -c .structured_output)
+[ "$(jq -r .status <<< "$so")" = "done" ] && grep -q '^first ' <<< "$line" \
+  && echo "a prompt naming the models command still reaches the sample output ok" || ofail "opencode prompt naming models" "$line
+ $so
+ $(tail -5 "$ocr/ocmodels.jsonl" 2>/dev/null)"
 # A prompt over one argv string's 128 KiB limit travels as an attached file: the stand-in receives --file with the whole
 # prompt and a short message, not the prompt as the message argument.
 { printf '# long task\n'; head -c 200000 /dev/zero | tr '\0' 'x'; printf '\n'; } > "$T/long.md"
@@ -5376,6 +5660,7 @@ row: $row"
 # their own scratch workspace so the same function can be pointed at a pre-change copy of the script.
 review_compare_filter_cases "$WS" || of=1
 review_compare_cache_cases "$WS" || of=1
+review_compare_evidence_cases "$WS" || of=1
 # Shadow reviews: with WS_REVIEW_SHADOW=opencode the deciding review starts a detached OpenCode review of the same
 # SHA and records the pair; a failing shadow is an error row and does not change the deciding review's exit;
 # shadow off starts nothing; a merge may remove the builder's worktree while the shadow runs, and the shadow
@@ -6635,7 +6920,7 @@ MW="$T/models-ws"; make_ws "$MW"
 MB="$T/models-bin"; mkdir -p "$MB"
 cat > "$MB/opencode" <<'MODELS_STUB'
 #!/usr/bin/env bash
-case " $* " in *" models "*) cat "$MODELS_LIST" ;; esac
+case "$1" in models) cat "$MODELS_LIST" ;; esac
 MODELS_STUB
 chmod +x "$MB/opencode"
 printf 'opencode-go/alpha\nopencode-go/beta-free\n' > "$T/models-1.txt"
@@ -6834,14 +7119,14 @@ done
 MSTUB="$T/maint-bin"; mkdir -p "$MSTUB"
 cat > "$MSTUB/opencode" <<'MAINTSTUB'
 #!/usr/bin/env bash
-case " $* " in
-  *" models "*)
+case "$1" in
+  models)
     case "${STUB_FAIL:-}" in
       exit) exit 1 ;;
       empty) exit 0 ;;
     esac
     cat "$STUB_MODELS" 2>/dev/null; printf '%s\n' "${XDG_DATA_HOME:-}" >> "$STUB_XDG_LOG" ;;
-  *" --version "*) echo "2.2.7" ;;
+  --version) echo "2.2.7" ;;
 esac
 MAINTSTUB
 chmod +x "$MSTUB/opencode"

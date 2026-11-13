@@ -56,6 +56,19 @@ cleanup_scratch() {
 }
 trap 'cleanup_scratch; true' EXIT
 
+# A detached scratch checkout has no .ws-evidence/, and a review there reads every logged claim as unbacked. Put
+# the kept evidence back where the reviewer prompt points at, as review-shadow does: the builder's worktree first,
+# then the copy a merge or a bench pass kept.
+restore_scratch_evidence() { # <name>
+  local source
+  for source in "$(worktree_dir "$1")/.ws-evidence" "$RUNS/evidence/$1" "$RUNS/bench/evidence/$1"; do
+    [ -d "$source" ] || continue
+    restore_evidence "$source" "$scratch"
+    [ "$EVIDENCE_COUNT" -eq 0 ] || return 0
+  done
+  echo "review-compare: no evidence found for $1"
+}
+
 # A merged branch is gone; the merge commit's second parent is its reviewed SHA and its first parent the tree the
 # recorded review compared against.
 merge_commit() {
@@ -332,6 +345,7 @@ recall_fix_first() {
     if ! git -C "$PROJECT_PATH" worktree add -q --detach "$scratch" "$sha"; then
       note "$cname: could not check out $(short "$sha") in $scratch; skipped"; status=1; scratch=""; continue
     fi
+    restore_scratch_evidence "$cname"
     case_name="$cname@$(short "$sha")"
     out_base="$recall_dir/$cname-$sha"
     run_opencode_review "$cname" "$out_base" "$scratch" "$base" "$out_base.log"
@@ -445,6 +459,7 @@ if [ "$mode" = merged ]; then
       if ! git -C "$PROJECT_PATH" worktree add -q --detach "$scratch" "$sha"; then
         note "$name: could not check out $(short "$sha") in $scratch; skipped"; status=1; scratch=""; continue
       fi
+      restore_scratch_evidence "$name"
       wt="$scratch"
     fi
     run_opencode_review "$name" "$RUNS/$name.review-opencode" "$wt" "$base" "$RUNS/$name.review-compare.log"

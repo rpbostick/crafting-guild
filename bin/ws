@@ -120,6 +120,7 @@ ws web <name> approve <n|all> [--url <url>]   fetch each approved URL (curl, htt
 ws web <name> deny <n> "<reason>"   record why a request is not given (the resume task says so)
 ws web <name> resume [dispatch flags]   write a resume task naming the files, then re-dispatch the same builder name
 ws precheck <name>              the checklist rules a script can check (ws review runs it first)
+ws evidence-claims <name>       the done-when evidence claims a script can check (ws review runs it)
 ws audit [days]                 what builders keep doing by hand, from the run logs (default 30 days)
 ws bench add <name>...          add merged runs to the project's replay corpus (plans/<slug>/bench/)
 ws bench run <slug> --arm L=<git-ref|dir>[,agent=claude|opencode][,model=M][,temp=T][,top_p=P][,effort=E] --arm L2=...
@@ -357,6 +358,7 @@ case "$cmd" in
     case "$st" in done*) exit 0 ;; *gated*|*held:*) exit 4 ;; *) exit 1 ;; esac ;;
   web) "$WS/scripts/web.sh" ${proj:+--project "$proj"} "$@" ;;
   precheck) "$WS/scripts/precheck.sh" ${proj:+--project "$proj"} "$@" ;;
+  evidence-claims) "$WS/scripts/evidence-claims.sh" ${proj:+--project "$proj"} "$@" ;;
   teeth) "$WS/scripts/teeth.sh" ${proj:+--project "$proj"} "$@" ;;
   bench) "$WS/scripts/bench.sh" ${proj:+--project "$proj"} "$@" ;;
   audit) load_project "$proj"; python3 "$WS/scripts/audit.py" "$SLUG" "$PROJECT_PATH" "$TEST_CMD" "$RUNS" "$WS/plans/$SLUG" "${1:-30}" ;;

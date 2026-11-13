@@ -561,7 +561,7 @@ $(cat "$sheet")
 $(cat "$WS/checklist.md")
 
 # Lessons from earlier runs
-$(lessons_for builder)
+$(lessons_for builder "$agent")
 
 # Project
 Main branch: $PROJECT_BRANCH. Project test command: ${TEST_CMD:-none configured}. The merge gate runs it on the merged tree; you do not. Run only the test files that cover what you changed, with the same runners, from the worktree root, in the foreground.

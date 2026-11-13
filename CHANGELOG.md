@@ -2,6 +2,10 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.8.4
+
+- `ws evidence-claims <name>` lists the done-when items a finished run reports as met on observed evidence whose evidence path is missing from the worktree, or whose failing-before log has no failure marker, as candidates for the reviewer; a run with no usable result says why instead of printing none. `review.sh` puts the same block in the reviewer prompt when there is something to report.
+
 ## 2.8.3
 
 - Reviews run their independent passes at the same time and union them in pass order; a failed pass is retried once, and `ws review --variant <name>` runs a pass at a chosen reasoning effort.

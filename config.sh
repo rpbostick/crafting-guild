@@ -57,6 +57,7 @@ WS_AGENT="${WS_AGENT:-claude}"  # what runs a builder: "claude" (claude -p, need
 WS_SANDBOX="${WS_SANDBOX-}"
 WS_OPENCODE_MODEL="opencode-go/deepseek-v4.1-flash"   # builder model for --agent opencode (provider/model); --model overrides
 WS_MIN_OPENCODE="1.19.1"        # oldest OpenCode whose SDK/plugin API the launchers use: the parity probe's server json_schema output and the plugins' hooks
+WS_OPENCODE_LINE="${WS_OPENCODE_LINE-}"   # 1 or 2, or empty to read the major from `opencode --version` in scripts/lib.sh; selects lessons/opencode-<line>.md and the line docs
 WS_ASK_MODEL="${WS_ASK_MODEL-}"   # provider/model for ws ask research jobs; empty = the builder model (WS_OPENCODE_MODEL), resolved in scripts/ask.sh
 WS_ASK_BUDGET="${WS_ASK_BUDGET:-0.50}"              # dollars, for one ws ask research job
 # OpenCode model IDs and the names its Go or Zen page gives them in its privacy table, which zdr-check reads: a model
