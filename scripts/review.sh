@@ -121,7 +121,17 @@ report=$(result_json "$RUNS/$name.jsonl" | jq -r '.structured_output // empty | 
 # Claude reads the diff on stdin, but `opencode run` closes stdin so it cannot wait on a prompt nobody sends: the
 # OpenCode prompt carries the diff after this text instead.
 diff_where="on stdin"; [ "$agent" = opencode ] && diff_where="below"
-prompt="You are the reviewer for branch $br of project $SLUG, working directory $wt (read-only). Review the whole branch against the checklist and answer with the JSON verdict.
+# 2.x has no --pure, so the review runs from the workspace and cannot load the branch's `.opencode` plugins or
+# `opencode.json`. The branch is then read by absolute path under the read-only config's external-directory grant.
+review_where="working directory $wt (read-only)"
+files_for_review="$files"
+evidence_dir=".ws-evidence/"
+if [ "$agent" = opencode ] && [ "$(opencode_line)" = 2 ]; then
+  review_where="branch checkout at $wt (read-only); this run's working directory is the workspace, so read the branch's files under $wt by absolute path"
+  files_for_review=$(printf '%s\n' "$files" | sed "s|^|$wt/|")
+  evidence_dir="$wt/.ws-evidence/"
+fi
+prompt="You are the reviewer for branch $br of project $SLUG, $review_where. Review the whole branch against the checklist and answer with the JSON verdict.
 
 # Your role
 $(cat "$WS/agents/reviewer.md")
@@ -137,7 +147,7 @@ Commits since $PROJECT_BRANCH:
 $commits
 
 Changed files:
-$files
+$files_for_review
 
 Diff stat:
 $stat
@@ -158,7 +168,7 @@ $tq
 ${ec_note:+$(printf '\n%s\n' "$ec_note")}
 In the JSON, \`blocking\` and \`suggestions\` are always arrays: write \`[]\`, never \`false\` or \`true\`, and never a second key for the findings; \`rule\` is a number or a short string. Each \`blocking\` item is \`{\"file\", \"line\", \"rule\", \"why\"}\` and each \`suggestions\` item is \`{\"file\", \"line\", \"why\"}\`: \`why\` carries the finding text, never \`finding\`, \`message\` or \`reason\`, and \`file\` and \`line\` are required.
 
-The full diff is $diff_where $capped. Read any changed file in full with Read when you need context. Logs and renders the builder saved are under .ws-evidence/ in the worktree (untracked, so not in the diff); read them there."
+The full diff is $diff_where $capped. Read any changed file in full with Read when you need context. Logs and renders the builder saved are under ${evidence_dir} in the worktree (untracked, so not in the diff); read them there."
 if $show_prompt; then printf '%s\n' "$prompt"; exit 0; fi
 out="$RUNS/$name.review.json"; errf="$RUNS/$name.review.err"; mdf="$RUNS/$name.review.md"
 if [ -n "$out_base" ]; then out="$out_base.json"; errf="$out_base.err"; mdf="$out_base.md"; fi
@@ -174,7 +184,11 @@ run_pass() { # <raw> <err> <opencode config> <opencode prompt>
   local -a cmd
   result_line=""
   if [ "$agent" = opencode ]; then
-    python3 -I "$WS/scripts/opencode_run.py" config --read-only > "$cfg" || die "could not build the OpenCode review config"
+    # A 2.x review runs from the workspace (see opencode-review.sh), so its config grants read access to the
+    # branch's worktree as an external directory; a 1.x review still runs inside the worktree and needs no grant.
+    local -a cfg_args=(--read-only --line "$(opencode_line)")
+    [ "$(opencode_line)" = 2 ] && cfg_args+=(--directory "$wt")
+    python3 -I "$WS/scripts/opencode_run.py" config "${cfg_args[@]}" > "$cfg" || die "could not build the OpenCode review config"
     printf '%s\n\n# The diff\n%s\n' "$prompt" "$diff" > "$pf"
     cmd=("$WS/scripts/opencode-review.sh" --model "$model" --budget "$budget" --config "$cfg"
       --log "$raw" --name "ws:$SLUG:review:$name")

@@ -49,16 +49,27 @@ echo "opencode-builder: $zdr"
 
 # A builder must not inherit the orchestrator's custom config: OpenCode merges it under the inline permissions
 # below, where its ask rules would wait on a prompt nobody answers and leave the run without a shell.
-# The builder loads its own run-events plugin from this inline config. --pure would skip it (it skips every
-# external plugin), so the workspace cold-start plugin instead returns early when WS_RUN_EVENTS is set.
 unset OPENCODE_CONFIG
 # deny-guard reads WS_RUN_DENY, dispatch's deny file. Without it the plugin registers nothing, and a quoted option
 # word would pass OpenCode's own rules, so the run stops here.
 [ -s "${WS_RUN_DENY:-}" ] || die "no deny list (WS_RUN_DENY); a builder runs only under dispatch's deny rules"
-plugin_url="file://$WS/scripts/opencode-plugins/run-events.js"
-guard_url="file://$WS/scripts/opencode-plugins/deny-guard.js"
-OPENCODE_CONFIG_CONTENT="$(jq --arg plugin "$plugin_url" --arg guard "$guard_url" '.plugin = ((.plugin // []) + [$plugin, $guard])' "$config")" \
-  || die "could not add the builder's plugins to $config"
+line=$(opencode_line)
+if [ "$line" = 2 ]; then
+  # 2.x discovers `.opencode/plugins/` from the run's directory, which a project worktree need not have, and a
+  # configured `plugins` entry must be a directory loaded as one module. The workspace names its own package
+  # absolutely, so the deny guard and run-events load in every project. --standalone starts a private server, which
+  # reads OPENCODE_CONFIG_CONTENT afresh instead of the background service's cached first config.
+  plugin_dir="$WS/scripts/opencode-plugins-2x"
+  OPENCODE_CONFIG_CONTENT="$(jq --arg dir "$plugin_dir" '.plugins = ((.plugins // []) + [$dir])' "$config")" \
+    || die "could not add the builder's plugins to $config"
+else
+  # The 1.x builder loads its own run-events and deny-guard from this inline config. --pure would skip them (it
+  # skips every external plugin), so the workspace cold-start plugin instead returns early when WS_RUN_EVENTS is set.
+  plugin_url="file://$WS/scripts/opencode-plugins/run-events.js"
+  guard_url="file://$WS/scripts/opencode-plugins/deny-guard.js"
+  OPENCODE_CONFIG_CONTENT="$(jq --arg plugin "$plugin_url" --arg guard "$guard_url" '.plugin = ((.plugin // []) + [$plugin, $guard])' "$config")" \
+    || die "could not add the builder's plugins to $config"
+fi
 export OPENCODE_CONFIG_CONTENT
 pid=""
 # A timeout or kill of this script stops OpenCode's whole process group, so a wrapper's child goes too. setsid makes
@@ -67,9 +78,16 @@ trap '[ -n "$pid" ] && kill -- "-$pid" 2>/dev/null; exit 143' TERM INT
 over() { python3 -I "$helper" over "$log" "$budget"; }
 # One OpenCode call with the budget watched across the whole log; stdin closed, or `opencode run` waits on it.
 run() {
-  local -a varargs=()
-  [ -n "$variant" ] && varargs=(--variant "$variant")
-  setsid opencode run "${varargs[@]}" --format json --model "$model" --title "$title" "$@" < /dev/null &
+  if [ "$line" = 2 ]; then
+    # 2.x names the variant in the model reference and has no --variant flag.
+    local model_arg="$model"
+    [ -n "$variant" ] && model_arg="$model#$variant"
+    setsid opencode run --standalone --format json --model "$model_arg" --title "$title" "$@" < /dev/null &
+  else
+    local -a varargs=()
+    [ -n "$variant" ] && varargs=(--variant "$variant")
+    setsid opencode run "${varargs[@]}" --format json --model "$model" --title "$title" "$@" < /dev/null &
+  fi
   pid=$!
   python3 -I "$helper" watch "$log" "$budget" "$pid" & watcher=$!
   wait "$pid"; pid=""

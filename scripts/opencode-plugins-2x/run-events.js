@@ -1,4 +1,5 @@
 import { appendFileSync } from "node:fs";
+import { Plugin } from "@opencode/plugin";
 
 const LIMIT = /usage limit|rate limit|too many requests|quota|limit reached|free limit/i;
 
@@ -39,7 +40,7 @@ function toolFields(data = {}) {
   };
 }
 
-export default {
+export default Plugin.define({
   id: "cg.run-events",
   async setup(ctx) {
     const file = ctx.options?.file ?? process.env.WS_RUN_EVENTS;
@@ -126,4 +127,4 @@ export default {
 
     return () => controller.abort();
   },
-};
+});

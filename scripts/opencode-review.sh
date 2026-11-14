@@ -24,6 +24,11 @@ done
 pf="${1:?usage: opencode-review.sh [flags] <prompt-file>}"
 for v in model budget config log title; do [ -n "${!v}" ] || die "--$v is required"; done
 [ -f "$config" ] || die "no OpenCode config $config"
+# A 2.x review changes directory (below) to a tree that cannot load the branch's plugins, so these paths are made
+# absolute first and every reader sees the same files wherever the review runs.
+case "$pf" in /*) ;; *) pf="$PWD/$pf" ;; esac
+case "$config" in /*) ;; *) config="$PWD/$config" ;; esac
+case "$log" in /*) ;; *) log="$PWD/$log" ;; esac
 # The version goes into the result line beside the model: a capability change is then traceable to an upgrade.
 WS_RUN_MODEL="$model"
 WS_RUN_OPENCODE_VERSION=$(opencode --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
@@ -46,19 +51,41 @@ echo "opencode-review: $zdr"
 
 # A review must not inherit the orchestrator's custom config: OpenCode merges it under the inline permissions
 # below, where its ask rules would wait on a prompt nobody answers and leave the run without a shell.
-# --pure stops OpenCode loading `.opencode/plugins` discovered from the checkout, which would inject the
-# orchestrator's cold-start brief into a headless review.
 unset OPENCODE_CONFIG
-OPENCODE_CONFIG_CONTENT="$(cat "$config")"; export OPENCODE_CONFIG_CONTENT
+line=$(opencode_line)
+if [ "$line" = 2 ]; then
+  # V2 always loads the `.opencode/` and `opencode.json` it finds from the start directory upward and has no --pure,
+  # so a review started in the branch's worktree would execute the branch's own plugins and merge its config. Run it
+  # from the workspace instead: only the workspace's plugins load, and the branch is read by absolute path under the
+  # external-directory grant its read-only config carries. The builder package supplies run-events, so the review's
+  # event trail is written; WS_RUN_EVENTS also makes the reply-log plugin return early.
+  plugin_dir="$WS/scripts/opencode-plugins-2x"
+  OPENCODE_CONFIG_CONTENT="$(jq --arg dir "$plugin_dir" '.plugins = ((.plugins // []) + [$dir])' "$config")" \
+    || die "could not add the review's plugins to $config"
+  export OPENCODE_CONFIG_CONTENT
+  WS_RUN_EVENTS="${log}.events.jsonl"; export WS_RUN_EVENTS
+  cd "$WS" || die "cannot enter the workspace $WS"
+else
+  # --pure stops OpenCode loading `.opencode/plugins` discovered from the checkout, which would inject the
+  # orchestrator's cold-start brief into a headless review.
+  OPENCODE_CONFIG_CONTENT="$(cat "$config")"; export OPENCODE_CONFIG_CONTENT
+fi
 pid=""
 # A timeout or kill of this script stops OpenCode's whole process group, so a wrapper's child goes too. setsid makes
 # the background opencode a session leader, so its PID is its group's ID; killing the group is safe and by PID.
 trap '[ -n "$pid" ] && kill -- "-$pid" 2>/dev/null; exit 143' TERM INT
 # One OpenCode call with the budget watched across the whole log; stdin closed, or `opencode run` waits on it.
 run() {
-  local -a varargs=()
-  [ -n "$variant" ] && varargs=(--variant "$variant")
-  setsid opencode run --pure --format json "${varargs[@]}" --model "$model" --title "$title" "$@" < /dev/null &
+  if [ "$line" = 2 ]; then
+    # 2.x names the variant in the model reference, has no --variant and no --pure.
+    local model_arg="$model"
+    [ -n "$variant" ] && model_arg="$model#$variant"
+    setsid opencode run --standalone --format json --model "$model_arg" --title "$title" "$@" < /dev/null &
+  else
+    local -a varargs=()
+    [ -n "$variant" ] && varargs=(--variant "$variant")
+    setsid opencode run --pure --format json "${varargs[@]}" --model "$model" --title "$title" "$@" < /dev/null &
+  fi
   pid=$!
   python3 -I "$helper" watch "$log" "$budget" "$pid" & watcher=$!
   wait "$pid"; pid=""

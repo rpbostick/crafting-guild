@@ -78,7 +78,9 @@ scripts/opencode-builder.sh  the OpenCode launcher: zdr-check.sh on the model's 
                         OPENCODE_CONFIG_CONTENT and stdin closed; drops OPENCODE_CONFIG, so the orchestrator's
                         custom config cannot merge its ask rules in; stops OpenCode by PID once the step costs pass the
                         budget; continues the session once when the reply is not a valid result; appends a Claude-shaped
-                        `result` line (cost, tokens, permission_denials, structured_output) for check-result.sh.
+                        `result` line (cost, tokens, permission_denials, structured_output) for check-result.sh. On 2.x it
+                        names scripts/opencode-plugins-2x in the config's `plugins`, so the workspace deny guard and
+                        run-events load in a project worktree whose checkout has no `.opencode/plugins`.
 scripts/opencode_run.py the launcher's parts: the permission config (bash deny except each Bash grant, the DENY list last,
                         nothing left at "ask"), the budget watch, the stdlib schema check, the result line. Its `config` command
                         takes `--temperature` and `--top-p` for the build agent's sampling; `variants <provider/model>`
@@ -174,6 +176,10 @@ scripts/verify.sh       `ws verify [--project slug] [--since YYYY-MM-DD] [--pass
  scripts/verify-check.sh  its check on throwaway clean and broken projects, one merge per rule; selftest.sh runs it.
 scripts/opencode-review.sh  the OpenCode review launcher: zdr-check.sh first, then `opencode run` under the read-only
                         config, the budget watch, one continue on an invalid review, and the result line review.sh reads.
+                        On 2.x it loads scripts/opencode-plugins-2x and runs from the workspace, because V2 has no
+                        `--pure` and would execute a branch's own `.opencode` plugins and config from its worktree; the
+                        review config grants `external_directory` for that worktree and review.sh gives the files by
+                        absolute path.
                         Both launchers take their prompt arguments from lib.sh's opencode_prompt_args: over 96 KiB the prompt
                         is attached with `--file <prompt-file>` and the message is a short pointer, under Linux's 128 KiB
                         single-argument limit.
@@ -357,12 +363,18 @@ docs/opencode-2-api.md  the 1.x-to-2.x map: one row per mechanism in docs/openco
                         CLI, config-cache and database rows, and every unresolved row with its source.
 docs/opencode-1x.md, docs/opencode-2x.md  the line's shell tool, flags, hooks and server paths.
 lessons/opencode-<line>.md  the short line text appended to a builder's and reviewer's prompt by lessons_for.
-.opencode/plugins/deny-guard-2x.js  the 2.x shell deny guard: registers ctx.tool.hook("execute.before") and rejects the
-                        same commands scripts/opencode-plugins/deny-guard.js rejects. The 1.x file stays unchanged.
-.opencode/plugins/run-events-2x.js  the 2.x event record: ctx.event.subscribe() maps permission.asked/replied,
+scripts/opencode-plugins-2x/deny-guard.js  the 2.x shell deny guard: Plugin.define registers ctx.tool.hook("execute.before") and
+                        rejects the same commands scripts/opencode-plugins/deny-guard.js rejects. The 1.x file stays
+                        unchanged. A real 2.2.7 shell call is refused in scripts/opencode-2x-check.mjs --live-guard.
+scripts/opencode-plugins-2x/run-events.js  the 2.x event record: ctx.event.subscribe() maps permission.asked/replied,
                         session.retry.scheduled, session.execution.failed and the tool/compaction events onto the
                         records scripts/opencode_run.py and scripts/check-result.sh read.
-scripts/opencode-2x-check.mjs  the scripted check for both 2.x plugins; selftest.sh runs it.
+scripts/opencode-plugins-2x/index.js  the package a 2.x builder's and review's config names in `plugins`: V2 loads a
+                        configured directory as one module, so its setup registers the deny guard and run-events.
+.opencode/plugins/reply-log-2x.js  the 2.x reply log: saves session.text.ended to runs/<slug>/replies.md. The event is
+                        read-only, so it cannot add the 1.x banner; reply-time has no 2.x port for the same reason.
+scripts/opencode-2x-check.mjs  the scripted check for the 2.x plugins; selftest.sh runs the fake-context cases and
+                        --live-guard/--live-reply run the same files against a real 2.2.7 CLI.
 ```
 
 ## The OpenCode line
@@ -376,7 +388,8 @@ mechanism states its line, or stays version-neutral:
   Those files are short; the detail stays in `docs/opencode-1x.md` and `docs/opencode-2x.md`.
 - A branch that touches a plugin, the shell tool, the server paths or the launcher flags says which line it targets and
   keeps the other line working or explicitly out of scope. The 1.x files under `scripts/opencode-plugins/` are not
-  rewritten for 2.x; the 2.x prototypes live under `.opencode/plugins/` with a `-2x` name.
+  rewritten for 2.x; the builder plugins live in the package `scripts/opencode-plugins-2x/`, whose `index.js` composes
+  the deny guard and run-events, and the reply log stays at `.opencode/plugins/reply-log-2x.js`.
 - `docs/opencode-2-api.md` is the map: update its row when a line-specific mechanism moves, and move a row out of
   "Unresolved rows" only with a probe log or a page that settles it.
 

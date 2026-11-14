@@ -2,6 +2,12 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.9.0
+
+- OpenCode 2.x is a supported line beside 1.x: `WS_OPENCODE_LINE` detects the installed version and loads that line's instructions, builder/reviewer text, flags and config shapes. `docs/opencode-2-api.md` maps every 1.x mechanism to the 2.x surface with its source; `docs/version-upgrade.md` is the procedure for the next release.
+- The 2.x plugins (deny-guard, run-events, reply-log) load from a pinned workspace package; the review runs where it cannot load the reviewed branch's plugins; the builder and review configs use the 2.x permissions array; the doctor and `opencode_run.py` probes use the 2.x `/api` endpoints; the wake forwards the password each line reads.
+- The bench compares the two lines on the same eight tasks; the 2.x line is the default after the switch, with the 1.x data backed up and the old binary kept for rollback.
+
 ## 2.8.4
 
 - `ws evidence-claims <name>` lists the done-when items a finished run reports as met on observed evidence whose evidence path is missing from the worktree, or whose failing-before log has no failure marker, as candidates for the reviewer; a run with no usable result says why instead of printing none. `review.sh` puts the same block in the reviewer prompt when there is something to report.

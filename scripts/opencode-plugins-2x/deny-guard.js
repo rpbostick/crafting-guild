@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { Plugin } from "@opencode/plugin";
 
 // OpenCode 2.x keeps matching a shell permission rule against the command text with its quotes kept, so
 // `python3 "-c" 1` passes the rule `python3 -c*` while the shell runs `python3 -c 1`. This plugin registers the
@@ -39,7 +40,7 @@ function denyRules(file) {
     .map(ruleRegex);
 }
 
-export default {
+export default Plugin.define({
   id: "cg.deny-guard",
   async setup(ctx) {
     const file = ctx.options?.denyFile ?? process.env.WS_RUN_DENY;
@@ -57,4 +58,4 @@ export default {
       }
     });
   },
-};
+});

@@ -52,16 +52,21 @@ case "$agent" in
   *) die "unknown agent '$agent' (claude or opencode)" ;;
 esac
 # OpenCode takes effort as a model variant. An unknown one fails here, with the model's list, rather than after
-# OpenCode has started without the reasoning the caller asked for.
+# OpenCode has started without the reasoning the caller asked for. 2.x has no verbose model listing and no
+# --variant: the name is passed in the model reference as provider/model#variant, so it is checked by the provider.
 variant=""
 if [ "$agent" = opencode ] && [ -n "$effort" ]; then
-  if ! valid_variants=$(python3 -I "$WS/scripts/opencode_run.py" variants "$model" 2>&1); then
-    die "cannot read the variants of $model for --effort '$effort': $valid_variants"
+  if [ "$(opencode_line)" = 2 ]; then
+    variant="$effort"
+  else
+    if ! valid_variants=$(python3 -I "$WS/scripts/opencode_run.py" variants "$model" 2>&1); then
+      die "cannot read the variants of $model for --effort '$effort': $valid_variants"
+    fi
+    [ -n "$valid_variants" ] || die "$model has no variants, so --effort '$effort' cannot be set"
+    grep -qxF -- "$effort" <<< "$valid_variants" \
+      || die "--effort '$effort' is not a variant of $model; valid: $(paste -sd ',' <<< "$valid_variants" | sed 's/,/, /g')"
+    variant="$effort"
   fi
-  [ -n "$valid_variants" ] || die "$model has no variants, so --effort '$effort' cannot be set"
-  grep -qxF -- "$effort" <<< "$valid_variants" \
-    || die "--effort '$effort' is not a variant of $model; valid: $(paste -sd ',' <<< "$valid_variants" | sed 's/,/, /g')"
-  variant="$effort"
 fi
 [ -z "$temperature" ] || sampling_temperature --temperature "$temperature"
 [ -z "$top_p" ] || sampling_top_p --top-p "$top_p"
@@ -593,7 +598,7 @@ if [ "$agent" = opencode ]; then
   sampling=()
   [ -n "$temperature" ] && sampling+=(--temperature "$temperature")
   [ -n "$top_p" ] && sampling+=(--top-p "$top_p")
-  WS_SANDBOX="$WS_SANDBOX" python3 -I "$WS/scripts/opencode_run.py" config ${sampling[@]+"${sampling[@]}"} "${TOOLS[@]}" "${dargs[@]}" > "$oc_config" || die "could not build the OpenCode config"
+  WS_SANDBOX="$WS_SANDBOX" python3 -I "$WS/scripts/opencode_run.py" config --line "$(opencode_line)" ${sampling[@]+"${sampling[@]}"} "${TOOLS[@]}" "${dargs[@]}" > "$oc_config" || die "could not build the OpenCode config"
   variant_args=()
   [ -n "$variant" ] && variant_args=(--variant "$variant")
   printf '%s\n' "$prompt" > "$oc_prompt"

@@ -75,11 +75,29 @@ fi
 echo "ask-run: $zdr"
 
 # The read-only config must not be merged under the orchestrator's custom config, whose ask rules would wait on a
-# prompt nobody answers. --pure stops OpenCode loading the project's plugins into a headless research run.
+# prompt nobody answers.
 unset OPENCODE_CONFIG
-OPENCODE_CONFIG_CONTENT="$(cat "$config")"
-export OPENCODE_CONFIG_CONTENT
-cd "$dir" || die "ask-run: cannot enter $dir"
+line=$(opencode_line)
+if [ "$line" = 2 ]; then
+  # 2.x discovers `.opencode/plugins/` and `opencode.json` from the run's directory, so a run inside the asked
+  # directory would load that project's plugins and config, and 2.x has no --pure. Run from the workspace instead:
+  # the pinned plugin package supplies run-events, and the asked directory is read through the read-only config's
+  # external-directory grant. WS_RUN_EVENTS also keeps the workspace's reply-log plugin from recording the answer.
+  plugin_dir="$WS/scripts/opencode-plugins-2x"
+  OPENCODE_CONFIG_CONTENT="$(jq --arg dir "$plugin_dir" '.plugins = ((.plugins // []) + [$dir])' "$config")" \
+    || die "ask-run: could not add the ask's plugins to $config"
+  export OPENCODE_CONFIG_CONTENT
+  WS_RUN_EVENTS="${log%.jsonl}.events.jsonl"; [ "$WS_RUN_EVENTS" = "$log" ] && WS_RUN_EVENTS="$log.events.jsonl"
+  export WS_RUN_EVENTS
+  cd "$WS" || die "ask-run: cannot enter the workspace $WS"
+  run_args=(run --standalone --format json --model "$model")
+else
+  OPENCODE_CONFIG_CONTENT="$(cat "$config")"
+  export OPENCODE_CONFIG_CONTENT
+  cd "$dir" || die "ask-run: cannot enter $dir"
+  # --pure skips every external plugin, so the asked project's plugins stay out of a headless research run.
+  run_args=(run --pure --format json --model "$model")
+fi
 WS_RUN_MODEL="$model"
 WS_RUN_OPENCODE_VERSION=$(opencode --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 export WS_RUN_MODEL WS_RUN_OPENCODE_VERSION="${WS_RUN_OPENCODE_VERSION:-unknown}"
@@ -89,7 +107,6 @@ pid=""
 trap '[ -n "$pid" ] && kill -- "-$pid" 2>/dev/null; exit 143' TERM INT
 : > "$log"
 opencode_prompt_args "$prompt"
-run_args=(run --pure --format json --model "$model")
 [ -z "$session" ] || run_args+=(--session "$session")
 run_args+=(--title "ws:$SLUG:ask:$name")
 # One OpenCode call with the budget watched across the whole log; stdin closed, or `opencode run` waits on it.

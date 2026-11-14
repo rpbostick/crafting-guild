@@ -10,7 +10,10 @@ ws [--project <slug>] <command> ...   every command below takes the selected pro
 ws <slug>                       open a Claude orchestrator session for a registered project
 ws oc <slug> [args]             open an OpenCode orchestrator session, pinned to the project, listening on the
                                 first free port from WS_OC_PORT (recorded in runs/<slug>/oc.port; a --port given is
-                                kept); --print shows the command; the alias is ws opencode
+                                kept); 2.x sets that port on the one shared background service and restarts it with
+                                the line's instruction set, so a second 2.x session reconfigured for its project
+                                stops serving the first one's port and wake; --print shows the command; the alias is
+                                ws opencode
 ws init <path> [--tests CMD] [--branch B] [--yes] [--dry-run] [--force]   register a project (and retire v1
                                 hooks if found); --dry-run shows the conf first, --force replaces an existing one after a backup
 ws list                         registered projects
@@ -91,8 +94,9 @@ ws wake <session|current> "<message>" [--at <time>|--when-chain-stops|--every <O
                                 send one message into an idle OpenCode session from a systemd timer: now, at a time,
                                 when the chain stops, or on a calendar spec repeating until a date (persistent unit
                                 files under WS_WAKE_UNIT_DIR); current is the id in runs/<slug>/session.id; the
-                                server is --url, else WS_WAKE_URL, else the port ws oc recorded, else 4096; a server password comes from OPENCODE_SERVER_PASSWORD
-                                in the environment
+                                server is --url, else WS_WAKE_URL, else the port ws oc recorded, else 4096; the server
+                                password is OPENCODE_SERVER_PASSWORD on 1.x and OPENCODE_PASSWORD (or
+                                OPENCODE_SERVER_PASSWORD) on 2.x, from the environment
 ws wake list | ws wake cancel <id> | ws wake failed [--clear]   pending wakes; a recurring one shows its spec,
                                 next run and end date; cancel disables its timer and deletes both unit files;
                                 undelivered ones stay in runs/<slug>/wake.failed, and cold start names them until cleared
@@ -312,6 +316,81 @@ case "$cmd" in
       [ "$prev" != --port ] || { port="$a"; listen_given=true; }
       prev="$a"
     done
+    line=$(opencode_line)
+    # The 2.x TUI has no --port/--hostname: it connects to the background service, whose port is set first. The
+    # service also caches the first config it reads, so ws oc restarts it with the per-line config before the TUI.
+    if [ "$line" = 2 ]; then
+      tui=(); previ=""
+      for a in ${args[@]+"${args[@]}"}; do
+        case "$a" in
+          --port=*) port="${a#--port=}"; listen_given=true ;;
+          --port) listen_given=true ;;
+          --hostname|--hostname=*) listen_given=true ;;
+          *) [ "$previ" = --port ] || [ "$previ" = --hostname ] || tui+=("$a") ;;
+        esac
+        previ="$a"
+      done
+      if ! $listen_given; then
+        case "$WS_OC_PORT" in ''|*[!0-9]*) die "WS_OC_PORT must be a port number, not '$WS_OC_PORT' (config.sh or config.local.sh)" ;; esac
+        port="$WS_OC_PORT"
+        while (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; do
+          port=$((port + 1))
+          [ "$port" -lt $((WS_OC_PORT + 100)) ] || die "no free port in $WS_OC_PORT..$port for the OpenCode server (WS_OC_PORT)"
+        done
+      fi
+      oc_cfg="$WS/runs/$slug/oc.config.json"
+      mkdir -p "$WS/runs/$slug"
+      # The session's instruction set: the project's list as absolute paths plus the line's mechanics, so the
+      # session gets 2.x wording even though AGENTS.md and opencode.json stay version-neutral. The orchestrator's
+      # 1.x `permission`/`mcp` shapes are translated to the 2.x `permissions` array and `mcp.servers`, because a
+      # 2.x process does not read the 1.x keys. The inline copy is exported too: an inline config is applied after
+      # the project config, so the project's own `instructions` cannot drop the lesson.
+      jq -n --slurpfile org "$cfg" --slurpfile proj "$WS/opencode.json" --arg ws "$WS" \
+        --arg line "$WS/lessons/opencode-2.md" \
+        '($proj[0].instructions // []) as $base
+         | $org[0]
+         | .instructions = (($base | map(if startswith("/") then . else ($ws + "/" + .) end)) + [$line] | unique)
+         | (if (.permission | type) == "object" then
+              .permissions = (
+                [{"action": "*", "resource": "*", "effect": "allow"}]
+                + (if (.permission.task // "") != "" then [{"action": "subagent", "resource": "*", "effect": .permission.task}] else [] end)
+                + (if (.permission.external_directory | type) == "object"
+                   then (.permission.external_directory | to_entries | map({"action": "external_directory", "resource": .key, "effect": .value}))
+                   else [] end)
+                + (if (.permission.bash | type) == "object"
+                   then (.permission.bash | to_entries | map({"action": "shell", "resource": .key, "effect": .value}))
+                   else [] end)
+                + (if (.permission.edit | type) == "object"
+                   then ([{"action": "edit", "resource": "*", "effect": "allow"}]
+                         + (.permission.edit | to_entries | map({"action": "edit", "resource": .key, "effect": .value})))
+                   else [] end))
+            else . end)
+         | (if (.mcp | type) == "object"
+            then .mcp = {servers: (.mcp | with_entries(.value = (.value | if has("enabled") then .disabled = (.enabled | not) | del(.enabled) else . end)))}
+            else del(.mcp) end)
+         | del(.permission)' \
+        > "$oc_cfg.tmp" || die "could not build the 2.x session config"
+      mv "$oc_cfg.tmp" "$oc_cfg"
+      if $print; then
+        printf 'cd %s\n' "$WS"
+        printf 'WS_PROJECT=%s OPENCODE_CONFIG=%s opencode service set port %s\n' "$slug" "$oc_cfg" "$port"
+        printf 'WS_PROJECT=%s OPENCODE_CONFIG=%s opencode service restart\n' "$slug" "$oc_cfg"
+        printf 'WS_PROJECT=%s OPENCODE_CONFIG=%s opencode' "$slug" "$oc_cfg"
+        printf ' %s' "${tui[@]+"${tui[@]}"}"; echo; exit 0
+      fi
+      command -v opencode >/dev/null || die "opencode not found; install it, or start Claude with: ws <slug>"
+      echo "$port" > "$WS/runs/$slug/oc.port"
+      export WS_PROJECT="$slug" OPENCODE_CONFIG="$oc_cfg"
+      # An inline config is applied after the project config, so the project's `instructions` key cannot drop the
+      # 2.x lesson this session needs. The service reads it on the restart below, not from its first-start cache.
+      OPENCODE_CONFIG_CONTENT="$(cat "$oc_cfg")"
+      export OPENCODE_CONFIG_CONTENT
+      cd "$WS" || die "no workspace at $WS"
+      # The service reads its config at start; a restart after setting the port is the per-run config path.
+      opencode service set port "$port" >/dev/null || die "opencode service set port $port failed"
+      opencode service restart >/dev/null || die "opencode service restart failed"
+      exec opencode "${tui[@]+"${tui[@]}"}"
+    fi
     # The TUI opens a server only when given --port; ws wake and ws bg --wake current send to the port recorded here.
     if ! $listen_given; then
       case "$WS_OC_PORT" in ''|*[!0-9]*) die "WS_OC_PORT must be a port number, not '$WS_OC_PORT' (config.sh or config.local.sh)" ;; esac

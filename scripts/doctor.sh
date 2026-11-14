@@ -255,13 +255,22 @@ if $parity; then
   else warn "claude: the structured-output probe failed" "run ws claude --schema <file> with a trivial prompt and read the error"; fi
   if command -v opencode >/dev/null; then
     # The server enforces a schema through its StructuredOutput tool; `opencode run` cannot. Its API is reachable
-    # only with the basic-auth password, so a fresh random one is made per run and never written down.
-    OPENCODE_SERVER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_hex(16))')
-    export OPENCODE_SERVER_PASSWORD
+    # only with the basic-auth password, so a fresh random one is made per run and never written down. 2.x reads
+    # OPENCODE_PASSWORD for the fixed `opencode` user and still accepts OPENCODE_SERVER_PASSWORD, so both are set.
+    ocline=$(opencode_line)
+    OPENCODE_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_hex(16))')
+    OPENCODE_SERVER_PASSWORD="$OPENCODE_PASSWORD"
+    export OPENCODE_PASSWORD OPENCODE_SERVER_PASSWORD
     oclog="$ptmp/opencode-serve.log"
     # The orchestrator's browser entry, inline, so the probe does not depend on how doctor itself was launched.
+    # 2.x moves the entry under mcp.servers and turns `enabled` into `disabled`.
+    if [ "$ocline" = 2 ]; then
+      ocprobe_cfg=$(browser_mcp_json "$ocprobe_marker" | jq '{mcp: {servers: (with_entries(.value |= (.disabled = (.enabled | not) | del(.enabled))))}}')
+    else
+      ocprobe_cfg=$(browser_mcp_json "$ocprobe_marker" | jq '{mcp: .}')
+    fi
     # setsid makes the server a process group, so stopping the probe reaches the npx and browser it starts.
-    OPENCODE_CONFIG_CONTENT=$(jq -nc --argjson mcp "$(browser_mcp_json "$ocprobe_marker")" '{mcp: $mcp}') \
+    OPENCODE_CONFIG_CONTENT="$ocprobe_cfg" \
       setsid opencode serve --hostname 127.0.0.1 --port 0 >"$oclog" 2>&1 &
     ocsrv=$!
     ocport=""
@@ -273,7 +282,7 @@ if $parity; then
     if [ -z "$ocport" ]; then
       warn "opencode: the schema probe could not start a server" "run opencode serve --hostname 127.0.0.1 --port 0 and read its output"
     else
-      ocout=$(timeout 180 python3 "$WS/scripts/opencode_run.py" schema-probe --url "http://127.0.0.1:$ocport" \
+      ocout=$(timeout 180 python3 "$WS/scripts/opencode_run.py" schema-probe --line "$ocline" --url "http://127.0.0.1:$ocport" \
         --password "$OPENCODE_SERVER_PASSWORD" --model "${WS_OPENCODE_MODEL:-opencode-go/deepseek-v4.1-flash}" \
         --schema "$ptmp/schema.json" --prompt "$probe" 2>&1) || true
       case "$ocout" in
@@ -282,16 +291,28 @@ if $parity; then
         unsupported:*) warn "opencode: structured output is not supported ($ocout)" "update OpenCode, or keep check-result checking the branch" ;;
         *) warn "opencode: the schema probe returned no verdict ($ocout)" "start opencode serve and run scripts/opencode_run.py schema-probe by hand" ;;
       esac
-      # These lines only report: builders' web work stays on the orchestrator's relay whatever they print.
+      # These lines only report: builders' web work stays on the orchestrator's relay whatever they print. On 2.x the
+      # server searches through a third-party provider, so the search line says relay-only until one is configured.
       for webkind in fetch search; do
-        ocout=$(timeout 150 python3 "$WS/scripts/opencode_run.py" web-probe --url "http://127.0.0.1:$ocport" \
+        ocout=$(timeout 150 python3 "$WS/scripts/opencode_run.py" web-probe --line "$ocline" --url "http://127.0.0.1:$ocport" \
           --password "$OPENCODE_SERVER_PASSWORD" --model "${WS_OPENCODE_MODEL:-opencode-go/deepseek-v4.1-flash}" \
           --kind "$webkind" 2>&1) || true
-        case "$ocout" in
-          worked:*) ok "opencode web $webkind: $ocout" ;;
-          "not available:"*|failed:*) warn "opencode web $webkind: $ocout" "builders keep the web relay (ws web)" ;;
-          *) warn "opencode web $webkind: no verdict ($ocout)" "start opencode serve and run scripts/opencode_run.py web-probe by hand" ;;
-        esac
+        if [ "$webkind" = search ] && [ "$ocline" = 2 ]; then
+          case "$ocout" in
+            worked:*) ok "opencode web search: $ocout" ;;
+            "relay only:"*) warn "opencode web search: $ocout" \
+              "builders send searches through ws web; to give OpenCode its own search, set websearch.provider and that provider's API key in opencode.json (https://opencode.ai/docs/websearch/)" ;;
+            "not available:"*|failed:*) warn "opencode web search: $ocout" \
+              "a search provider is configured and the call still failed: check its API key, or send builders' searches through ws web" ;;
+            *) warn "opencode web search: no verdict ($ocout)" "start opencode serve and run scripts/opencode_run.py web-probe by hand" ;;
+          esac
+        else
+          case "$ocout" in
+            worked:*) ok "opencode web $webkind: $ocout" ;;
+            "not available:"*|failed:*) warn "opencode web $webkind: $ocout" "builders keep the web relay (ws web)" ;;
+            *) warn "opencode web $webkind: no verdict ($ocout)" "start opencode serve and run scripts/opencode_run.py web-probe by hand" ;;
+          esac
+        fi
       done
       # A local stand-in page holding a one-run word: only a real read of the page can return it.
       mkdir -p "$ptmp/page"; pagemark="parity-page-$$-$RANDOM"
@@ -306,7 +327,7 @@ if $parity; then
       done
       if [ -z "$pageport" ]; then ocout="failed: the local page did not start: $(head -c 200 "$ptmp/page.log")"
       else
-        ocout=$(timeout 240 python3 "$WS/scripts/opencode_run.py" browser-probe --url "http://127.0.0.1:$ocport" \
+        ocout=$(timeout 240 python3 "$WS/scripts/opencode_run.py" browser-probe --line "$ocline" --url "http://127.0.0.1:$ocport" \
           --password "$OPENCODE_SERVER_PASSWORD" --model "${WS_OPENCODE_MODEL:-opencode-go/deepseek-v4.1-flash}" \
           --page "http://127.0.0.1:$pageport/" --marker "$pagemark" 2>&1) || true
       fi
@@ -321,18 +342,18 @@ if $parity; then
       mkdir -p "$ptmp/project/.opencode/skills/$skillname"
       printf -- '---\nname: %s\ndescription: Throwaway skill from ws doctor --parity.\n---\n%s\n' "$skillname" "$skillmark" \
         > "$ptmp/project/.opencode/skills/$skillname/SKILL.md"
-      ocout=$(timeout 90 python3 "$WS/scripts/opencode_run.py" skill-probe --url "http://127.0.0.1:$ocport" \
+      ocout=$(timeout 90 python3 "$WS/scripts/opencode_run.py" skill-probe --line "$ocline" --url "http://127.0.0.1:$ocport" \
         --password "$OPENCODE_SERVER_PASSWORD" --directory "$ptmp/project" --name "$skillname" --marker "$skillmark" \
         --user-skills "$HOME/.claude/skills" 2>&1) || true
       case "$ocout" in
         loaded:*) ok "opencode skills: $ocout" ;;
         "not loaded:"*) warn "opencode skills: $ocout" "a user skill will not reach an OpenCode session; check its SKILL.md frontmatter against opencode.ai/docs/skills" ;;
-        "not available:"*) warn "opencode skills: $ocout" "update OpenCode, whose server has listed skills at GET /skill since at least 1.19.1" ;;
+        "not available:"*) warn "opencode skills: $ocout" "update OpenCode, whose server lists skills at GET /api/skill on 2.x and GET /skill on 1.x" ;;
         failed:*) warn "opencode skills: $ocout" "start opencode serve and run scripts/opencode_run.py skill-probe by hand" ;;
         *) warn "opencode skills: no verdict ($ocout)" "start opencode serve and run scripts/opencode_run.py skill-probe by hand" ;;
       esac
       # The one paid skill probe: a model must call the skill tool for the throwaway and reply with its marker.
-      ocout=$(timeout 150 python3 "$WS/scripts/opencode_run.py" skill-call --url "http://127.0.0.1:$ocport" \
+      ocout=$(timeout 150 python3 "$WS/scripts/opencode_run.py" skill-call --line "$ocline" --url "http://127.0.0.1:$ocport" \
         --password "$OPENCODE_SERVER_PASSWORD" --model "${WS_OPENCODE_MODEL:-opencode-go/deepseek-v4.1-flash}" \
         --directory "$ptmp/project" --name "$skillname" --marker "$skillmark" 2>&1) || true
       case "$ocout" in

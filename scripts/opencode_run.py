@@ -4,7 +4,9 @@
 config   [--temperature T] [--top-p P] <tool>... [--deny <tool>]...
                                        the OpenCode config a builder runs under, from dispatch's Claude-style grants;
                                        T and P set the sampling of OpenCode's build agent (the one `opencode run` uses)
-config   --read-only                   the OpenCode config a review runs under: reads allowed, everything else denied
+config   --read-only [--directory <path>]
+                                       the OpenCode config a review runs under: reads allowed, everything else denied;
+                                       <path> is a worktree the review reads as an external directory
 variants <provider/model>              the model's variant names from `opencode models <provider> --verbose`, one
                                        per line; exit 1 when the model is absent, 2 when the listing cannot be read
 watch    <log> <budget> <pid>          stop <pid> once the step costs in <log> pass <budget> dollars
@@ -21,7 +23,7 @@ schema-probe --url <url> --password <pw> --model <provider/model> --schema <file
                                        `enforced <json>`, `failed: <error> ...` or `unsupported: ...`
 web-probe --url <url> --password <pw> --model <provider/model> --kind fetch|search
                                        ask a running `opencode serve` for one web fetch or search and report:
-                                       `worked: ...`, `not available: ...` or `failed: <error> ...`
+                                       `worked: ...`, `relay only: ...`, `not available: ...` or `failed: <error> ...`
 browser-probe --url <url> --password <pw> --model <provider/model> --page <url> --marker <text>
                                        ask a running `opencode serve` to load a local page through the browser MCP:
                                        `worked: ...`, `not available: ...` or `failed: <error> ...`
@@ -67,6 +69,15 @@ READONLY_FIXED = {"read": "allow", "grep": "allow", "glob": "allow", "list": "al
 READONLY_BASH = ("git diff", "git diff *", "git log", "git log *", "git show", "git show *",
                  "git status", "git status *", "cat *", "ls *")
 READONLY_BASH_DENY = ("*--output*", "*>*", "git difftool*")
+# 2.x names the shell action `shell`, edits `edit` and the task tool `subagent`; `bash`, `write` and `patch` are not
+# V2 action names. A rule is {action, resource, effect} and the last matching rule wins, so these lists are ordered.
+FIXED2 = {"read": "allow", "glob": "allow", "grep": "allow", "list": "allow", "lsp": "allow",
+          "todoread": "allow", "todowrite": "allow", "subagent": "deny", "skill": "deny", "question": "deny",
+          "doom_loop": "deny", "external_directory": "deny", "codesearch": "deny"}
+READONLY_FIXED2 = {"read": "allow", "grep": "allow", "glob": "allow", "list": "allow",
+                   "edit": "deny", "webfetch": "deny", "websearch": "deny",
+                   "lsp": "deny", "todoread": "deny", "todowrite": "deny", "subagent": "deny", "skill": "deny",
+                   "question": "deny", "doom_loop": "deny", "external_directory": "deny", "codesearch": "deny"}
 KNOWN = {"type", "enum", "properties", "required", "items", "description", "additionalProperties", "anyOf"}
 DENIAL = re.compile(r"permission|prevents you from using|rejected", re.I)
 # The wrapper beside this file; the generated config names it as OpenCode's shell when WS_SANDBOX is bwrap.
@@ -90,8 +101,34 @@ def sampling_value(flag, value, low, high, low_open=False):
     return number
 
 
-def build_config(tools, deny, temperature=None, top_p=None):
-    """Bash is deny unless a grant allows it; the deny list comes last because OpenCode applies the last matching rule."""
+def permission_rules(fixed, shell, edit, webfetch, websearch, external=None):
+    """The 2.x ordered permissions array: {action, resource, effect}, the last matching rule wins.
+
+    The catch-all deny comes first, then the fixed per-tool rules, then the shell allow/deny patterns in the order the
+    1.x config used, then the edit and web rules. An `external` map appends after the fixed external_directory deny.
+    """
+    rules = [{"action": "*", "resource": "*", "effect": "deny"}]
+    for action, effect in fixed.items():
+        if action not in ("edit", "webfetch", "websearch"):
+            rules.append({"action": action, "resource": "*", "effect": effect})
+    rules.append({"action": "shell", "resource": "*", "effect": "deny"})
+    for pattern, effect in shell.items():
+        if pattern != "*":
+            rules.append({"action": "shell", "resource": pattern, "effect": effect})
+    rules.append({"action": "edit", "resource": "*", "effect": edit})
+    rules.append({"action": "webfetch", "resource": "*", "effect": webfetch})
+    rules.append({"action": "websearch", "resource": "*", "effect": websearch})
+    for resource, effect in (external or {}).items():
+        rules.append({"action": "external_directory", "resource": resource, "effect": effect})
+    return rules
+
+
+def build_config(tools, deny, temperature=None, top_p=None, line=1):
+    """Bash is deny unless a grant allows it; the deny list comes last because OpenCode applies the last matching rule.
+
+    `line` picks the config shape: the 1.x `permission` object, or the 2.x `permissions` array of
+    {action, resource, effect} rules whose action names are shell/edit/subagent.
+    """
     bash = {"*": "deny"}
     for tool in tools:
         pattern = bash_pattern(tool)
@@ -103,16 +140,20 @@ def build_config(tools, deny, temperature=None, top_p=None):
             sys.exit(f"opencode_run: deny entry {denied!r} is not Bash(<pattern>)")
         bash.pop(pattern, None)
         bash[pattern] = "deny"
-    perm = {"*": "deny", **FIXED, "bash": bash,
-            # Edits stay in the worktree: OpenCode's project directory is the worktree and external_directory is deny.
-            "edit": "allow" if any(tool.startswith("Edit(") for tool in tools) else "deny",
-            "webfetch": "allow" if "WebFetch" in tools else "deny",
-            "websearch": "allow" if "WebSearch" in tools else "deny"}
-    cfg = {"$schema": "https://opencode.ai/config.json", "share": "disabled", "autoupdate": False, "permission": perm}
-    bad = [key for key, value in perm.items() if value not in ("allow", "deny") and not isinstance(value, dict)]
-    bad += [f"bash {key}" for key, value in bash.items() if value not in ("allow", "deny")]
-    if bad:
-        sys.exit(f"opencode_run: permissions not allow or deny: {bad}")
+    # Edits stay in the worktree: OpenCode's project directory is the worktree and external_directory is deny.
+    edit = "allow" if any(tool.startswith("Edit(") for tool in tools) else "deny"
+    webfetch = "allow" if "WebFetch" in tools else "deny"
+    websearch = "allow" if "WebSearch" in tools else "deny"
+    if line == 2:
+        cfg = {"$schema": "https://opencode.ai/config.json", "share": "disabled", "autoupdate": False,
+               "permissions": permission_rules(FIXED2, bash, edit, webfetch, websearch)}
+    else:
+        perm = {"*": "deny", **FIXED, "bash": bash, "edit": edit, "webfetch": webfetch, "websearch": websearch}
+        bad = [key for key, value in perm.items() if value not in ("allow", "deny") and not isinstance(value, dict)]
+        bad += [f"bash {key}" for key, value in bash.items() if value not in ("allow", "deny")]
+        if bad:
+            sys.exit(f"opencode_run: permissions not allow or deny: {bad}")
+        cfg = {"$schema": "https://opencode.ai/config.json", "share": "disabled", "autoupdate": False, "permission": perm}
     # Only a builder's shell is wrapped: a review's read-only grants run on the host and dispatch does not set
     # the evidence runner's grant file there. With WS_SANDBOX empty the config keeps exactly the keys above.
     if os.environ.get("WS_SANDBOX") == "bwrap":
@@ -129,14 +170,24 @@ def build_config(tools, deny, temperature=None, top_p=None):
     return cfg
 
 
-def build_readonly_config():
-    """A review's config: reads only, no edit, no write, no network tool and no shell command that writes."""
+def build_readonly_config(directory=None, line=1):
+    """A review's config: reads only, no edit, no write, no network tool and no shell command that writes.
+
+    A 2.x review runs outside the branch's worktree, so `directory` names the worktree it may read as an external
+    directory; without it every path outside the run's own project stays denied.
+    """
     bash = {"*": "deny"}
     for pattern in READONLY_BASH:
         bash[pattern] = "allow"
     for pattern in READONLY_BASH_DENY:
         bash[pattern] = "deny"
+    if line == 2:
+        external = {f"{directory.rstrip('/')}/**": "allow"} if directory else None
+        return {"$schema": "https://opencode.ai/config.json", "share": "disabled", "autoupdate": False,
+                "permissions": permission_rules(READONLY_FIXED2, bash, "deny", "deny", "deny", external)}
     perm = {"*": "deny", **READONLY_FIXED, "bash": bash}
+    if directory:
+        perm["external_directory"] = {"*": "deny", f"{directory.rstrip('/')}/**": "allow"}
     bad = [key for key, value in perm.items() if value not in ("allow", "deny") and not isinstance(value, dict)]
     bad += [f"bash {key}" for key, value in bash.items() if value not in ("allow", "deny")]
     if bad:
@@ -606,6 +657,44 @@ def probe_request(base, password, method, path, body=None, timeout=180, director
             return exc.code, raw
 
 
+def api(line, path):
+    """The server path for the line: 2.x serves the API under /api, 1.x at the root."""
+    return path if line == 1 else "/api" + path
+
+
+def unwrap(payload):
+    """2.x replies carry their body under `data`; 1.x replies are the body itself."""
+    if isinstance(payload, dict) and "data" in payload:
+        return payload["data"]
+    return payload
+
+
+def line_of(opts):
+    return int(opts.get("--line", "1"))
+
+
+def prompt_body(line, provider, model_id, text, extra=None):
+    """One prompt: 1.x sends parts and a model, 2.x sends text on the session's own model."""
+    if line == 1:
+        body = {"model": {"providerID": provider, "modelID": model_id},
+                "parts": [{"type": "text", "text": text}]}
+    else:
+        body = {"text": text}
+    if extra:
+        body.update(extra)
+    return body
+
+
+def wait_idle(base, password, sid, line, timeout):
+    """2.x prompts run in the background; block until the session is idle so the messages are complete."""
+    if line != 2:
+        return
+    try:
+        probe_request(base, password, "POST", f"/api/experimental/session/{sid}/wait", timeout=timeout)
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        pass
+
+
 def error_text(error):
     """One line for an AssistantMessage.error, keeping the provider's own words (the reason the reply failed)."""
     if not isinstance(error, dict):
@@ -620,14 +709,16 @@ def error_text(error):
 
 def parse_probe_args(args, command="schema-probe", required=("--url", "--password", "--model", "--schema", "--prompt"),
                      optional=("--retry",)):
-    values = {"--retry": "2"}
-    allowed = set(required) | set(optional)
+    values = {"--retry": "2", "--line": "1"}
+    allowed = set(required) | set(optional) | {"--line"}
     i = 0
     while i < len(args):
         if args[i] not in allowed or i + 1 >= len(args):
             sys.exit(f"opencode_run: {command} takes {sorted(allowed)} with a value, not {args[i]!r}")
         values[args[i]] = args[i + 1]
         i += 2
+    if values["--line"] not in ("1", "2"):
+        sys.exit(f"opencode_run: {command} --line takes 1 or 2, not {values['--line']!r}")
     for key in required:
         if not values.get(key):
             sys.exit(f"opencode_run: {command} needs {key}")
@@ -641,23 +732,55 @@ def schema_probe(argv):
     refuses a forced tool choice fails here even though a plain `opencode run` reply could still be valid JSON.
     """
     opts = parse_probe_args(argv)
+    line = line_of(opts)
     provider, sep, model_id = opts["--model"].partition("/")
     if not sep or not provider or not model_id:
         return f"failed: model {opts['--model']!r} is not provider/model"
     with open(opts["--schema"], encoding="utf-8") as fh:
         schema = json.load(fh)
     base, password = opts["--url"], opts["--password"]
+    create = {"title": "schema probe"}
+    if line == 2:
+        create["model"] = {"providerID": provider, "id": model_id}
     try:
-        status, session = probe_request(base, password, "POST", "/session", {"title": "schema probe"})
+        status, session = probe_request(base, password, "POST", api(line, "/session"), create)
     except (urllib.error.URLError, TimeoutError) as exc:
         return f"failed: cannot reach the OpenCode server: {exc}"
+    session = unwrap(session)
     if status != 200 or not isinstance(session, dict) or not session.get("id"):
-        return f"unsupported: POST /session returned HTTP {status}: {json.dumps(session)[:300]}"
+        return f"unsupported: POST {api(line, '/session')} returned HTTP {status}: {json.dumps(session)[:300]}"
     sid = session["id"]
+    format_field = {"type": "json_schema", "schema": schema, "retryCount": int(opts["--retry"])}
     try:
-        body = {"model": {"providerID": provider, "modelID": model_id},
-                "format": {"type": "json_schema", "schema": schema, "retryCount": int(opts["--retry"])},
-                "parts": [{"type": "text", "text": opts["--prompt"]}]}
+        if line == 2:
+            # 2.x documents no format field on the prompt; send one anyway and read the assistant messages for it.
+            body = prompt_body(line, provider, model_id, opts["--prompt"], {"format": format_field})
+            status, reply = probe_request(base, password, "POST", api(line, f"/session/{sid}/prompt"), body)
+            if status in (400, 404, 405):
+                return f"unsupported: POST /api/session/{sid}/prompt returned HTTP {status}: {json.dumps(reply)[:300]}"
+            if status != 200:
+                return f"failed: POST /api/session/{sid}/prompt returned HTTP {status}: {json.dumps(reply)[:300]}"
+            wait_idle(base, password, sid, line, 180)
+            status, messages = probe_request(base, password, "GET", api(line, f"/session/{sid}/message"), timeout=30)
+            messages = unwrap(messages)
+            if status != 200 or not isinstance(messages, list):
+                return f"failed: GET /api/session/{sid}/message returned HTTP {status}"
+            structured = None
+            for message in messages:
+                if not isinstance(message, dict):
+                    continue
+                if message.get("structured") is not None:
+                    structured = message["structured"]
+                for part in message.get("content") or []:
+                    if isinstance(part, dict) and part.get("structured") is not None:
+                        structured = part["structured"]
+            if structured is None:
+                return "unsupported: the 2.x prompt API carries no structured-output field and the reply had none"
+            errs = validate(structured, schema)
+            if errs:
+                return "failed: the structured output does not match the schema: " + "; ".join(errs)
+            return "enforced " + json.dumps(structured, sort_keys=True)
+        body = prompt_body(line, provider, model_id, opts["--prompt"], {"format": format_field})
         status, reply = probe_request(base, password, "POST", f"/session/{sid}/message", body)
         if status in (400, 404, 405):
             return f"unsupported: POST /session/{sid}/message returned HTTP {status}: {json.dumps(reply)[:300]}"
@@ -675,7 +798,7 @@ def schema_probe(argv):
     finally:
         # The server is about to be stopped, but a session left behind would still hold its cost and transcript.
         try:
-            probe_request(base, password, "DELETE", f"/session/{sid}", timeout=10)
+            probe_request(base, password, "DELETE", api(line, f"/session/{sid}"), timeout=10)
         except (urllib.error.URLError, TimeoutError):
             pass
 
@@ -683,12 +806,16 @@ def schema_probe(argv):
 # `expect` is text the tool's output must hold, so a completed call that returned "no results" is not a success. The
 # search expects a URL, because a no-results message can echo the query's words.
 WEB_PROBES = {
-    "fetch": {"tool": "webfetch", "expect": "Example Domain",
+    "fetch": {"tool": "webfetch", "expect": "for use in",
               "prompt": "Use the webfetch tool once to fetch https://example.com, then reply with the single word done."},
     "search": {"tool": "websearch", "expect": "http",
                "prompt": "Use the websearch tool once to search for: example domain. "
                          "Then reply with the single word done."},
 }
+# A backend check is one HTTP call with no model turn; anything past this is a hung provider, not a slow search.
+WEBSEARCH_BACKEND_TIMEOUT = 30
+# The 2.x server's error kind for `POST /api/websearch` when no search provider is selected.
+WEBSEARCH_NO_PROVIDER = "websearch_provider_required"
 # Below the 150 seconds doctor allows a probe, so a hung prompt reports its own failure instead of being killed.
 WEB_PROMPT_TIMEOUT = 120
 # A session create does no model work, so it answers quickly or not at all.
@@ -701,13 +828,15 @@ SKILL_CALL_TIMEOUT = 120
 PROBE_ERRORS = (urllib.error.URLError, TimeoutError, json.JSONDecodeError)
 
 
-def listed_tools(base, password, provider, model_id):
+def listed_tools(base, password, provider, model_id, line=1):
     """The tool IDs the server offers this model, or None when it has no such list.
 
-    OpenCode can leave a built-in tool out for a provider, and the list says so without a paid prompt. The route is
-    under /experimental and a server without it can answer with its web app's HTML, so anything but a JSON list means
-    "unknown" and the prompt decides.
+    OpenCode can leave a built-in tool out for a provider, and the list says so without a paid prompt. The 1.x route
+    is under /experimental and a server without it can answer with its web app's HTML, so anything but a JSON list
+    means "unknown" and the prompt decides. 2.x has no tool-list route, so the prompt decides there.
     """
+    if line == 2:
+        return None
     path = f"/experimental/tool?provider={urllib.parse.quote(provider)}&model={urllib.parse.quote(model_id)}"
     try:
         status, tools = probe_request(base, password, "GET", path, timeout=30)
@@ -718,17 +847,39 @@ def listed_tools(base, password, provider, model_id):
     return {tool.get("id") for tool in tools if isinstance(tool, dict)}
 
 
-def session_parts(base, password, sid, directory=None):
+def session_parts(base, password, sid, directory=None, line=1):
     """Every part of a session, oldest first.
 
     A prompt's reply holds only the last step's message; the tool call was the step before it, so a verdict read from
-    the reply alone sees a model that never called anything.
+    the reply alone sees a model that never called anything. A 2.x message carries its parts in `content` and names a
+    tool call `name` with its output in `state.content`; both are normalised to the 1.x field names the verdicts read.
     """
-    status, messages = probe_request(base, password, "GET", f"/session/{sid}/message", timeout=30,
+    status, messages = probe_request(base, password, "GET", api(line, f"/session/{sid}/message"), timeout=30,
                                      directory=directory)
-    if status != 200 or not isinstance(messages, list):
-        raise ValueError(f"GET /session/{sid}/message returned HTTP {status}: {json.dumps(messages)[:300]}")
-    return [part for message in messages for part in message.get("parts") or []]
+    if status != 200:
+        raise ValueError(f"GET {api(line, f'/session/{sid}/message')} returned HTTP {status}: {json.dumps(messages)[:300]}")
+    messages = unwrap(messages)
+    if not isinstance(messages, list):
+        raise ValueError(f"GET {api(line, f'/session/{sid}/message')} did not return a list: {json.dumps(messages)[:300]}")
+    if line == 1:
+        return [part for message in messages for part in message.get("parts") or []]
+    parts = []
+    for message in messages:
+        for part in message.get("content") or []:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "tool":
+                part = dict(part)
+                if "tool" not in part and "name" in part:
+                    part["tool"] = part["name"]
+                state = part.get("state")
+                if isinstance(state, dict) and "output" not in state and isinstance(state.get("content"), list):
+                    state = dict(state)
+                    state["output"] = " ".join(str(item.get("text") or "") for item in state["content"]
+                                               if isinstance(item, dict))
+                    part["state"] = state
+            parts.append(part)
+    return parts
 
 
 def web_verdict(spec, parts):
@@ -750,6 +901,24 @@ def web_verdict(spec, parts):
     return f"not available: the model made no {tool} call (it said: {said[:200]!r})"
 
 
+def search_without_provider(base, password):
+    """The 2.x server's refusal when its search backend has no provider, or "" when it has one.
+
+    2.x searches through one of five third-party providers, and the server answers `POST /api/websearch` with
+    `websearch_provider_required` until one is configured. A headless session sees the same gap as a cancelled
+    `websearch` tool call, so this one call names the cause without spending a prompt. An unreachable or
+    unrecognised route reads as "" (unknown), and the prompt still decides.
+    """
+    try:
+        _, reply = probe_request(base, password, "POST", "/api/websearch", {"query": "example domain"},
+                                 timeout=WEBSEARCH_BACKEND_TIMEOUT)
+    except PROBE_ERRORS:
+        return ""
+    if isinstance(reply, dict) and reply.get("kind") == WEBSEARCH_NO_PROVIDER:
+        return f"no search provider is configured ({reply.get('message') or WEBSEARCH_NO_PROVIDER})"
+    return ""
+
+
 def web_probe(argv):
     """Ask a running OpenCode server for one web tool call and report what the call returned.
 
@@ -757,6 +926,7 @@ def web_probe(argv):
     from the web must not reach any other tool. OpenCode applies the last matching rule, so the deny comes first.
     """
     opts = parse_probe_args(argv, "web-probe", ("--url", "--password", "--model", "--kind"), ())
+    line = line_of(opts)
     spec = WEB_PROBES.get(opts["--kind"])
     if spec is None:
         sys.exit(f"opencode_run: web-probe --kind takes {sorted(WEB_PROBES)}, not {opts['--kind']!r}")
@@ -765,39 +935,56 @@ def web_probe(argv):
     if not sep or not provider or not model_id:
         return f"failed: model {opts['--model']!r} is not provider/model"
     base, password = opts["--url"], opts["--password"]
-    permission = [{"permission": "*", "pattern": "*", "action": "deny"},
-                  {"permission": tool, "pattern": "*", "action": "allow"}]
+    if line == 2 and opts["--kind"] == "search":
+        refusal = search_without_provider(base, password)
+        if refusal:
+            return f"relay only: {refusal}, so a headless session's {tool} call is cancelled before it runs"
+    if line == 2:
+        permission = [{"action": "*", "resource": "*", "effect": "deny"},
+                      {"action": tool, "resource": "*", "effect": "allow"}]
+        create = {"title": f"web probe {opts['--kind']}", "permissions": permission,
+                  "model": {"providerID": provider, "id": model_id}}
+    else:
+        permission = [{"permission": "*", "pattern": "*", "action": "deny"},
+                      {"permission": tool, "pattern": "*", "action": "allow"}]
+        create = {"title": f"web probe {opts['--kind']}", "permission": permission}
     try:
-        tools = listed_tools(base, password, provider, model_id)
+        tools = listed_tools(base, password, provider, model_id, line)
         if tools is not None and tool not in tools:
             return f"not available: the server does not list {tool} for {opts['--model']}"
-        status, session = probe_request(base, password, "POST", "/session",
-                                        {"title": f"web probe {opts['--kind']}", "permission": permission},
+        status, session = probe_request(base, password, "POST", api(line, "/session"), create,
                                         timeout=SESSION_TIMEOUT)
     except PROBE_ERRORS as exc:
         return f"failed: cannot reach the OpenCode server: {exc}"
+    session = unwrap(session)
     if status != 200 or not isinstance(session, dict) or not session.get("id"):
-        return f"failed: POST /session returned HTTP {status}: {json.dumps(session)[:300]}"
+        return f"failed: POST {api(line, '/session')} returned HTTP {status}: {json.dumps(session)[:300]}"
     sid = session["id"]
     try:
-        body = {"model": {"providerID": provider, "modelID": model_id},
-                "parts": [{"type": "text", "text": spec["prompt"]}]}
+        body = prompt_body(line, provider, model_id, spec["prompt"])
+        prompt_path = api(line, f"/session/{sid}/prompt") if line == 2 else f"/session/{sid}/message"
         try:
-            status, reply = probe_request(base, password, "POST", f"/session/{sid}/message", body,
-                                          timeout=WEB_PROMPT_TIMEOUT)
+            status, reply = probe_request(base, password, "POST", prompt_path, body, timeout=WEB_PROMPT_TIMEOUT)
         except PROBE_ERRORS as exc:
             return f"failed: no reply from the prompt: {exc}"
-        if status != 200 or not isinstance(reply, dict) or not isinstance(reply.get("info"), dict):
-            return f"failed: POST /session/{sid}/message returned HTTP {status}: {json.dumps(reply)[:300]}"
-        if reply["info"].get("error") is not None:
-            return f"failed: {error_text(reply['info']['error'])}"
+        if line == 2:
+            if status in (400, 404, 405):
+                return f"failed: POST {prompt_path} returned HTTP {status}: {json.dumps(reply)[:300]}"
+            if status != 200:
+                return f"failed: POST {prompt_path} returned HTTP {status}: {json.dumps(reply)[:300]}"
+            wait_idle(base, password, sid, line, WEB_PROMPT_TIMEOUT)
+        else:
+            if status != 200 or not isinstance(reply, dict) or not isinstance(reply.get("info"), dict):
+                return f"failed: POST /session/{sid}/message returned HTTP {status}: {json.dumps(reply)[:300]}"
+            if reply["info"].get("error") is not None:
+                return f"failed: {error_text(reply['info']['error'])}"
         try:
-            return web_verdict(spec, session_parts(base, password, sid))
+            return web_verdict(spec, session_parts(base, password, sid, line=line))
         except (urllib.error.URLError, TimeoutError, ValueError) as exc:
             return f"failed: cannot read the session: {exc}"
     finally:
         try:
-            probe_request(base, password, "DELETE", f"/session/{sid}", timeout=10)
+            probe_request(base, password, "DELETE", api(line, f"/session/{sid}"), timeout=10)
         except PROBE_ERRORS:
             pass
 
@@ -811,13 +998,23 @@ BROWSER_OUTSIDE = "https://example.com/"
 BROWSER_PROMPT_TIMEOUT = 200
 
 
-def browser_status(base, password):
+def browser_status(base, password, line=1):
     """The MCP server's state from the server's own list, or None when the server has no such route."""
     try:
-        status, servers = probe_request(base, password, "GET", "/mcp", timeout=SKILL_LIST_TIMEOUT)
+        status, servers = probe_request(base, password, "GET", api(line, "/mcp"), timeout=SKILL_LIST_TIMEOUT)
     except json.JSONDecodeError:
         return None
-    if status != 200 or not isinstance(servers, dict):
+    if status != 200:
+        return None
+    servers = unwrap(servers)
+    if line == 2:
+        entries = servers if isinstance(servers, list) else []
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("name") == BROWSER_SERVER:
+                # 2.x nests the state one level: {name, status: {status: "connected"}}.
+                return entry["status"] if isinstance(entry.get("status"), dict) else entry
+        return {"status": "not configured"}
+    if not isinstance(servers, dict):
         return None
     entry = servers.get(BROWSER_SERVER)
     return entry if isinstance(entry, dict) else {"status": "not configured"}
@@ -855,46 +1052,69 @@ def browser_probe(argv):
     the tool outputs, so a model's own words cannot pass it.
     """
     opts = parse_probe_args(argv, "browser-probe", ("--url", "--password", "--model", "--page", "--marker"), ())
+    line = line_of(opts)
     provider, sep, model_id = opts["--model"].partition("/")
     if not sep or not provider or not model_id:
         return f"failed: model {opts['--model']!r} is not provider/model"
     base, password, page = opts["--url"], opts["--password"], opts["--page"]
-    permission = [{"permission": "*", "pattern": "*", "action": "deny"},
-                  {"permission": BROWSER_NAVIGATE, "pattern": "*", "action": "allow"},
-                  {"permission": BROWSER_SNAPSHOT, "pattern": "*", "action": "allow"}]
+    if line == 2:
+        permission = [{"action": "*", "resource": "*", "effect": "deny"},
+                      {"action": BROWSER_NAVIGATE, "resource": "*", "effect": "allow"},
+                      {"action": BROWSER_SNAPSHOT, "resource": "*", "effect": "allow"}]
+        create = {"title": "browser probe", "permissions": permission,
+                  "model": {"providerID": provider, "id": model_id}}
+    else:
+        permission = [{"permission": "*", "pattern": "*", "action": "deny"},
+                      {"permission": BROWSER_NAVIGATE, "pattern": "*", "action": "allow"},
+                      {"permission": BROWSER_SNAPSHOT, "pattern": "*", "action": "allow"}]
+        create = {"title": "browser probe", "permission": permission}
     try:
-        state = browser_status(base, password)
+        state = browser_status(base, password, line)
+        if line == 2:
+            # A 2.x server connects its MCP servers asynchronously; the list is empty for the first moment.
+            for _ in range(10):
+                if isinstance(state, dict) and isinstance(state.get("status"), str) \
+                        and state.get("status") != "not configured":
+                    break
+                time.sleep(0.5)
+                state = browser_status(base, password, line)
         if state is not None and state.get("status") != "connected":
             return f"not available: the browser MCP is {state.get('status')}: {str(state.get('error') or '')[:300]}"
-        status, session = probe_request(base, password, "POST", "/session",
-                                        {"title": "browser probe", "permission": permission}, timeout=SESSION_TIMEOUT)
+        status, session = probe_request(base, password, "POST", api(line, "/session"), create, timeout=SESSION_TIMEOUT)
     except PROBE_ERRORS as exc:
         return f"failed: cannot reach the OpenCode server: {exc}"
+    session = unwrap(session)
     if status != 200 or not isinstance(session, dict) or not session.get("id"):
-        return f"failed: POST /session returned HTTP {status}: {json.dumps(session)[:300]}"
+        return f"failed: POST {api(line, '/session')} returned HTTP {status}: {json.dumps(session)[:300]}"
     sid = session["id"]
     prompt = (f"Do these three steps in order, one tool call each. 1. Call {BROWSER_NAVIGATE} with url {page}. "
               f"2. Call {BROWSER_SNAPSHOT}. 3. Call {BROWSER_NAVIGATE} with url {BROWSER_OUTSIDE}. "
               "Step 3 may fail; that is expected. Then reply with the single word done.")
     try:
-        body = {"model": {"providerID": provider, "modelID": model_id}, "parts": [{"type": "text", "text": prompt}]}
+        body = prompt_body(line, provider, model_id, prompt)
+        prompt_path = api(line, f"/session/{sid}/prompt") if line == 2 else f"/session/{sid}/message"
         try:
-            status, reply = probe_request(base, password, "POST", f"/session/{sid}/message", body,
+            status, reply = probe_request(base, password, "POST", prompt_path, body,
                                           timeout=BROWSER_PROMPT_TIMEOUT)
         except PROBE_ERRORS as exc:
             return f"failed: no reply from the prompt: {exc}"
-        if status != 200 or not isinstance(reply, dict) or not isinstance(reply.get("info"), dict):
-            return f"failed: POST /session/{sid}/message returned HTTP {status}: {json.dumps(reply)[:300]}"
-        if reply["info"].get("error") is not None:
-            return f"failed: {error_text(reply['info']['error'])}"
+        if line == 2:
+            if status != 200:
+                return f"failed: POST {prompt_path} returned HTTP {status}: {json.dumps(reply)[:300]}"
+            wait_idle(base, password, sid, line, BROWSER_PROMPT_TIMEOUT)
+        else:
+            if status != 200 or not isinstance(reply, dict) or not isinstance(reply.get("info"), dict):
+                return f"failed: POST /session/{sid}/message returned HTTP {status}: {json.dumps(reply)[:300]}"
+            if reply["info"].get("error") is not None:
+                return f"failed: {error_text(reply['info']['error'])}"
         try:
-            parts = session_parts(base, password, sid)
+            parts = session_parts(base, password, sid, line=line)
         except (urllib.error.URLError, TimeoutError, ValueError) as exc:
             return f"failed: cannot read the session: {exc}"
         return browser_verdict(page, opts["--marker"], parts)
     finally:
         try:
-            probe_request(base, password, "DELETE", f"/session/{sid}", timeout=10)
+            probe_request(base, password, "DELETE", api(line, f"/session/{sid}"), timeout=10)
         except PROBE_ERRORS:
             pass
 
@@ -943,17 +1163,21 @@ def skill_probe(argv):
     """
     opts = parse_probe_args(argv, "skill-probe", ("--url", "--password", "--directory", "--name", "--marker",
                                                   "--user-skills"), ())
-    path = f"/skill?directory={urllib.parse.quote(opts['--directory'], safe='')}"
+    line = line_of(opts)
+    path = f"{api(line, '/skill')}?directory={urllib.parse.quote(opts['--directory'], safe='')}"
     try:
         status, listed = probe_request(opts["--url"], opts["--password"], "GET", path, timeout=SKILL_LIST_TIMEOUT)
     except json.JSONDecodeError:
-        return "not available: the server has no skill list (GET /skill did not answer with JSON)"
+        return f"not available: the server has no skill list ({path} did not answer with JSON)"
     except (urllib.error.URLError, TimeoutError) as exc:
         return f"failed: cannot reach the OpenCode server: {exc}"
     if status == 404:
-        return "not available: the server has no skill list (GET /skill returned HTTP 404)"
-    if status != 200 or not isinstance(listed, list):
-        return f"failed: GET /skill returned HTTP {status}: {json.dumps(listed)[:300]}"
+        return f"not available: the server has no skill list ({api(line, '/skill')} returned HTTP 404)"
+    if status != 200:
+        return f"failed: GET {api(line, '/skill')} returned HTTP {status}: {json.dumps(listed)[:300]}"
+    listed = unwrap(listed)
+    if not isinstance(listed, list):
+        return f"failed: GET {api(line, '/skill')} did not return a list: {json.dumps(listed)[:300]}"
     return skill_verdict(listed, opts["--name"], opts["--marker"], user_skill_names(opts["--user-skills"]))
 
 
@@ -988,43 +1212,56 @@ def skill_call_probe(argv):
     """
     opts = parse_probe_args(argv, "skill-call", ("--url", "--password", "--model", "--directory", "--name",
                                                  "--marker"), ())
+    line = line_of(opts)
     provider, sep, model_id = opts["--model"].partition("/")
     if not sep or not provider or not model_id:
         return f"failed: model {opts['--model']!r} is not provider/model"
     base, password, directory = opts["--url"], opts["--password"], opts["--directory"]
-    permission = [{"permission": "*", "pattern": "*", "action": "deny"},
-                  {"permission": "skill", "pattern": "*", "action": "allow"}]
+    if line == 2:
+        permission = [{"action": "*", "resource": "*", "effect": "deny"},
+                      {"action": "skill", "resource": "*", "effect": "allow"}]
+        create = {"title": "skill call probe", "permissions": permission,
+                  "model": {"providerID": provider, "id": model_id}}
+    else:
+        permission = [{"permission": "*", "pattern": "*", "action": "deny"},
+                      {"permission": "skill", "pattern": "*", "action": "allow"}]
+        create = {"title": "skill call probe", "permission": permission}
     try:
-        status, session = probe_request(base, password, "POST", "/session",
-                                        {"title": "skill call probe", "permission": permission},
+        status, session = probe_request(base, password, "POST", api(line, "/session"), create,
                                         timeout=SESSION_TIMEOUT, directory=directory)
     except PROBE_ERRORS as exc:
         return f"failed: cannot reach the OpenCode server: {exc}"
+    session = unwrap(session)
     if status != 200 or not isinstance(session, dict) or not session.get("id"):
-        return f"failed: POST /session returned HTTP {status}: {json.dumps(session)[:300]}"
+        return f"failed: POST {api(line, '/session')} returned HTTP {status}: {json.dumps(session)[:300]}"
     sid = session["id"]
     prompt = (f"Use the skill tool to load the skill {opts['--name']}, then reply with the marker word it contains, "
               "and nothing else.")
     try:
-        body = {"model": {"providerID": provider, "modelID": model_id},
-                "parts": [{"type": "text", "text": prompt}]}
+        body = prompt_body(line, provider, model_id, prompt)
+        prompt_path = api(line, f"/session/{sid}/prompt") if line == 2 else f"/session/{sid}/message"
         try:
-            status, reply = probe_request(base, password, "POST", f"/session/{sid}/message", body,
+            status, reply = probe_request(base, password, "POST", prompt_path, body,
                                           timeout=SKILL_CALL_TIMEOUT, directory=directory)
         except PROBE_ERRORS as exc:
             return f"failed: no reply from the prompt: {exc}"
-        if status != 200 or not isinstance(reply, dict) or not isinstance(reply.get("info"), dict):
-            return f"failed: POST /session/{sid}/message returned HTTP {status}: {json.dumps(reply)[:300]}"
-        if reply["info"].get("error") is not None:
-            return f"failed: {error_text(reply['info']['error'])}"
+        if line == 2:
+            if status != 200:
+                return f"failed: POST {prompt_path} returned HTTP {status}: {json.dumps(reply)[:300]}"
+            wait_idle(base, password, sid, line, SKILL_CALL_TIMEOUT)
+        else:
+            if status != 200 or not isinstance(reply, dict) or not isinstance(reply.get("info"), dict):
+                return f"failed: POST /session/{sid}/message returned HTTP {status}: {json.dumps(reply)[:300]}"
+            if reply["info"].get("error") is not None:
+                return f"failed: {error_text(reply['info']['error'])}"
         try:
-            parts = session_parts(base, password, sid, directory)
+            parts = session_parts(base, password, sid, directory, line)
         except (urllib.error.URLError, TimeoutError, ValueError) as exc:
             return f"failed: cannot read the session: {exc}"
         return skill_call_verdict(opts["--name"], opts["--marker"], parts)
     finally:
         try:
-            probe_request(base, password, "DELETE", f"/session/{sid}", timeout=10, directory=directory)
+            probe_request(base, password, "DELETE", api(line, f"/session/{sid}"), timeout=10, directory=directory)
         except PROBE_ERRORS:
             pass
 
@@ -1068,8 +1305,29 @@ def variants(spec):
 def main(argv):
     cmd, args = argv[0], argv[1:]
     if cmd == "config":
-        if args == ["--read-only"]:
-            print(json.dumps(build_readonly_config(), indent=2))
+        args = list(args)
+        directory = None
+        line = 1
+        if "--line" in args:
+            index = args.index("--line")
+            if index + 1 >= len(args):
+                sys.exit("opencode_run: --line needs a value")
+            if args[index + 1] not in ("1", "2"):
+                sys.exit(f"opencode_run: --line takes 1 or 2, not {args[index + 1]!r}")
+            line = int(args[index + 1])
+            del args[index:index + 2]
+        readonly = "--read-only" in args
+        if readonly:
+            args.remove("--read-only")
+            if "--directory" in args:
+                index = args.index("--directory")
+                if index + 1 >= len(args):
+                    sys.exit("opencode_run: --directory needs a value")
+                directory = os.path.abspath(args[index + 1])
+                del args[index:index + 2]
+            if args:
+                sys.exit(f"opencode_run: --read-only takes only --directory, not {' '.join(args)}")
+            print(json.dumps(build_readonly_config(directory, line), indent=2))
             return 0
         tools, deny, i = [], [], 0
         temperature = top_p = None
@@ -1088,7 +1346,7 @@ def main(argv):
                 i += 2
             else:
                 tools.append(args[i]); i += 1
-        print(json.dumps(build_config(tools, deny, temperature, top_p), indent=2))
+        print(json.dumps(build_config(tools, deny, temperature, top_p, line), indent=2))
     elif cmd == "variants":
         return variants(*args)
     elif cmd == "watch":

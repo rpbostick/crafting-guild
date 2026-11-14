@@ -92,14 +92,22 @@ cfg="$ASK/$name.opencode.json"
 prompt="$ASK/$name.prompt.txt"
 log="$ASK/$name.jsonl"
 out="$ASK/$name.md"
-python3 -I "$WS/scripts/opencode_run.py" config --read-only > "$cfg" || die "could not build the OpenCode read-only config"
-if $cont; then
-  printf 'Answer this follow-up in the context of your earlier answer, with a conclusion of at most 300 words and file:line after every claim. Do not change any file.\n\n# Question\n%s\n' "$question" > "$prompt" \
-    || die "cannot write $prompt"
-else
-  printf 'Answer the question with a conclusion of at most 300 words. Put file:line after every claim it rests on (for example scripts/ask.sh:12). Do not change any file.\n\n# Question\n%s\n' "$question" > "$prompt" \
-    || die "cannot write $prompt"
-fi
+# A 2.x ask runs from the workspace (see ask-run.sh): its read-only config grants the asked directory as an
+# external directory, and its prompt names that directory because the grant permits reads but does not point the
+# model at the project. A 1.x ask runs inside that directory and needs neither.
+cfg_args=(--read-only --line "$(opencode_line)")
+[ "$(opencode_line)" = 2 ] && cfg_args+=(--directory "$dir")
+python3 -I "$WS/scripts/opencode_run.py" config "${cfg_args[@]}" > "$cfg" || die "could not build the OpenCode read-only config"
+dir_line=""
+[ "$(opencode_line)" = 2 ] && dir_line="The directory to research is $dir; this run's working directory is the workspace, so read the project's files under $dir by absolute path."
+{
+  [ -z "$dir_line" ] || printf '%s\n\n' "$dir_line"
+  if $cont; then
+    printf 'Answer this follow-up in the context of your earlier answer, with a conclusion of at most 300 words and file:line after every claim. Do not change any file.\n\n# Question\n%s\n' "$question"
+  else
+    printf 'Answer the question with a conclusion of at most 300 words. Put file:line after every claim it rests on (for example scripts/ask.sh:12). Do not change any file.\n\n# Question\n%s\n' "$question"
+  fi
+} > "$prompt" || die "cannot write $prompt"
 cmd=(bash "$WS/scripts/ask-run.sh" --project "$SLUG" --name "$name" --model "$model" --budget "$budget" \
   --dir "$dir" --config "$cfg" --log "$log" --prompt "$prompt" --out "$out")
 [ -z "$sid" ] || cmd+=(--session "$sid" --append)

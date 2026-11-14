@@ -2076,7 +2076,7 @@ export WS_WAKE_UNIT_DIR="$T/wake-units"
 # Every background check is a subtree, so cleanup signals each tree rather than only its wrapper.
 kill_par_tree() { local pid; for pid in "${par_pids[@]}"; do kill_tree "$pid"; done; }
 # Cleanup runs on every exit (a failed check, a kill, a crash), so the scratch project never outlives the test.
-trap '[ -n "${srvpid:-}" ] && kill "$srvpid" 2>/dev/null; [ -n "${par_pids[*]:-}" ] && kill_par_tree || true; rm -rf "$T" "$OC" "$TT" "$TQ" "$PD" "$WS/plans/$slug" "$WS/runs/$slug" "$WS/plans/$slug-b" "$WS/runs/$slug-b" "$WS/plans/$slug-t" "$WS/runs/$slug-t" "$WS/plans/$slug-p" "$WS/runs/$slug-p"; rm -f "$WS/projects/$slug.conf" "$WS/projects/$slug-b.conf" "$WS/projects/$slug-t.conf" "$WS/projects/$slug-p.conf"; [ -n "${TTslug:-}" ] && rm -rf "$WS/plans/$TTslug" "$WS/runs/$TTslug" && rm -f "$WS/projects/$TTslug.conf"' EXIT
+trap '[ -n "${srvpid:-}" ] && kill "$srvpid" 2>/dev/null; [ -n "${par_pids[*]:-}" ] && kill_par_tree || true; rm -rf "$T" "$OC" "$TT" "$TQ" "$PD" "$WS/plans/$slug" "$WS/runs/$slug" "$WS/plans/$slug-b" "$WS/runs/$slug-b" "$WS/plans/$slug-t" "$WS/runs/$slug-t" "$WS/plans/$slug-p" "$WS/runs/$slug-p" "$WS/plans/$slug-oc2" "$WS/runs/$slug-oc2"; rm -f "$WS/projects/$slug.conf" "$WS/projects/$slug-b.conf" "$WS/projects/$slug-t.conf" "$WS/projects/$slug-p.conf" "$WS/projects/$slug-oc2.conf"; [ -n "${TTslug:-}" ] && rm -rf "$WS/plans/$TTslug" "$WS/runs/$TTslug" && rm -f "$WS/projects/$TTslug.conf"' EXIT
 # A signal that terminates the shell by default skips the EXIT trap, so turn each into an exit: the cleanup above
 # then kills the background checks and their children.
 trap 'exit 129' HUP
@@ -3591,7 +3591,7 @@ grep -q "WS_PROJECT=$slug" <<< "$out" && echo "ws opencode is the same launcher 
 # ws oc listens: it skips a taken port from WS_OC_PORT up, passes the free one and records it; a caller's --port is
 # used as given; --print shows the flag and writes nothing. A stand-in opencode records its arguments.
 # Its own directory, outside the scratch repo $T, where a later case keeps an ocbin of its own under git.
-OCL=$(mktemp -d); printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s/oc.args"\n' "$OCL" > "$OCL/opencode"; chmod +x "$OCL/opencode"
+OCL=$(mktemp -d); printf '#!/usr/bin/env bash\ncase "$1" in --version) exit 0 ;; esac\nprintf "%%s\\n" "$@" > "%s/oc.args"\n' "$OCL" > "$OCL/opencode"; chmod +x "$OCL/opencode"
 ocbase=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
 python3 -c 'import socket, sys, time; s=socket.socket(); s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(); time.sleep(60)' "$ocbase" & ocbusy=$!
 for _ in 1 2 3 4 5 6 7 8 9 10; do (exec 3<>"/dev/tcp/127.0.0.1/$ocbase") 2>/dev/null && break; sleep 0.2; done
@@ -3610,6 +3610,54 @@ grep -q -- "--port $((ocbase + 1)) --hostname 127.0.0.1" <<< "$out" && [ ! -e "$
   && [ "$(cat "$WS/runs/$slug/oc.port")" = 5123 ] \
   && echo "ws oc refuses a WS_OC_PORT that is not a number ok" || { echo "ws oc WS_OC_PORT=abc FAILED (exit $x): $out"; exit 1; }
 kill "$ocbusy" 2>/dev/null || true; wait "$ocbusy" 2>/dev/null || true; rm -rf "$OCL"; rm -f "$WS/runs/$slug/oc.port"
+# ws oc on 2.x: the TUI has no --port/--hostname. The launcher detects the line from --version, sets the background
+# service's port, restarts it with a config that adds the 2.x lesson to the project's instruction list, then starts
+# the TUI. A stand-in opencode records each call.
+OC2L=$(mktemp -d); printf '#!/usr/bin/env bash\nprintf "%%s\\n" "${*:-<none>}" >> "%s/calls"\nprintf "%%s" "${OPENCODE_CONFIG_CONTENT:-}" > "%s/inline.json"\ncase "$1" in --version) echo "opencode v2.2.7" ;; esac\nexit 0\n' "$OC2L" "$OC2L" > "$OC2L/opencode"; chmod +x "$OC2L/opencode"
+oc2base=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+python3 -c 'import socket, sys, time; s=socket.socket(); s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(); time.sleep(60)' "$oc2base" & oc2busy=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do (exec 3<>"/dev/tcp/127.0.0.1/$oc2base") 2>/dev/null && break; sleep 0.2; done
+rm -f "$WS/runs/$slug/oc.port" "$WS/runs/$slug/oc.config.json"
+out=$(OC2_LOG="$OC2L" PATH="$OC2L:$PATH" XDG_CONFIG_HOME="$OC" WS_OPENCODE_LINE= WS_OC_PORT=$oc2base "$WS/bin/ws" oc "$slug" --print || true)
+grep -q "opencode service set port $((oc2base + 1))" <<< "$out" && grep -q 'opencode service restart' <<< "$out" \
+  && ! grep -q -- '--port' <<< "$out" && [ ! -e "$WS/runs/$slug/oc.port" ] \
+  && jq -e --arg f "$WS/lessons/opencode-2.md" '.instructions | index($f)' "$WS/runs/$slug/oc.config.json" >/dev/null \
+  && jq -e '(.permissions | type) == "array" and (.permission == null)
+      and ([.permissions[] | select(.action == "subagent" and .effect == "deny")] | length) == 1
+      and ([.permissions[] | select(.action == "external_directory" and .effect == "allow")] | length) > 0
+      and (.mcp.servers.playwright.type == "local") and (.mcp.playwright == null)' "$WS/runs/$slug/oc.config.json" >/dev/null \
+  && echo "ws oc 2.x --print shows the service commands, the line lesson and the 2.x config shape ok" \
+  || { echo "ws oc 2.x --print FAILED:"; echo "$out"; jq . "$WS/runs/$slug/oc.config.json"; exit 1; }
+: > "$OC2L/calls"
+OC2_LOG="$OC2L" PATH="$OC2L:$PATH" XDG_CONFIG_HOME="$OC" WS_OPENCODE_LINE= WS_OC_PORT=$oc2base "$WS/bin/ws" oc "$slug" >/dev/null 2>&1 || true
+[ "$(sed -n '1p' "$OC2L/calls")" = "--version" ] \
+  && [ "$(sed -n '2p' "$OC2L/calls")" = "service set port $((oc2base + 1))" ] \
+  && [ "$(sed -n '3p' "$OC2L/calls")" = "service restart" ] && [ "$(sed -n '4p' "$OC2L/calls")" = "<none>" ] \
+  && [ "$(grep -c '' "$OC2L/calls")" = 4 ] \
+  && [ "$(cat "$WS/runs/$slug/oc.port")" = "$((oc2base + 1))" ] \
+  && jq -e --arg f "$WS/lessons/opencode-2.md" '.instructions | index($f)' "$OC2L/inline.json" >/dev/null \
+  && echo "ws oc 2.x sets the service port, restarts it, exports the inline lesson config and starts the TUI ok" \
+  || { echo "ws oc 2.x start FAILED: $(cat "$OC2L/calls" 2>/dev/null) / $(cat "$WS/runs/$slug/oc.port" 2>/dev/null) / $(cat "$OC2L/inline.json" 2>/dev/null)"; exit 1; }
+: > "$OC2L/calls"
+OC2_LOG="$OC2L" PATH="$OC2L:$PATH" XDG_CONFIG_HOME="$OC" WS_OPENCODE_LINE=2 "$WS/bin/ws" oc "$slug" --port 5123 >/dev/null 2>&1 || true
+[ "$(cat "$WS/runs/$slug/oc.port")" = 5123 ] && [ "$(sed -n '1p' "$OC2L/calls")" = "service set port 5123" ] \
+  && echo "ws oc 2.x keeps a caller's --port ok" \
+  || { echo "ws oc 2.x caller port FAILED: $(cat "$OC2L/calls" 2>/dev/null)"; exit 1; }
+# One background service serves every 2.x session: a second project's launch sets its port and restarts the service,
+# so the first session's recorded port no longer reaches it. Run one 2.x session at a time (docs/opencode-2x.md).
+slugoc2="$slug-oc2"
+printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$T" > "$WS/projects/$slugoc2.conf"
+: > "$OC2L/calls"
+OC2_LOG="$OC2L" PATH="$OC2L:$PATH" XDG_CONFIG_HOME="$OC" WS_OPENCODE_LINE=2 "$WS/bin/ws" oc "$slugoc2" --port 5124 >/dev/null 2>&1 || true
+[ "$(cat "$WS/runs/$slugoc2/oc.port")" = 5124 ] \
+  && [ "$(sed -n '1p' "$OC2L/calls")" = "service set port 5124" ] \
+  && [ "$(sed -n '2p' "$OC2L/calls")" = "service restart" ] \
+  && [ "$(cat "$WS/runs/$slug/oc.port")" = 5123 ] \
+  && echo "ws oc 2.x a second project reconfigures the one shared service ok" \
+  || { echo "ws oc 2.x second project FAILED: $(cat "$OC2L/calls" 2>/dev/null) / $(cat "$WS/runs/$slugoc2/oc.port" 2>/dev/null)"; exit 1; }
+rm -f "$WS/projects/$slugoc2.conf"; rm -rf "$WS/runs/$slugoc2" "$WS/plans/$slugoc2"
+kill "$oc2busy" 2>/dev/null || true; wait "$oc2busy" 2>/dev/null || true; rm -rf "$OC2L"
+rm -f "$WS/runs/$slug/oc.port" "$WS/runs/$slug/oc.config.json"
 # email audit: a personal author address fails; a noreply history passes; the identity is checked too.
 EA=$(mktemp -d); git -C "$EA" init -q
 git -C "$EA" -c user.name=t -c user.email=someone@example.com commit -q --allow-empty -m one
@@ -3645,6 +3693,8 @@ WEB_MODE = os.environ.get("OC_WEB_MODE", "worked")
 SKILL_MODE = os.environ.get("OC_SKILL_MODE", "worked")
 SKILL_CALL_MODE = os.environ.get("OC_SKILL_CALL_MODE", "worked")
 BROWSER_MODE = os.environ.get("OC_BROWSER_MODE", "worked")
+# The 2.x stand-in's search provider: empty for the machine with none configured, which is the default.
+WEB2_PROVIDER = os.environ.get("OC_WEB2_PROVIDER", "")
 if os.environ.get("OC_BROWSER_CONFIG"):
     with open(os.environ["OC_BROWSER_CONFIG"], "w", encoding="utf-8") as fh:
         fh.write(os.environ.get("OPENCODE_CONFIG_CONTENT", ""))
@@ -3706,8 +3756,57 @@ class Handler(BaseHTTPRequestHandler):
             user = []
         self.reply(200, project + user)
 
+    def api_get(self):
+        """The 2.x route the probes read: a session's messages, in the shape the verdicts normalise."""
+        if self.path.split("?")[0] == "/api/session/ses_probe/message":
+            self.reply(200, {"data": getattr(self.server, "messages", [])})
+            return
+        self.reply(404, {"name": "NotFoundError"})
+
+    def api_prompt(self, body):
+        """A 2.x prompt's messages: a structured reply for the schema probe, else one completed tool call.
+
+        The shape is the server's: parts live in `content`, a tool call is named `name`, and its output sits in `state`.
+        """
+        text = body.get("text", "")
+        if body.get("format"):
+            self.server.messages = [{"structured": {"ok": True, "status": "ready"}}]
+        else:
+            if os.environ.get("OC_WEB_RECEIPT"):
+                with open(os.environ["OC_WEB_RECEIPT"], "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"prompt": text}) + "\n")
+            tool = "websearch" if "websearch" in text else "webfetch"
+            output = "Example Domain at https://example.com is for use in examples."
+            call = {"type": "tool", "name": tool, "state": {"status": "completed", "output": output}}
+            self.server.messages = [{"content": [call]}]
+        self.reply(200, {"data": {"type": "user", "payload": {"text": text}}})
+
+    def api_post(self):
+        path = self.path.split("?")[0]
+        if path == "/api/websearch":
+            if WEB2_PROVIDER:
+                self.reply(200, {"data": {"results": [{"url": "https://example.com"}]}})
+            else:
+                self.reply(400, {"_tag": "InvalidRequestError", "kind": "websearch_provider_required",
+                                 "message": "Web search provider is required", "field": "providerID"})
+            return
+        if path == "/api/session":
+            self.body()
+            self.reply(200, {"data": {"id": "ses_probe"}})
+            return
+        if path == "/api/session/ses_probe/prompt":
+            self.api_prompt(self.body())
+            return
+        if path == "/api/experimental/session/ses_probe/wait":
+            self.reply(200, {"data": True})
+            return
+        self.reply(404, {"name": "NotFoundError"})
+
     def do_GET(self):
         if not self.authed():
+            return
+        if self.path.startswith("/api/"):
+            self.api_get()
             return
         if self.path.startswith("/skill?"):
             self.skill_list()
@@ -3820,6 +3919,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.authed():
             return
+        if self.path.startswith("/api/"):
+            self.api_post()
+            return
         if self.path.split("?")[0] == "/session":
             query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             self.server.directory = (query.get("directory") or [None])[0]
@@ -3853,7 +3955,7 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(404, {"name": "NotFoundError"})
 
     def do_DELETE(self):
-        if self.path.startswith("/session/"):
+        if self.path.startswith("/session/") or self.path.startswith("/api/session/"):
             self.reply(200, True)
         else:
             self.reply(404, {"name": "NotFoundError"})
@@ -3960,6 +4062,29 @@ jq -se 'length == 2 and all(.model.providerID == "opencode-go" and .model.modelI
 [ "$(jq -s '[.[] | select(.tool == "websearch")] | length' "$T/oc-web-absent.jsonl")" = 0 ] \
   && echo "doctor --parity web probe spends no prompt on a tool the server does not offer ok" \
   || { echo "doctor --parity web probe spent a prompt FAILED:"; cat "$T/oc-web-absent.jsonl"; exit 1; }
+# On 2.x the server searches through a third-party provider: with none configured the search line reads relay only and
+# spends no prompt, and with one it passes only when the search really returns a result.
+web2_check() { # <name> <provider> <what to grep in the search line> <receipt: missing|present> <case name> [<text of the line under it>]
+  local out pid="$T/oc-web2-$1.pid" receipt="$T/oc-web2-$1.jsonl" ok=1
+  out=$(WS_OPENCODE_LINE=2 OC_WEB2_PROVIDER="$2" OC_WEB_RECEIPT="$receipt" parity_run valid "$pid")
+  grep -q '^ok    opencode web fetch: worked' <<< "$out" || ok=0
+  grep -qF "$3" <<< "$out" || ok=0
+  [ -z "${6:-}" ] || grep -A1 -F "$3" <<< "$out" | grep -qF "$6" || ok=0
+  kill -0 "$(cat "$pid")" 2>/dev/null && ok=0
+  case "$4" in
+    missing) grep -q 'Use the websearch tool' "$receipt" 2>/dev/null && ok=0 ;;
+    present) grep -q 'Use the websearch tool' "$receipt" 2>/dev/null || ok=0 ;;
+  esac
+  [ "$ok" = 1 ] && echo "doctor --parity on 2.x: $5 ok" \
+    || { echo "doctor --parity on 2.x $5 FAILED:"; echo "$out" | sed -n '/parity/,/workspace/p'; cat "$receipt" 2>/dev/null; exit 1; }
+}
+web2_pids=(); web2_fail=0
+web2_check noprovider '' 'warn  opencode web search: relay only: no search provider is configured (Web search provider is required)' missing \
+  'a search with no provider is relay only and spends no prompt' 'set websearch.provider' & web2_pids+=("$!")
+web2_check provider tavily 'ok    opencode web search: worked: websearch returned' present \
+  'a configured search passes only when it returns a result' & web2_pids+=("$!")
+for w2p in "${web2_pids[@]}"; do wait "$w2p" || web2_fail=1; done
+[ "$web2_fail" = 0 ] || exit 1
 # The browser on OpenCode: one line, passed only by the page's own text and a refused public page. The stand-in reads
 # the page doctor serves, so a page doctor never served fails too, and the server gets the orchestrator's MCP entry.
 browser_check() { # <mode> <what to grep> <case name>
@@ -4113,6 +4238,12 @@ out=$(WS_OPENCODE_LINE=2 WS_LESSONS_DIR="$LL" "$WS/scripts/review.sh" --project 
 ! grep -q 'line lesson marker' <<< "$out" && echo "claude reviewer prompt has no OpenCode line lesson ok" || { echo "claude reviewer line lesson FAILED"; exit 1; }
 out=$(WS_OPENCODE_LINE=2 WS_LESSONS_DIR="$LL" "$WS/scripts/review.sh" --project "$slug" --print-prompt --agent opencode demo 2>&1 || true)
 grep -q 'line lesson marker' <<< "$out" && echo "opencode reviewer prompt carries the line lesson ok" || { echo "opencode reviewer line lesson FAILED"; exit 1; }
+# A 2.x review runs from the workspace, so its prompt names the branch checkout by absolute path and the files
+# under it; a relative path would read the workspace's copy instead of the reviewed branch.
+grep -q "branch checkout at $T/.worktrees/demo (read-only)" <<< "$out" \
+  && grep -q "Changed files:" <<< "$out" && grep -q "^$T/.worktrees/demo/" <<< "$out" \
+  && echo "opencode 2.x reviewer prompt names the branch checkout by absolute path ok" \
+  || { echo "opencode 2.x reviewer prompt paths FAILED:"; grep -n 'branch checkout\|Changed files' <<< "$out"; exit 1; }
 rm -rf "$LL"
 # ws-run: runs a granted command and records its exit code; refuses one outside the grants.
 printf '%s\n' 'true' 'false *' > "$T/grants"; rm -f "$W/.ws-evidence/runs.tsv"
@@ -4654,6 +4785,10 @@ oc-web-noresults.jsonl
 oc-web-noresults.pid
 oc-web-worked.jsonl
 oc-web-worked.pid
+oc-web2-noprovider.jsonl
+oc-web2-noprovider.pid
+oc-web2-provider.jsonl
+oc-web2-provider.pid
 oc.pid
 package.json
 pbin/claude
@@ -4944,10 +5079,14 @@ for arg in "$@"; do
     *) if [ "$in_file" = 1 ]; then file="$arg"; else msg="$arg"; fi ;;
   esac
 done
-line="$call stdin=$(readlink /proc/self/fd/0) config=$(jq -r '.permission.bash["*"]' <<< "${OPENCODE_CONFIG_CONTENT:-{\}}") plugins=$(jq -r '(.plugin // []) | join(",")' <<< "${OPENCODE_CONFIG_CONTENT:-{\}}") msg=$(printf '%s' "$msg" | sha256sum | cut -d' ' -f1) msg_len=${#msg} custom=${OPENCODE_CONFIG:-none}"
+line="$call stdin=$(readlink /proc/self/fd/0) config=$(jq -r '.permission.bash["*"]' <<< "${OPENCODE_CONFIG_CONTENT:-{\}}") plugins=$(jq -r '(.plugins // .plugin // []) | join(",")' <<< "${OPENCODE_CONFIG_CONTENT:-{\}}") msg=$(printf '%s' "$msg" | sha256sum | cut -d' ' -f1) msg_len=${#msg} custom=${OPENCODE_CONFIG:-none}"
 [ -n "$variant" ] && line="$line variant=$variant"
 [ -n "$file" ] && line="$line file=$(stat -c %s "$file"):$(sha256sum "$file" | cut -d' ' -f1)"
 echo "$line" >> "$OC_CALLS"
+# The 2.x launchers run a different argv and env; keep those in their own files so the 1.x exact-match checks above
+# stay exact.
+[ -n "${OC_ARGV:-}" ] && printf '%s\n' "$*" >> "$OC_ARGV"
+[ -n "${OC_ENV:-}" ] && printf 'events=%s\ncwd=%s\n' "${WS_RUN_EVENTS:-none}" "$PWD" >> "$OC_ENV"
 valid='{"status":"done","summary":"stand-in","files_changed":[],"commits":[],"tests":null,"denied":[],"done_when":[{"item":"x","status":"met","basis":"inferred","evidence":"r"}],"edge_cases":{"platform":"n/a: no browser feature","time":"n/a: no clock","stored_data":"n/a: no stored shape","state_resets":"n/a: no user input"},"unknowns":[],"open_questions":[]}'
 case "$OC_STUB" in
   valid) t="Done. $valid" ;; invalid) t='{"status":"done"}' ;;
@@ -5324,7 +5463,7 @@ node "$T/run-events-plugin.test.mjs" "$WS/scripts/opencode-plugins/run-events.js
   || { echo "run-events plugin FAILED"; exit 1; }
 # The 2.x prototypes load through the V2 default-definition shape, register their hooks and write records
 # scripts/opencode_run.py reads. They are separate files, so the 1.x plugin above is unchanged.
-node "$WS/scripts/opencode-2x-check.mjs" "$WS/.opencode/plugins/deny-guard-2x.js" "$WS/.opencode/plugins/run-events-2x.js" \
+node "$WS/scripts/opencode-2x-check.mjs" "$WS/scripts/opencode-plugins-2x/deny-guard.js" "$WS/scripts/opencode-plugins-2x/run-events.js" \
   && echo "opencode 2.x plugins load and write records the tool reads ok" \
   || { echo "opencode 2.x plugins FAILED"; exit 1; }
 # A headless review passes --pure, so no external plugin loads. A builder names its run-events plugin in its
@@ -5353,6 +5492,23 @@ res=$(cat "$ocr/ocrun.result.txt" 2>/dev/null || true)
 $res
 $(tail -3 "$ocr/ocrun.jsonl" 2>/dev/null)"
 git -C "$T" worktree remove --force "$T/.worktrees/ocrun" 2>/dev/null; git -C "$T" branch -q -D agent/ocrun 2>/dev/null || true
+# 2.x launchers: --standalone replaces the cached service config, the variant moves into the model reference, and a
+# review has no --pure. Its WS_RUN_EVENTS keeps the reply-log plugin from writing the review into replies.md.
+rm -f "$T/oc-argv" "$T/oc-env" "$T/oc-calls"
+( OC_ARGV="$T/oc-argv" OC_ENV="$T/oc-env" WS_OPENCODE_LINE=2 oc valid "$WS/scripts/opencode-builder.sh" --model opencode-go/deepseek-v4.1-flash --variant low --budget 1 --config "$ocr/demo.opencode.json" --log "$ocr/oc2b.jsonl" --name "ws:$slug:oc2b" "$T/task.md" > "$ocr/oc2b.jsonl" 2>&1 ) || true
+grep -q '^run --standalone --format json --model opencode-go/deepseek-v4.1-flash#low ' "$T/oc-argv" \
+  && ! grep -q -- '--variant' "$T/oc-argv" && ! grep -q 'file://' "$T/oc-calls" \
+  && grep -q "plugins=$WS/scripts/opencode-plugins-2x msg=" "$T/oc-calls" && grep -q '^events=.*oc2b\.events\.jsonl' "$T/oc-env" \
+  && echo "opencode 2.x builder runs standalone with the variant and the workspace plugin package ok" \
+  || ofail "opencode 2.x builder" "$(cat "$T/oc-argv" "$T/oc-env" "$T/oc-calls" 2>/dev/null)"
+rm -f "$T/oc-argv" "$T/oc-env" "$T/oc-calls"
+( cd "$T" && OC_ARGV="$T/oc-argv" OC_ENV="$T/oc-env" WS_OPENCODE_LINE=2 oc review "$WS/scripts/opencode-review.sh" --model opencode-go/deepseek-v4.1-flash --variant low --budget 1 --config "$ocr/demo.opencode.json" --log "$ocr/oc2r.log" --name "ws:$slug:oc2r" "$T/task.md" > "$ocr/oc2r.log" 2>&1 ) || true
+grep -q '^run --standalone --format json --model opencode-go/deepseek-v4.1-flash#low ' "$T/oc-argv" \
+  && ! grep -q -- '--pure' "$T/oc-argv" \
+  && grep -q "plugins=$WS/scripts/opencode-plugins-2x msg=" "$T/oc-calls" \
+  && grep -q '^events=.*oc2r\.log\.events\.jsonl' "$T/oc-env" && grep -qx "cwd=$WS" "$T/oc-env" \
+  && echo "opencode 2.x review runs standalone from the workspace with the pinned plugin package ok" \
+  || ofail "opencode 2.x review" "$(cat "$T/oc-argv" "$T/oc-env" "$T/oc-calls" 2>/dev/null)"
 # The stand-in branches on its argv, not on the prompt text: a prompt that quotes the model-list command still
 # replays the sample reply and records the call, rather than printing the model list.
 printf '# task\nCheck the variants with `opencode models <provider> --verbose` first.\n' > "$T/ocmodels.md"

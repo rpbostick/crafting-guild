@@ -46,7 +46,7 @@ cat > "$bin/opencode" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$STANDIN_LOG/opencode.args"
 printf 'x\n' >> "$STANDIN_LOG/oc.calls"
-printf '%s' "${OPENCODE_SERVER_PASSWORD:-}" > "$STANDIN_LOG/opencode.password"
+printf '%s' "${OPENCODE_PASSWORD:-${OPENCODE_SERVER_PASSWORD:-}}" > "$STANDIN_LOG/opencode.password"
 case "${STANDIN_OC:-ok}" in
   ok) echo '{"type":"step_start","sessionID":"ses_x"}' ;;
   # OpenCode 1.19.1 prints this line for a closed port as well as for an unknown session.
@@ -61,7 +61,7 @@ case "${STANDIN_OC:-ok}" in
 esac
 EOF
 chmod +x "$bin/systemd-run" "$bin/systemctl" "$bin/systemd-analyze" "$bin/opencode"
-export PATH="$bin:$PATH" STANDIN_LOG="$log" WS_PROJECT="$slug"
+export PATH="$bin:$PATH" STANDIN_LOG="$log" WS_PROJECT="$slug" WS_OPENCODE_LINE="${WS_OPENCODE_LINE:-1}"
 export WS_WAKE_URL=http://127.0.0.1:1
 # retries are real but instant here; the down case disables them.
 export WS_WAKE_RETRY_DELAY=0
@@ -89,6 +89,26 @@ grep -q 's3cret-word' "$log/systemd-run.args" && fail "the password is on system
 grep -rq 's3cret-word' "$runs" && fail "the password was written under runs/"
 [ "$(cat "$log/opencode.password")" = s3cret-word ] || fail "opencode did not get the password from its environment"
 echo "ws wake takes the password from the environment, by name ok"
+
+# On 2.x the same message goes with --server (no --attach) and the password variable is OPENCODE_PASSWORD.
+: > "$log/systemd-run.args"; rm -f "$log/opencode.args"
+export WS_OPENCODE_LINE=2
+out=$(OPENCODE_PASSWORD=s3cret-2x ws wake ses_abc123 "hello 2x" 2>&1) || fail "2.x wake exited non-zero"
+expected=$(printf '%s\n' run --server http://127.0.0.1:1 --session ses_abc123 --format json -- "hello 2x")
+[ "$(cat "$log/opencode.args" 2>/dev/null)" = "$expected" ] || fail "2.x delivery arguments: $(cat "$log/opencode.args" 2>/dev/null)"
+grep -qx -- "--setenv=OPENCODE_PASSWORD" "$log/systemd-run.args" || fail "the 2.x password is not passed by name"
+grep -q 's3cret-2x' "$log/systemd-run.args" && fail "the 2.x password is on systemd-run's command line"
+grep -rq 's3cret-2x' "$runs" && fail "the 2.x password was written under runs/"
+[ "$(cat "$log/opencode.password")" = s3cret-2x ] || fail "opencode did not get OPENCODE_PASSWORD"
+# OPENCODE_SERVER_PASSWORD is the name the help and docs use, and 2.x still reads it; it must reach the server too.
+: > "$log/systemd-run.args"; rm -f "$log/opencode.args"
+out=$(OPENCODE_SERVER_PASSWORD=s3cret-2x-legacy ws wake ses_abc123 "hello 2x legacy" 2>&1) || fail "2.x wake with OPENCODE_SERVER_PASSWORD exited non-zero"
+grep -qx -- "--setenv=OPENCODE_SERVER_PASSWORD" "$log/systemd-run.args" || fail "the 2.x legacy password is not passed by name"
+grep -q 's3cret-2x-legacy' "$log/systemd-run.args" && fail "the 2.x legacy password is on systemd-run's command line"
+grep -rq 's3cret-2x-legacy' "$runs" && fail "the 2.x legacy password was written under runs/"
+[ "$(cat "$log/opencode.password")" = s3cret-2x-legacy ] || fail "opencode did not get OPENCODE_SERVER_PASSWORD"
+unset OPENCODE_PASSWORD OPENCODE_SERVER_PASSWORD; export WS_OPENCODE_LINE=1
+echo "ws wake 2.x uses --server and forwards OPENCODE_PASSWORD or OPENCODE_SERVER_PASSWORD ok"
 
 # A later time is one calendar timer in UTC; list shows it; a cancel stops both units, and a late firing sends nothing.
 : > "$log/systemd-run.args"; rm -f "$log/opencode.args"; touch "$log/active"

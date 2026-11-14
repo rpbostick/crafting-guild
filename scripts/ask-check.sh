@@ -39,7 +39,7 @@ while [ $# -gt 0 ] && [[ $1 == -* ]]; do shift; done
 EOF
 cat > "$bin/opencode" <<'EOF'
 #!/usr/bin/env bash
-if [ "${1:-}" = --version ]; then echo "1.19.1"; exit 0; fi
+if [ "${1:-}" = --version ]; then echo "${STANDIN_OPENCODE_VERSION:-1.19.1}"; exit 0; fi
 case " $* " in
   *" --attach "*)
     printf '%s\n' "$@" >> "$STANDIN_LOG/wake.args"
@@ -178,6 +178,27 @@ head1=$(head -n1 "$ans" 2>/dev/null || true)
 grep -qE '^model: opencode-go/deepseek-v4\.1-flash  cost: ' <<< "$head1" \
   || fail "an empty WS_ASK_MODEL did not use the builder model: ${head1:-<none>}"
 case_end "an empty WS_ASK_MODEL uses the builder model"
+
+# On a 2.x line the run uses a valid 2.x invocation: --standalone, no --pure, the workspace's 2.x plugin package,
+# an event trail, the workspace as working directory, and the asked directory granted as an external directory.
+case_start
+rm -f "$log/config.json" "$log/opencode.args"
+out=$(WS_OPENCODE_LINE=2 STANDIN_OPENCODE_VERSION=2.2.7 STANDIN_ASK_MODE=normal "$WS/bin/ws" --project "$slug" ask q3 "Which argv does 2.x take?" --dir "$repo" 2>&1)
+"$WS/bin/ws" --project "$slug" bg wait ask-q3 --timeout 60 >/dev/null 2>&1 || true
+ans="$runs/ask/q3.md"
+args="$log/opencode.args"
+[ -f "$ans" ] || fail "no answer file $ans"
+grep -qx -- '--standalone' "$args" || fail "the 2.x ask run passed no --standalone: $(cat "$args" 2>/dev/null)"
+! grep -qx -- '--pure' "$args" || fail "the 2.x ask run passed --pure: $(cat "$args" 2>/dev/null)"
+[ "$(jq -r '(.plugins // .plugin // []) | join(",")' "$log/config.json" 2>/dev/null)" = "$WS/scripts/opencode-plugins-2x" ] \
+  || fail "the 2.x ask config names no 2.x plugin package: $(jq -c '.plugins // .plugin' "$log/config.json" 2>/dev/null)"
+[ "$(jq -r '[.permissions[] | select(.action == "external_directory" and .effect == "allow") | .resource] | join(" ")' "$log/config.json" 2>/dev/null)" = "$repo/**" ] \
+  || fail "the 2.x ask config grants no external directory for --dir: $(jq -c '.permissions' "$log/config.json" 2>/dev/null)"
+grep -qF "read the project's files under $repo by absolute path" "$args" \
+  || fail "the 2.x ask prompt does not name the asked directory: $(cat "$args" 2>/dev/null)"
+grep -qE '^model: opencode-go/deepseek-v4\.1-flash  cost: \$[0-9]+\.[0-9]+  minutes: [0-9]+  exit: 0$' <<< "$(head -n1 "$ans" 2>/dev/null)" \
+  || fail "2.x answer header: $(head -n1 "$ans" 2>/dev/null)"
+case_end "ws ask on a 2.x line runs --standalone with the 2.x plugin package and grants --dir externally"
 
 [ "$rc" = 0 ] && echo "ws ask checks ok"
 exit "$rc"

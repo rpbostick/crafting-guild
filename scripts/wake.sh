@@ -18,6 +18,13 @@ WAKE_UNIT_DIR="${WS_WAKE_UNIT_DIR:-$HOME/.config/systemd/user}"
 usage() { die "usage: ws wake [--session] <session|current> \"<message>\" [--at <time>|--when-chain-stops] [--every <OnCalendar>] [--until YYYY-MM-DD] [--url <server>] | ws wake list | ws wake cancel <id> | ws wake failed [--clear]"; }
 unit_of() { echo "ws-wake-$SLUG-$1"; }
 one_line() { printf '%s' "$1" | tr '\n\r\t' '   '; }
+# The password variables the line's client reads: 2.x takes OPENCODE_PASSWORD for the fixed `opencode` user and still
+# reads OPENCODE_SERVER_PASSWORD; 1.x takes the OPENCODE_SERVER_* pair. Forward whichever is set, so naming the
+# variable the help and docs name reaches the server on either line. They reach a recurring unit through
+# PassEnvironment= and a transient one through --setenv.
+password_vars() {
+  if [ "$(opencode_line)" = 2 ]; then printf 'OPENCODE_PASSWORD\nOPENCODE_SERVER_PASSWORD\n'; else printf 'OPENCODE_SERVER_PASSWORD\nOPENCODE_SERVER_USERNAME\n'; fi
+}
 local_date() { if [ -n "${WS_TZ:-}" ]; then TZ="$WS_TZ" date "$@"; else date "$@"; fi; }
 chain_running() { pid_file_alive "$RUNS/chain.pid"; }
 
@@ -74,6 +81,8 @@ schedule() {
   # --session and --wake name the session as a flag, the spelling ws bg run uses.
   case "${1:-}" in --session|--wake) shift ;; esac
   local session="${1:-}" message="${2:-}" at="" chain=false every="" until="" url="" when="now" epoch id unit calendar pass="" var
+  local -a pvars
+  mapfile -t pvars < <(password_vars)
   [ $# -ge 2 ] || usage
   session=$(wake_session "$session") || exit 1
   shift 2
@@ -119,7 +128,7 @@ schedule() {
   # A unit file cannot name a variable's value; PassEnvironment= takes it from the user manager's copy.
   # That copy lives only in the user manager's memory and does not survive a reboot, so a password-protected
   # recurring wake has to be rescheduled after one. A failed import is fatal: the timer would fail every fire.
-  for var in OPENCODE_SERVER_PASSWORD OPENCODE_SERVER_USERNAME; do
+  for var in "${pvars[@]}"; do
     if [ -n "$every" ] && [ -n "${!var:-}" ]; then
       pass+="$var "
       systemctl --user import-environment "$var" >/dev/null 2>&1 \
@@ -147,7 +156,7 @@ schedule() {
   # The user manager's PATH lacks ~/.local/bin, where opencode lives.
   local env_args=("--setenv=PATH=$PATH") var
   # Deliberate: name only, so systemd-run copies the value from its own environment and it stays off every command line.
-  for var in OPENCODE_SERVER_PASSWORD OPENCODE_SERVER_USERNAME; do
+  for var in "${pvars[@]}"; do
     if [ -n "${!var:-}" ]; then env_args+=("--setenv=$var"); fi
   done
   if ! systemd-run --user --quiet --collect --unit="$unit" --description="ws wake $SLUG $id" --working-directory="$WS" \
@@ -168,8 +177,10 @@ fail_delivery() { # <id> <recurring> <session> <url> <reason> <message>
 # restart) still lands. The .backstop marker keeps a failed backstop from scheduling another.
 schedule_backstop() { # <id>
   local id="$1" unit env_args=("--setenv=PATH=$PATH") var
+  local -a pvars
+  mapfile -t pvars < <(password_vars)
   unit="$(unit_of "$id")-backstop"
-  for var in OPENCODE_SERVER_PASSWORD OPENCODE_SERVER_USERNAME; do
+  for var in "${pvars[@]}"; do
     if [ -n "${!var:-}" ]; then env_args+=("--setenv=$var"); fi
   done
   systemd-run --user --quiet --collect --unit="$unit" --description="ws wake $SLUG $id retry" \
@@ -178,7 +189,8 @@ schedule_backstop() { # <id>
 }
 
 fire() {
-  local id="$1" job="$WAKE_DIR/$1.job" output="$WAKE_DIR/$1.out" session url message status recurring until
+  local id="$1" job="$WAKE_DIR/$1.job" output="$WAKE_DIR/$1.out" session url message status recurring until line
+  line=$(opencode_line)
   # Gone means cancelled after the timer had already started this unit.
   [ -f "$job" ] || exit 0
   recurring=$(hold_field "$job" recurring); until=$(hold_field "$job" until)
@@ -205,7 +217,11 @@ fire() {
   while :; do
     : > "$output"
     # `--` keeps a message that starts with a dash from being read as a flag.
-    opencode run --attach "$url" --session "$session" --format json -- "$message" > "$output" 2>&1 < /dev/null &
+    if [ "$line" = 2 ]; then
+      opencode run --server "$url" --session "$session" --format json -- "$message" > "$output" 2>&1 < /dev/null &
+    else
+      opencode run --attach "$url" --session "$session" --format json -- "$message" > "$output" 2>&1 < /dev/null &
+    fi
     pid=$!; deadline=$(( $(date +%s) + WS_WAKE_TIMEOUT )); delivered=false; timed_out=false
     # pid is this shell's own background opencode child ($!), not a pid read from a file.
     while kill -0 "$pid" 2>/dev/null; do
@@ -227,7 +243,7 @@ fire() {
     if $timed_out; then
       reason="no reply in $WS_WAKE_TIMEOUT s; a busy session may still have it queued"
     else
-      # OpenCode 1.19.1 prints "Session not found" for a closed port too, so the reason keeps both readings.
+      # OpenCode prints "Session not found" for a closed port too, so the reason keeps both readings.
       reason="opencode run exit $code: $(sed 's/\x1b\[[0-9;]*m//g' "$output" | grep . | tail -n1 | cut -c1-200) (server down, or the session is unknown to it)"
     fi
     # A timeout is not retried: the message may be queued in the session, and a second copy would repeat it.
