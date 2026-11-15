@@ -35,13 +35,21 @@ opencode.json           OpenCode project config: loads CLAUDE.local.md, operator
                         lessons files by reference, and disables session sharing. No model is set; the operator chooses.
 .opencode/commands/cold-start.md  `/cold-start`: prints scripts/cold-start.sh --brief, the session-start context
                         Claude Code gets from its hook.
-.opencode/plugins/cold-start.js  adds the cold-start brief, and with WS_MEMORY_DIR set the memory index and feedback
-                        bodies, to an OpenCode orchestrator's system text once per session and again at compaction.
+.opencode/plugins/       must hold no plugin file: both OpenCode lines auto-discover it, so a plugin placed here loads
+                        on both, and a 1.x plugin there fails to start on 2.x.
+.opencode/plugins-1x/cold-start.js  adds the cold-start brief, and with WS_MEMORY_DIR set the memory index and feedback
+                        bodies, to an OpenCode 1.x orchestrator's system text once per session and again at compaction.
                         scripts/memory-settings.sh hands it the two settings; scripts/cold-start-memory.test.mjs tests it.
-.opencode/plugins/reply-time.js  OpenCode's reply hook: runs scripts/reply-time-check.sh on a finished reply and
+.opencode/plugins-2x/cold-start-2x.js  the same job on the OpenCode 2.x line: a plain { id, setup } export that pushes
+                        the brief and memory onto each request's system parts through session.hook("context") and
+                        session.hook("compaction"), and writes runs/<slug>/session.id; a builder skips it too.
+                        scripts/cold-start-2x.test.mjs tests it.
+.opencode/plugins-2x/index.js  the one module a 2.x session loads from .opencode/plugins-2x/: its setup runs
+                        cold-start-2x.js and reply-log-2x.js, because `ws oc` names a directory and V2 loads its index.js.
+.opencode/plugins-1x/reply-time.js  OpenCode 1.x's reply hook: runs scripts/reply-time-check.sh on a finished reply and
                         appends its warning; a headless builder skips it.
-.opencode/plugins/reply-log.js  OpenCode's reply log: prepends the local-time banner to a finished reply and appends
-                        it to runs/<slug>/replies.md; a headless builder skips it.
+.opencode/plugins-1x/reply-log.js  OpenCode 1.x's reply log: prepends the local-time banner to a finished reply and
+                        appends it to runs/<slug>/replies.md; a headless builder skips it.
 docs/opencode-orchestrator.md    which OpenCode pages back each substitution, and how the two briefs avoid drift.
 scripts/lib.sh          shared helpers; loads projects/<slug>.conf into variables. `commit_new_file <path> <message>`
                         commits one file a tool just wrote, that path only (`git commit --only`), in the workspace
@@ -81,14 +89,22 @@ scripts/opencode-builder.sh  the OpenCode launcher: zdr-check.sh on the model's 
                         `result` line (cost, tokens, permission_denials, structured_output) for check-result.sh. On 2.x it
                         names scripts/opencode-plugins-2x in the config's `plugins`, so the workspace deny guard and
                         run-events load in a project worktree whose checkout has no `.opencode/plugins`.
+                        Every exit path ends the run's processes (lib.sh's stop_run): the client's process group, then
+                        every process carrying the run's marker (WS_RUN_ID, in its environment). The group alone is not
+                        the boundary: on OpenCode 2.2.7 a real client ran each shell command in a session of its own,
+                        and an `opencode serve` a command started kept that session after the command exited, so it was
+                        in neither the client's group nor the client's session and outlived the wrapper with the run's
+                        memory cap still held. SIGTERM first, SIGKILL after WS_RUN_KILL_GRACE seconds, one log line per
+                        process it ends.
 scripts/opencode_run.py the launcher's parts: the permission config (bash deny except each Bash grant, the DENY list last,
                         nothing left at "ask"), the budget watch, the stdlib schema check, the result line. Its `config` command
                         takes `--temperature` and `--top-p` for the build agent's sampling; `variants <provider/model>`
                         lists a model's variants from `opencode models <provider> --verbose`. With
                         WS_SANDBOX=bwrap the builder config also names scripts/ws-sandbox-shell.sh as OpenCode's shell.
 scripts/ws-sandbox-shell.sh  OpenCode's builder shell when WS_SANDBOX=bwrap: one command in bubblewrap with the home
-                        directory masked (only the worktree, node_modules/.venv links, the git paths, bin/ and the
-                        real install directories of node/npm/npx found under $HOME are visible) and no network; it
+                        directory masked (only the worktree, node_modules/.venv links, the git paths, bin/, scripts/
+                        and the real install directories of node/npm/npx found under $HOME are visible) and no
+                        network; it
                         refuses a missing, setuid or below-floor bwrap, any tool bind that would expose a credentials
                         folder, a tool no bound folder holds by name, and a tool root at or above the worktree, instead
                         of running unsandboxed. The floor is 0.12 (CVE-2026-87766, recommended 0.13.1); Ubuntu's
@@ -98,14 +114,16 @@ scripts/ws-sandbox-shell.sh  OpenCode's builder shell when WS_SANDBOX=bwrap: one
                         A link resolving to an ancestor of the worktree is not bound: it would cover the writable bind.
 scripts/sandbox-check.sh  the sandbox's rollout probes through the wrapper against the real bwrap: git writes in a
                         temporary worktree, a one-folder-down node_modules link readable, a link to an ancestor leaving
-                        the worktree writable, a credential read and curl failing, bin/ws-run writing evidence and
-                        refusing a command a deny rule matches, and node's and npx's versions matching the host's; one
+                        the worktree writable, a credential read and curl failing, bin/ws-run writing evidence,
+                        refusing a command a deny rule matches and naming the closest grant for that refusal and for a
+                        command no grant covers, and node's and npx's versions matching the host's; one
                         pass or FAIL line each, and a note for a credential file the host does not have. Below the floor
                         run it with `WS_SANDBOX_MIN_VERSION`. The selftest runs it with that set to 0.9 when the wrapper's
                         `--check` passes, and prints a skip line otherwise.
-scripts/sandbox-binds-check.sh  the binds and PATH the wrapper hands a stand-in bwrap on throwaway layouts (an ancestor link,
-                        a dangling link, a parent root, a tool outside a bin folder, a tool with no reachable name, a
-                        tool root at or above the worktree) and what `--check` reports on them; the selftest runs it.
+scripts/sandbox-binds-check.sh  the binds and PATH the wrapper hands a stand-in bwrap on throwaway layouts (an ancestor
+                        link, a dangling link, a parent root, a tool outside a bin folder, a tool with no reachable
+                        name, a tool root at or above the worktree, and scripts/ bound beside bin/) and what `--check`
+                        reports on them; the selftest runs it.
 scripts/fixtures/       a real OpenCode log the selftest's stand-in opencode replays, and the generated OpenCode
                         config with the builder shell sandbox off (WS_SANDBOX empty).
 scripts/zdr-check.sh    whether an OpenCode model is zero-retention with no training, from its Go or Zen privacy page.
@@ -164,18 +182,24 @@ scripts/orchestrator-record.sh  `ws orchestrator-record [--project slug|--all] [
                         --runs names another runs/ directory, since a linked worktree has none of its own.
 scripts/orchestrator-record-check.sh  its check on a throwaway project with a known mix; selftest.sh runs it.
 scripts/orchestrator-record-doc-check.sh  its check that doc, config and code direct commits are counted apart; selftest.sh runs it.
-scripts/verify.sh       `ws verify [--project slug] [--since YYYY-MM-DD] [--passes N] [--json]`: checks every merge
-                         on the project branch since the date. The subject must name the reviewed SHA and the step; a
-                         review at that SHA must carry it and say merge; a merge test run must be on record (the log's
-                         WS_MERGE_SUITE_MARK or the merge.unfinished marker at stage push, with only the newest merge of
-                         a reused step name owning the shared log); no --no-review and no
+scripts/verify.sh       `ws verify [--project slug] [--since YYYY-MM-DD] [--passes N] [--merge SHA] [--json]`: checks
+                         every merge on the project branch since the date. The subject must name the reviewed SHA and
+                         the step; a review at that SHA must carry it and say merge; a merge test run must be on record
+                         (the log's WS_MERGE_SUITE_MARK or the merge.unfinished marker at stage push, with only the
+                         newest merge of a reused step name owning the shared log); no unreasoned --no-review and no
                          unreasoned --no-look; with --passes N (or WS_VERIFY_PASSES) a merge that changes a file other
-                         than documentation or a test must record at least N review passes. Prints each broken rule and
-                         exits 1; --json prints the same as a record. Reads the merge subjects through the regexes in
-                         lib.sh that orchestrator-record.sh uses too, and needs no model call or network.
+                         than documentation or a test must record at least N review passes. --merge checks that one
+                         merge alone, which merge.sh runs on its own merge after the tests and before the push; it
+                         also fails a branch that moved past the merged tip, which a history run cannot see. Prints
+                         each broken rule and exits 1; --json prints the same as a record. Reads the merge subjects
+                         through the regexes in lib.sh that orchestrator-record.sh uses too, and needs no model call
+                         or network.
  scripts/verify-check.sh  its check on throwaway clean and broken projects, one merge per rule; selftest.sh runs it.
 scripts/opencode-review.sh  the OpenCode review launcher: zdr-check.sh first, then `opencode run` under the read-only
                         config, the budget watch, one continue on an invalid review, and the result line review.sh reads.
+                        It ends the run's processes on every exit path exactly as the builder does (lib.sh's stop_run:
+                        the client's group and every process carrying the run marker), so a review cannot leave a
+                        server in the run's scope either.
                         On 2.x it loads scripts/opencode-plugins-2x and runs from the workspace, because V2 has no
                         `--pure` and would execute a branch's own `.opencode` plugins and config from its worktree; the
                         review config grants `external_directory` for that worktree and review.sh gives the files by
@@ -246,8 +270,13 @@ scripts/teeth.sh        `ws teeth`: checks the branch tip out in a scratch workt
                         branch changed back to its merge base (removing files it added), keeps the branch's test
                         files (`TEST_GLOBS`, default covering the usual names) and runs `TEETH_CMD` (or `TEST_CMD`).
                         Writes runs/<slug>/<name>.teeth.txt (ok, toothless, n/a or error, the SHA, the files
-                        reverted and the last 40 log lines) and runs/<slug>/logs/<name>.teeth.log; chain.sh runs it
-                        before the review, where toothless blocks under rule 2 unless the reviewer explains why.
+                        reverted and the last 40 log lines) and runs/<slug>/logs/<name>.teeth.log. A branch that
+                        changes no test file is answered `n/a` before any worktree or test run. review.sh is not
+                        where it runs: `ws review` runs it at the branch tip and refuses a toothless one before the
+                        reviewer, and `ws chain` runs it before its review and stops a toothless step, naming the
+                        verdict and the result. `ws review-compare` and `ws review-shadow` call review.sh directly,
+                        so there a toothless verdict reaches the reviewer as a blocking finding under rule 2 unless
+                        it can say why the test is still sound.
 scripts/doctor.sh       `ws doctor`: required and optional tools, the version and sign-in or credential of the client
                         each configured role uses (Claude Code or OpenCode; `config.sh` defaults builders to Claude
                         Code, and with `WS_REVIEW_AGENT` empty a review uses the only installed client, the changed
@@ -279,7 +308,10 @@ scripts/wake.sh         `ws wake`: one message into an OpenCode session from a s
                         wake.log, wake.failed. The session `current` is runs/<slug>/session.id (written by the
                         cold-start plugin); the server is --url, WS_WAKE_URL, runs/<slug>/oc.port (written by
                         `ws oc`), then 4096 (wake_session and wake_url in lib.sh; bg.sh calls wake_session only, and
-                        the URL is resolved by wake.sh when the wake fires).
+                        the URL is resolved by wake.sh when the wake fires). A wake's turn can run long, and a client
+                        left attached would make the session a non-interactive run that refuses the question tool
+                        until it ends: the sender kills its client once the first event arrives, and the turn
+                        continues on the server.
                         `scripts/wake-check.sh` tests it with stand-ins; selftest.sh runs that
                         (or `selftest.sh --wake` for only these cases).
 scripts/bg.sh           `ws bg run|watch|list|log|wait|stop`: a command detached with setsid under runs/<slug>/bg/,
@@ -342,10 +374,26 @@ scripts/lessons-check.py pairs each lessons/<role>.local.md bullet with the shar
 scripts/opencode-plugins/deny-guard.js  a builder's second deny check: OpenCode matches its rules with the command's
                         quotes kept, so this hook re-tests WS_RUN_DENY on the unquoted text before the bash tool runs.
                         It removes quoting and splits at separators, no more: a word the shell computes
-                        (`x=-c; python3 $x 1`) is out of its reach. opencode-builder.sh refuses to start without the list.
+                        (`x=-c; python3 $x 1`) is out of its reach. The refusal names the grant the command would
+                        have needed (scripts/grant-suggest.js), so a lost turn leaves a shape to use.
+                        opencode-builder.sh refuses to start without the list.
+scripts/grant-suggest.js  the closest grant for a refused command: the grant whose pattern shares the longest run
+                        of the command's first words, as `Bash(...)`, or none. Both deny guards and bin/ws-run use it,
+                        so every refusal names the same grant: a command matching a deny rule is told the grant it
+                        would have needed and that the rule overrides it; a command no grant shares a first word
+                        with is reported as uncovered. `node scripts/grant-suggest.js <grants-file> <command...>`
+                        prints the suggestion alone, for callers in another language.
+scripts/denied-summary.py  the denied calls of one finished run, each with that suggestion, as one line `ws wait`
+                        prints after the result: the count and the first three. It reads the grant the guard named
+                        from the run log, and computes it from runs/<slug>/<name>.grants for a call OpenCode's own
+                        permission map refused. A run with no grants file has nothing to compare against, so
+                        nothing is printed.
 bin/ws-run              the builders' evidence runner: one granted and not-denied command, its log, its exit code,
                         a row in runs.tsv. Its grant file holds the grants without quotes: it matches the words the
-                        shell passed it, while the agent matches a grant as written.
+                        shell passed it, while the agent matches a grant as written. A command matching no grant and
+                        a command a deny rule refuses are both refused with the suggestion the deny guard prints
+                        (scripts/grant-suggest.js), on the line under the refusal, at the same exit 2. It reads that
+                        helper from scripts/ beside bin/, which the builder shell sandbox binds read-only for it.
 scripts/selftest.sh     syntax checks plus a dry run against a scratch repo. Run it after any change here.
 agents/*.md             the three roles. Plain prose, pasted into prompts.
 lessons/*.md            per-role notes, pasted into prompts. The whole memory system. lessons/<role>.local.md, when
@@ -371,8 +419,8 @@ scripts/opencode-plugins-2x/run-events.js  the 2.x event record: ctx.event.subsc
                         records scripts/opencode_run.py and scripts/check-result.sh read.
 scripts/opencode-plugins-2x/index.js  the package a 2.x builder's and review's config names in `plugins`: V2 loads a
                         configured directory as one module, so its setup registers the deny guard and run-events.
-.opencode/plugins/reply-log-2x.js  the 2.x reply log: saves session.text.ended to runs/<slug>/replies.md. The event is
-                        read-only, so it cannot add the 1.x banner; reply-time has no 2.x port for the same reason.
+.opencode/plugins-2x/reply-log-2x.js  the 2.x reply log: saves session.text.ended to runs/<slug>/replies.md. The event
+                        is read-only, so it cannot add the 1.x banner; reply-time has no 2.x port for the same reason.
 scripts/opencode-2x-check.mjs  the scripted check for the 2.x plugins; selftest.sh runs the fake-context cases and
                         --live-guard/--live-reply run the same files against a real 2.2.7 CLI.
 ```
@@ -389,15 +437,36 @@ mechanism states its line, or stays version-neutral:
 - A branch that touches a plugin, the shell tool, the server paths or the launcher flags says which line it targets and
   keeps the other line working or explicitly out of scope. The 1.x files under `scripts/opencode-plugins/` are not
   rewritten for 2.x; the builder plugins live in the package `scripts/opencode-plugins-2x/`, whose `index.js` composes
-  the deny guard and run-events, and the reply log stays at `.opencode/plugins/reply-log-2x.js`.
+  the deny guard and run-events, and the orchestrator's reply log stays at `.opencode/plugins-2x/reply-log-2x.js`.
+- The workspace's orchestrator plugins sit in one directory per line, `.opencode/plugins-1x/` and
+  `.opencode/plugins-2x/`, because `.opencode/plugins/` is auto-discovered by whichever line is installed and a 1.x
+  plugin does not load on 2.x. `ws oc` names the line's set in the config it writes: `plugin`, a list of file URLs, on
+  1.x; `plugins`, one directory whose `index.js` V2 loads as a module, on 2.x. `scripts/oc-config.test.mjs` checks both
+  the files' shapes and the two generated configs, and `--live <opencode>` starts the installed CLI in a throwaway XDG
+  prefix to prove its log has no `failed to load plugin` line.
 - `docs/opencode-2-api.md` is the map: update its row when a line-specific mechanism moves, and move a row out of
   "Unresolved rows" only with a probe log or a page that settles it.
+
+## Which check covers what
+
+Six layers, each a script: review and chain call most of them at a fixed point, and every one runs by hand on one branch or project.
+
+| Layer | Script | What it covers |
+|---|---|---|
+| `ws verify` | `scripts/verify.sh` | every merge on the project branch since a date: the subject names the reviewed SHA and the step, a review at that SHA says merge, a merge test run is on record, no unreasoned `--no-review` and no unreasoned `--no-look`, and a merge that changes code was reviewed as many times as `--passes N` asks. `--merge <sha>` checks one merge alone, which `ws merge` runs on its own merge after the tests and before the push (and it fails a branch that moved past the merged tip). Read-only, no model call and no network. |
+| `ws teeth` | `scripts/teeth.sh` | whether a branch's tests can fail: the non-test files it changed go back to the merge base, its test files stay, `TEETH_CMD` (else `TEST_CMD`) runs, and the verdict `ok`, `toothless`, `n/a` or `error` lands in `runs/<slug>/<name>.teeth.txt`. `n/a` comes before any worktree when no changed file is a test. `ws review` runs it at the branch tip before the reviewer and `ws chain` runs it before its review; `toothless` stops the review. |
+| `ws precheck` | `scripts/precheck.sh` | the checklist rules a script can decide, as `FLAG`/`ok` lines: a backticked path in added lines that does not exist (rule 4), a reference to a deleted file (6), a new test with no failing run on record (2), an SVG that does not parse (11), logs, databases or scratch files in the branch (14), a check whose last run failed or that nothing re-runs (15), a date after today (17), a secret pattern, a home path or a broken dispatch deny list (18), attribution (19). `scripts/review.sh` puts the lines in the reviewer's prompt. |
+| `ws evidence-claims` | `scripts/evidence-claims.sh` | the done-when items claiming observed evidence whose path is missing from the worktree, and the failing-before logs that hold no failure marker. Candidates for the reviewer, not verdicts; a run with no usable result prints why instead of `none`. |
+| `ws orchestrator-record` | `scripts/orchestrator-record.sh` | what the orchestrator did in one project or all of them: direct and merge commits from first-parent history, the chain's stops, each stop's note, the looks and the merge test runs. A number with no source prints `not recorded`, never `0`. |
+| `ws ask` | `scripts/ask.sh` | one read-only research question, run by an OpenCode job out of the way of the turn, answered at `runs/<slug>/ask/<name>.md` under a model/cost/minutes header, with no worktree and no writes. |
+
+`ws review` runs `teeth.sh` at the branch tip before the reviewer starts, and `scripts/review.sh` runs `precheck.sh` and `evidence-claims.sh` and hands their output, with the teeth verdict, to the reviewer; the review summary it prints repeats every evidence-claim `FLAG` line, so a reviewer that disagrees with one has to say so rather than drop it. `scripts/merge.sh` runs `verify.sh --merge` on its own merge after the tests and before the push. A change to the way the tool talks to a client — a new OpenCode or Claude release — follows `docs/version-upgrade.md`, which sets the order these layers are proved in for the switch.
 
 ## Where to change what
 
 | You want to | Change |
 |---|---|
-| Give builders another command | `EXTRA_TOOLS` in `projects/<slug>.conf` for one project; the `TOOLS` array in `scripts/dispatch.sh` for all. Rules are Claude Code permission patterns: `Bash(cmd *)`, `Edit(./**)`. A `## Commands` entry that starts with a shell is granted as written (`bash scripts/t.sh` becomes `Bash(bash scripts/t.sh)`), never by its first word, an entry whose option word carries a `c` (`-c`, `-lc`, `--norc`) is not granted, and neither is one whose script is a bare glob (`bash *`). An interpreter (`python`, `python3`, `node`, `perl`, `ruby`) is granted by the script it names (`node scripts/build.js`), not by its first word: `node *` and its `-c`/`-e`/`--eval`/`-p`/`--print` forms are not granted. `node --test` stays runnable. |
+| Give builders another command | `EXTRA_TOOLS` in `projects/<slug>.conf` for one project; the `TOOLS` array in `scripts/dispatch.sh` for all. Rules are Claude Code permission patterns: `Bash(cmd *)`, `Edit(./**)`. A `## Commands` entry that starts with a shell is granted as written (`bash scripts/t.sh` becomes `Bash(bash scripts/t.sh)`), never by its first word, an entry whose option word carries a `c` (`-c`, `-lc`, `--norc`) is not granted, and neither is one whose script is a bare glob (`bash *`). An entry naming a script by a relative path is granted as written too (`./gradlew test` becomes `Bash(./gradlew*)`), and a glob or a bare directory in that place (`./*`, `./scripts/`) is not. An interpreter (`python`, `python3`, `node`, `perl`, `ruby`) is granted by the script it names (`node scripts/build.js`), not by its first word: `node *` and its `-c`/`-e`/`--eval`/`-p`/`--print` forms are not granted. `node --test` stays runnable. |
 | Forbid something | the `DENY` array in `scripts/dispatch.sh`; a deny beats every allow on both agents and in `bin/ws-run`, including a broad `EXTRA_TOOLS` grant such as `Bash(node *)`. The interpreter eval options (`-c`, `-e`, `--eval`, `-p`, `--print`) are denied there, as are the combined short-option bundles listed in `interp_combos` (`-uc`, `-Buc`, `-anle`); a bundle with another flag, order or length is not (a glob cannot match every cluster without thousands of rules). A later code option is denied only in an option-first command (`node --no-warnings -p 1`): a word after the script is the script's own, so `node scripts/serve.js -p 8080` runs, and `python -m pytest -c setup.cfg` stays denied because a glob cannot see where the options end. On OpenCode, `scripts/opencode-plugins/deny-guard.js` applies the list to the unquoted command as well. |
 | Change what counts as attribution | `WS_ATTRIBUTION_RE` in `config.sh` (merge refuses added lines, dispatch refuses task files; `--names-ok` for a scrub task). Intended credits: `CREDIT_PATHS` in the project's conf. |
 | Change the default budget, timeout or model | `config.sh`; or per run with `--budget`, `--timeout`, `--model`, `--effort` (an OpenCode model variant when `--agent opencode`, checked against the model's list). |
@@ -405,15 +474,15 @@ mechanism states its line, or stays version-neutral:
 | Run builders on OpenCode | `WS_AGENT="opencode"` in `config.sh`, or `--agent opencode` per run (also in a chain queue's flags); the model is `WS_OPENCODE_MODEL` or `--model provider/model`, and it must be in `WS_OPENCODE_MODEL_NAMES` with its Go page name, or the launcher refuses it. `--effort` (or `WS_EFFORT`) is passed as the model's variant (`opencode run --variant`), checked before the run, so a model without it refuses the dispatch. |
 | Change how a builder behaves | `agents/builder.md` (the role) or `lessons/builder.md` (specific lessons; `lessons/builder.local.md` for private ones). All go into every builder prompt verbatim; `ws dispatch --print-prompt <name> <task>` shows the result. |
 | Change what a review checks | `checklist.md`. Add a rule only by removing one. `agents/reviewer.md` sets the reviewer's posture (what blocks, what is a suggestion). `ws review --print-prompt <name>` shows the reviewer's whole prompt. |
-| Prove a branch's tests can fail | `ws teeth <name>` (or let `ws chain` run it before the review): `TEST_GLOBS` in the conf says which files are tests, `TEETH_CMD` (else `TEST_CMD`) is the runner. `ok` means they fail without the production change; `toothless` names the test files that pass either way and blocks under rule 2; `n/a` means there is no test or no production change; `error` means the runner crashed before reporting a failure. `ws bench` records the verdict per run. |
+| Prove a branch's tests can fail | `ws teeth <name>` (or let `ws review` or `ws chain` run it before the review): `TEST_GLOBS` in the conf says which files are tests, `TEETH_CMD` (else `TEST_CMD`) is the runner. `ok` means they fail without the production change; `toothless` names the test files that pass either way and stops the review under rule 2; `n/a` means there is no test or no production change; `error` means the runner crashed before reporting a failure and the review goes ahead. A branch with no changed test file is answered `n/a` with no worktree and no test run. `ws bench` records the verdict per run. |
 | Run reviews on OpenCode, or measure them | Nothing to set by default: a branch whose changed files are all Markdown or under `docs/`, `plans/`, `reports/`, `lessons/`, `agents/` (or `checklist.md`) reviews on OpenCode, and any other branch on Claude. `WS_REVIEW_AGENT="claude"` or `"opencode"` in `config.sh` forces one everywhere, and `ws review --agent opencode --model provider/model <name>` does it per branch (default `WS_OPENCODE_MODEL`; the model must be in `WS_OPENCODE_MODEL_NAMES`, read-only permissions, no writes or network). `ws review-compare <name>...` sets an OpenCode review beside the recorded Claude one for the same branch and prints what matched; `--fix-first` measures recall on the commits Claude marked fix-first (from the chain log and automatic fix tasks), and `--bench <slug> [--arm L]` does the same for fix-first bench runs rebuilt from their patches. Both recall modes write `runs/<slug>/review-recall.tsv` and keep each OpenCode review under `runs/<slug>/review-recall/`; it never merges. `WS_REVIEW_SHADOW=opencode` instead measures during normal work: every deciding review (unless it is already OpenCode's) starts a detached OpenCode review of the same SHA, and `ws review-shadow [--project slug\|--all]` prints the recorded pairs' agreement and recall from `runs/<slug>/review-shadow.tsv`. Model and budget: `WS_REVIEW_SHADOW_MODEL` (default `WS_OPENCODE_MODEL`) and `WS_REVIEW_SHADOW_BUDGET`; the run is capped by `WS_REVIEW_MEM`. |
 | Change what counts as a valid result | `schema/result.json`; then update the checks in `scripts/check-result.sh`. A full-track builder result answers `edge_cases` (platform, time, stored data, state that resets), a light-track one warns when it does not; the planner marks a visible change `UI: yes` in its task header, and such a run must leave a render or saved HTML snapshot in `.ws-evidence/`. `scripts/review.sh` puts the answers in the reviewer's prompt. |
 | Change what cold-start shows | `scripts/cold-start.sh`. Keep it under half a minute; it runs on every session start and after every compaction. Never put a test run in it. |
-| Change the merge gate | `scripts/merge.sh`. Today: pinned SHA, review on record, an operator hold passed only by a commit after it and a newer merge review (`scripts/hold.sh`; a chain stops on a held step like a gate), clean trees, no home paths or username in lines the branch adds (`home_path_leaks` in `scripts/lib.sh`, which precheck rule 18 shares; exempt: only the project's `ATTRIBUTION_EXEMPT`, its private files, so a home path in a LICENSE, manifest or `CREDIT_PATHS` file is flagged by review and refused by merge), no attribution in them (`WS_ATTRIBUTION_RE` in `config.sh`; exempt: LICENSE, manifests, license lists, the project's `CREDIT_PATHS`), tests via `TEST_CMD` (timed; warns over `WS_SUITE_WARN_S`), push on green, evidence moved to `runs/`. |
+| Change the merge gate | `scripts/merge.sh`. Today: pinned SHA, review on record, an operator hold passed only by a commit after it and a newer merge review (`scripts/hold.sh`; a chain stops on a held step like a gate), clean trees, no home paths or username in lines the branch adds (`home_path_leaks` in `scripts/lib.sh`, which precheck rule 18 shares; exempt: only the project's `ATTRIBUTION_EXEMPT`, its private files, so a home path in a LICENSE, manifest or `CREDIT_PATHS` file is flagged by review and refused by merge), no attribution in them (`WS_ATTRIBUTION_RE` in `config.sh`; exempt: LICENSE, manifests, license lists, the project's `CREDIT_PATHS`), tests via `TEST_CMD` (timed; warns over `WS_SUITE_WARN_S`), `verify.sh --merge` on the merge commit just made (a failed test or verify resets the merge and leaves the branch and worktree in place; `runs/<slug>/<name>.merge-verify.log` keeps its verdict), push on green, evidence moved to `runs/`. |
 | Run a chore after every merge | `POST_MERGE_CMD` in the project's conf (empty = none). It runs detached in the main checkout after the push, or after the local merge when the project has no remote, with `WS_MERGED_SHA`, `WS_MERGED_NAME` and `WS_PROJECT` set, under `WS_SERVE_MEM`; `scripts/post-merge.sh` logs it to `runs/<slug>/post-merge-<name>.log`, records `ok`/`failed` in `runs/<slug>/post-merge.status`, notifies on failure, and never changes the merge's exit code. |
 | Change where evidence goes | `.ws-evidence/` is created by `scripts/dispatch.sh`, named in `agents/builder.md` and `agents/reviewer.md`, excluded via `.git/info/exclude`, and moved by `scripts/merge.sh`. |
 | Change the timeouts | `WS_DEFAULT_TIMEOUT` and `WS_LIGHT_TIMEOUT` in `config.sh`; `scripts/dispatch.sh` picks the light one when the task says `Track: light`. |
-| Change how an OpenCode session is woken | `WS_OC_PORT` (where `ws oc` starts looking for a free port for the session's server, recorded in `runs/<slug>/oc.port`; the `oc` arm of `bin/ws`), `WS_WAKE_URL` (a fixed server that wins over the recorded port; empty by default), the session id the cold-start plugin (`.opencode/plugins/cold-start.js`) writes to `runs/<slug>/session.id` for `current`, and `WS_WAKE_TIMEOUT` (seconds to the first event) in `config.sh`; `WS_WAKE_UNIT_DIR` (where `--every` writes its persistent units, default `~/.config/systemd/user`); `scripts/wake.sh`. See "Waking an idle session" in `docs/opencode-orchestrator.md`. |
+| Change how an OpenCode session is woken | `WS_OC_PORT` (where `ws oc` starts looking for a free port for the session's server, recorded in `runs/<slug>/oc.port`; the `oc` arm of `bin/ws`), `WS_WAKE_URL` (a fixed server that wins over the recorded port; empty by default), the session id the cold-start plugin (`.opencode/plugins-2x/cold-start-2x.js` on 2.x, `.opencode/plugins-1x/cold-start.js` on 1.x) writes to `runs/<slug>/session.id` for `current`, and `WS_WAKE_TIMEOUT` (seconds to the first event) in `config.sh`; `WS_WAKE_UNIT_DIR` (where `--every` writes its persistent units, default `~/.config/systemd/user`); `scripts/wake.sh`. A 2.x wake's password comes from `OPENCODE_PASSWORD`/`OPENCODE_SERVER_PASSWORD` when either is set, else from the service's own `$XDG_STATE_HOME/opencode/service.json` (`scripts/oc-service-password.sh`; `ws oc` exports it for the session). A recurring wake reads it from a 0600 file under `runs/<slug>/wake/`, never the user manager's memory. See "Waking an idle session" in `docs/opencode-orchestrator.md`. |
 | Change the builder memory cap | `WS_BUILDER_MEM` in `config.sh` (systemd `MemoryMax` form, empty = none); `scripts/dispatch.sh` wraps the run in `systemd-run --user --scope` when systemd is there. |
 | Turn the builder shell sandbox on | `WS_SANDBOX=bwrap` in `config.sh`: `scripts/opencode_run.py config` then names `scripts/ws-sandbox-shell.sh` as OpenCode's shell, so builder commands run in bubblewrap with the home masked and no network. Probe it with `bash scripts/sandbox-check.sh`; `ws doctor` fails when it is on but bwrap is missing, setuid or older than the 0.12 floor, which the Ubuntu package does not meet; with it off doctor does not check. |
 | Change where worktrees live | `worktree_root` in `scripts/lib.sh`: `WT_ROOT`, `worktree_of`, `brief`, `opencode-perms`, `dispatch`'s exclude line and `doctor` all build on it, so one change moves every worktree. They are under `<project>/.worktrees/` (excluded via `.git/info/exclude`) so the project's own `CLAUDE.md` applies to builders and this workspace's does not. |
@@ -441,6 +510,6 @@ mechanism states its line, or stays version-neutral:
 
 ## Testing a change
 
-`scripts/selftest.sh` checks syntax and exercises, against a throwaway repo: init (including `--dry-run` and `--force`), dispatch (dry run, prompt contents, grants, `--input` files), the resume path, cold-start and its In flight block, the result check's done-when rules, the README command table against `ws help`, the review prompt, `ws teeth` (ok, toothless, n/a, a new file's test that fails or crashes, and no worktree left behind), doctor, the chain's merged-step skip and a killed chain's `killed` status, `ws web` (requests listed and printed, a fetch from a local `http.server` with its sidecar, scheme and size refusals, deny, resume, the chain's stop on requests), `ws bg` and `ws ask` with stand-ins, `ws wake` with stand-ins (`--wake` runs only those cases), the usage-limit probe and stale-result cases, the bench (corpus, `dispatch --base`/`--instructions`, transcript metrics, a replay run with a stand-in `claude` on PATH, the merge-lock wait, the report's quality-drop flag), and release (audit, `RELEASE_PATHS`, private-file refusal). Independent checks run in parallel and each is timed when `WS_SELFTEST_TIMES` names a file; the suite targets under 120 s, with no single check over 30 s. For a real end-to-end check, register a scratch repo and run a small task with `--model haiku --budget 1`; a full dispatch, review and merge costs under twenty cents.
+`scripts/selftest.sh` checks syntax and exercises, against a throwaway repo: init (including `--dry-run` and `--force`), dispatch (dry run, prompt contents, grants, the refused-entry notes and their prompt block, `--input` files), the resume path, cold-start and its In flight block, the result check's done-when rules, the README command table against `ws help`, the review prompt, `ws teeth` (ok, toothless, n/a with its test command proven not to run, a new file's test that fails or crashes, and no worktree left behind), `ws review` stopping before the reviewer on a toothless branch and going ahead on ok and n/a, the review summary repeating the evidence-claim flags, `ws merge` (verify's verdict on its own merge, and a branch that moved during the test run refused with the merge undone), doctor, the chain's merged-step skip and a killed chain's `killed` status, `ws web` (requests listed and printed, a fetch from a local `http.server` with its sidecar, scheme and size refusals, deny, resume, the chain's stop on requests), `ws bg` and `ws ask` with stand-ins, `ws wake` with stand-ins (`--wake` runs only those cases), the usage-limit probe and stale-result cases, the bench (corpus, `dispatch --base`/`--instructions`, transcript metrics, a replay run with a stand-in `claude` on PATH, the merge-lock wait, the report's quality-drop flag), and release (audit, `RELEASE_PATHS`, private-file refusal). Independent checks run in parallel and each is timed when `WS_SELFTEST_TIMES` names a file; the suite targets under 120 s, with no single check over 30 s. For a real end-to-end check, register a scratch repo and run a small task with `--model haiku --budget 1`; a full dispatch, review and merge costs under twenty cents.
 
 - `scripts/release.sh` (`ws release`): also tags the private commit it published (`released-vX.Y.Z`), creates the GitHub release page (notes from the published CHANGELOG, marked Latest), and with `RELEASE_MAJOR_BRANCHES=1` moves the public branch `v<major>` to the release. with `RELEASE_PATHS` in the project's conf, only those paths (and `source=dest` renames) go public. Publishes main as a release of the project's public repository (remote `public`, local branch `public-release`); audit, plumbing commit of main's tree, tag, clean-clone asset build, GitHub release. Covered by `scripts/selftest.sh`.

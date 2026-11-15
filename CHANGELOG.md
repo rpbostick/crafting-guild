@@ -2,11 +2,24 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.9.1
+
+- **An OpenCode 2.x session loads all of its plugins.** Each line gets its own plugin directory (`plugins-1x`, `plugins-2x`), so a 2.x session no longer reports three plugins failed and a 1.x rollback still loads its own set; `ws oc` hands each line its own `plugin` list.
+- **A wake reaches a 2.x session and lets go.** The service's own password is read from its state file (a throwaway-venv measurement shows it is stable across restarts), a delivered wake releases its client instead of holding the session non-interactive, and the chain watchdog carries the password the same way.
+- **A builder's run owns the processes it starts.** Every run is stamped with `WS_RUN_ID`; on exit the wrapper kills the process group and then sweeps any process still carrying the stamp, because a real client runs each shell command in its own session.
+- **A refused command names the grant it needed** — in dispatch's output, in the builder's prompt's `# Commands refused` block, in the deny guard's refusal, in `bin/ws-run`, and in `ws wait`'s summary. `./../x.sh` and every `..` component are refused instead of granted, and `./script` entries are granted.
+- **The review and merge check the claims.** `ws review` runs `ws teeth` first (a branch that changes no test file reports `n/a` without a test run), the review summary repeats every evidence-claims flag, and `ws merge` runs `ws verify` on the merge it is making before pushing; a failure undoes the merge and leaves the branch in place.
+- **A reasoned `--no-review` merge verifies clean**; an unreasoned one still fails.
+- **The suite leaves no scratch behind.** New cases had replaced the single EXIT trap, so every gate run left `plans/tmp-*`; the trap is single again and the scratch lives under it.
+- **`ws doctor` accepts OpenCode 2.x's `auth list` output**, so a working credential no longer reads as missing.
+- **Smaller fixes:** the sandbox binds `scripts` so `bin/ws-run` can print a suggestion inside bwrap; `ws audit` no longer crashes on a bad flag; a task that edits the suite is told to run it before answering.
+
 ## 2.9.0
 
 - OpenCode 2.x is a supported line beside 1.x: `WS_OPENCODE_LINE` detects the installed version and loads that line's instructions, builder/reviewer text, flags and config shapes. `docs/opencode-2-api.md` maps every 1.x mechanism to the 2.x surface with its source; `docs/version-upgrade.md` is the procedure for the next release.
-- The 2.x plugins (deny-guard, run-events, reply-log) load from a pinned workspace package; the review runs where it cannot load the reviewed branch's plugins; the builder and review configs use the 2.x permissions array; the doctor and `opencode_run.py` probes use the 2.x `/api` endpoints; the wake forwards the password each line reads.
+- The 2.x plugins (deny-guard, run-events, reply-log) load from a pinned workspace package; the review runs where it cannot load the reviewed branch's plugins; the builder and review configs use the 2.x permissions array; the doctor and `opencode_run.py` probes use the 2.x `/api` endpoints. The orchestrator's plugins sit in one directory per line (`.opencode/plugins-1x/`, `.opencode/plugins-2x/`), so a 2.x start no longer reports three plugins failed to load, and `ws oc` names only the installed line's set in the config it writes. A wake with no password in its environment reads the 2.x service's own `service.json`, so it authenticates again; `ws oc` exports the same value for the session it starts, and `ws chain-watch --arm` writes it to a 0600 `EnvironmentFile` the unit reads as a fallback, because the user manager's environment is gone after a reboot while the fired wake still reads the service's current password from its state file.
 - The bench compares the two lines on the same eight tasks; the 2.x line is the default after the switch, with the 1.x data backed up and the old binary kept for rollback.
+- `ws verify` fails a `--no-review` merge only when its subject records no reason, matching how it already treated `--no-look`: a sanctioned override that states why verifies clean.
 
 ## 2.8.4
 
@@ -48,7 +61,7 @@ Versions of Crafting Guild. `ws version` prints the current one.
 - Reviews get a test-quality input: `scripts/test-quality.sh` reads the branch diff and each run in `.ws-evidence/runs.tsv` and FLAGs a changed test that cannot fail, names none of the changed production files, has no failing-before run, or repeats a test name already in its file; the reviewer judges each FLAG, and a test that cannot fail blocks under rule 2.
 - `scripts/opencode_run.py` coerces the malformed builder-result shapes the repair-rate measurement found (denied and open-question lists of objects, a one-item `tests` list, a string `unknowns`, and a `done_when` basis that starts `observed:` or `inferred:`) before validating, so they no longer need the repair continue; a run that does need it is marked with `<log>.repair`.
 - `ws doctor` fails an orchestrator config that leaves the `task` tool open: a subagent session would overwrite `runs/<slug>/session.id`, so `ws wake current` would reach the finished child.
-- An OpenCode session's reply gets one warning appended when its leading local time is more than two minutes off the clock (`scripts/reply-time-check.sh`, `.opencode/plugins/reply-time.js`).
+- An OpenCode session's reply gets one warning appended when its leading local time is more than two minutes off the clock (`scripts/reply-time-check.sh`, `.opencode/plugins/reply-time.js`, now in `.opencode/plugins-1x/`).
 
 ## 2.8.0
 

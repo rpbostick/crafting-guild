@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Merge a reviewed branch into the main branch, run the tests, push on green, clean up.
+# Merge a reviewed branch into the main branch, run the tests, verify the merge's own record, push on green, clean up.
 # Usage: merge.sh [--project slug] [--no-review "<reason>"] [--no-look "<reason>"] <name> <reviewed-sha>
 #        merge.sh [--project slug] --test-only <name>
 # --test-only runs the project's tests (BENCH_TEST_CMD, else TEST_CMD) on the branch tip in its worktree and stops:
@@ -248,6 +248,20 @@ if [ -n "$TEST_CMD" ]; then
     tail -n 30 "$log"; die "tests failed on the merged tree; merge undone. Log: ${log#"$WS/"}"
   fi
 else printf '%s %s %s push\n' "$name" "$tip" "$merged_full" > "$RUNS/merge.unfinished"; echo "no TEST_CMD for $SLUG; merging without a test gate"; fi
+# The merge's own record, checked before the push: a review at the merged SHA, a merge test run on record, the branch
+# still at that tip, and a reason on every override. Run over the whole history verify reports merges that predate
+# the records, so it checks this merge alone. A failure undoes the merge the way a failed test does and leaves the
+# branch and its worktree in place, so the same branch can be fixed and merged again.
+verify_log="$RUNS/$name.merge-verify.log"
+if ! "$WS/scripts/verify.sh" --project "$SLUG" --merge "$merged_full" > "$verify_log" 2>&1; then
+  git -C "$PROJECT_PATH" reset --hard ORIG_HEAD -q
+  rm -f "$RUNS/merge.unfinished"
+  restore_allowed
+  cat "$verify_log" >&2
+  echo "exit 1" >> "$verify_log"
+  die "verify failed for this merge; merge undone. Branch $br and its worktree are untouched. Log: ${verify_log#"$WS/"}"
+fi
+echo "exit 0" >> "$verify_log"
 [ -f "$hf" ] && rm -f "$hf" && echo "hold on $name removed (the merge passed it)"
 if $gate_look; then record_look "$name" "$tip" chain-gate "merged from the chain's gate at $(short "$tip")"; echo "look recorded on $name from the chain's gate"; fi
 push_failed=false

@@ -39,6 +39,49 @@ opencode_line() {
     1|2) _ws_opencode_line=$major; printf '%s\n' "$major" ;;
   esac
 }
+# The workspace's plugins live in one directory per line, because one `.opencode/plugins/` is discovered by whichever
+# line is installed and a 1.x plugin does not load on 2.x. 2.x takes a configured directory as one module (its
+# index.js); 1.x takes one file URL per plugin. Absolute paths only: OpenCode resolves a configured plugin path
+# against the run's working directory otherwise, and a relative one could escape the workspace.
+oc_plugins_dir() { printf '%s/.opencode/plugins-%sx' "$WS" "${1:?oc_plugins_dir needs a line}"; }
+oc_plugins_json() { # <line>: the JSON value the line's config carries under `plugins` (2.x) or `plugin` (1.x)
+  local dir file
+  local -a files=()
+  dir=$(oc_plugins_dir "$1")
+  [ -d "$dir" ] || die "no $dir: an OpenCode $1.x session would load no plugins"
+  case "$1" in
+    2) jq -cn --arg dir "$dir" '[$dir]' ;;
+    1)
+      for file in "$dir"/*.js; do
+        [ -f "$file" ] || continue
+        files+=("file://$file")
+      done
+      [ ${#files[@]} -gt 0 ] || die "no plugins in $dir"
+      jq -cn --args '$ARGS.positional' -- "${files[@]}" ;;
+    *) die "no plugin set for OpenCode line '$1'" ;;
+  esac
+}
+# The 2.x service keeps its password in its own state file, which a client it did not start has to read to attach.
+# Prints nothing when either password variable is already set, when the file is absent or malformed, or on the 1.x
+# line; --note explains the absent or malformed file in one line on stderr. The value goes to stdout only, so a caller
+# can put it in the environment and never on a command line.
+oc_service_password() {
+  local note_mode=false state file password
+  case "${1:-}" in --note) note_mode=true ;; "") ;; *) die "usage: oc_service_password [--note]" ;; esac
+  if [ -n "${OPENCODE_PASSWORD:-}" ] || [ -n "${OPENCODE_SERVER_PASSWORD:-}" ]; then return 1; fi
+  [ "$(opencode_line)" = 2 ] || return 1
+  state="${XDG_STATE_HOME:-$HOME/.local/state}"; file="$state/opencode/service.json"
+  password=""
+  if [ -r "$file" ]; then
+    password=$(jq -er '.password | select(type == "string" and length > 0)' "$file" 2>/dev/null) || password=""
+  fi
+  if [ -z "$password" ]; then
+    $note_mode || return 1
+    note "no service password in $file; a client started now may have to authenticate by hand"
+    return 1
+  fi
+  printf '%s\n' "$password"
+}
 # Sampling settings reach OpenCode's build agent as plain decimals: temperature 0-2, top_p over 0 but at most 1.
 # The setting's own name is in each error, since a bad number came from that flag or arm key.
 sampling_decimal() { # <name> <value>
@@ -79,6 +122,84 @@ pid_file_alive() { # <file>
   hz=$(getconf CLK_TCK 2>/dev/null)
   case "$hz" in ''|*[!0-9]*) hz=100 ;; esac
   [ "$start" -le $(( (mtime - btime + 1) * hz )) ]
+}
+# A launcher's run leaves processes outside the group it started the client in: OpenCode 2.x runs each shell command
+# in a session of its own, and a server that command starts keeps that session after the command exits, so it is in
+# neither the client's group nor the client's session. Every process the client starts inherits the run's marker in
+# its environment, which survives both, so these helpers find and end them.
+# Deliberate: /proc and GNU grep's -z, because the marker is one NUL-separated entry of a process's environ file, and
+# the harness is Linux-only already (/proc/stat, systemd scopes).
+# The marker is unique per run; it is passed to the client alone, never exported, so the launcher's own helpers do not
+# carry it and the sweep cannot find itself.
+run_marker_id() { printf '%s-%s-%s\n' "$$" "$(date +%s%N)" "$RANDOM"; }
+run_marker_leftovers() { # <marker>: "pid<TAB>command" of every live process carrying that marker
+  local marker="$1" file pid cmd
+  grep -lxzF -- "WS_RUN_ID=$marker" /proc/[0-9]*/environ 2>/dev/null | while IFS= read -r file; do
+    pid="${file#/proc/}"; pid="${pid%/environ}"
+    [ "$pid" != "$$" ] || continue
+    cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null) || cmd=""
+    printf '%s\t%s\n' "$pid" "${cmd:0:120}"
+  done
+}
+# Live processes still in one process group, as "pid<TAB>command". A zombie has exited and cannot be signalled.
+group_leftovers() { # <pgid>
+  ps -ww -e -o pid=,pgid=,stat=,args= 2>/dev/null \
+    | awk -v g="$1" '$2 == g && substr($3, 1, 1) != "Z" { print $1 "\t" substr($0, index($0, $4)) }'
+}
+# How long a run's processes get after SIGTERM before SIGKILL: WS_RUN_KILL_GRACE seconds.
+run_kill_grace() {
+  local grace="${WS_RUN_KILL_GRACE:-15}"
+  case "$grace" in *[!0-9]*) die "WS_RUN_KILL_GRACE='$grace' is not a whole number of seconds" ;; esac
+  printf '%s\n' "$grace"
+}
+# Name every leftover one finder reports and end it: SIGTERM, then SIGKILL whatever survives <grace> seconds. The
+# finder runs again after each wait, so a process it lists late is still caught. Every line names the launcher, so a
+# run's log says what it had to kill and how long the process ignored SIGTERM.
+stop_found() { # <name> <grace> <finder> [<finder argument>]
+  local name="$1" grace="$2" finder="$3" arg="${4:-}" left pid cmd started elapsed=0 i
+  left=$("$finder" ${arg:+"$arg"})
+  [ -n "$left" ] || return 0
+  started=$(date +%s)
+  while IFS=$'\t' read -r pid cmd; do
+    printf '%s: leftover after the client exited: pid %s %s\n' "$name" "$pid" "${cmd:0:120}"
+  done <<< "$left"
+  # shellcheck disable=SC2046  # the finder prints one numeric pid per line, which kill takes as separate arguments
+  kill -TERM $(printf '%s\n' "$left" | cut -f1) 2>/dev/null || true
+  while [ "$elapsed" -lt "$grace" ]; do
+    [ -z "$("$finder" ${arg:+"$arg"})" ] && return 0
+    sleep 1
+    elapsed=$(( $(date +%s) - started ))
+  done
+  left=$("$finder" ${arg:+"$arg"})
+  while IFS=$'\t' read -r pid cmd; do
+    printf '%s: pid %s kept running %ss after SIGTERM, SIGKILL: %s\n' "$name" "$pid" "$elapsed" "${cmd:0:120}"
+  done <<< "$left"
+  # shellcheck disable=SC2046  # as above
+  kill -KILL $(printf '%s\n' "$left" | cut -f1) 2>/dev/null || true
+  for ((i = 0; i < 50; i++)); do
+    [ -z "$("$finder" ${arg:+"$arg"})" ] && return 0
+    sleep 0.1
+  done
+  echo "$name: a process it started is still alive after SIGKILL" >&2
+  return 1
+}
+# End everything one launcher run left behind: the group the client started in, then every process carrying the run's
+# marker. The wrapper's own group is refused by id, so a failed setsid cannot make the kill reach this wrapper.
+stop_run() { # <pgid> <grace> <name> [<marker>]
+  local g="$1" grace="$2" name="$3" marker="${4:-}" own_pgid
+  if [ -n "$g" ]; then
+    own_pgid=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')
+    if [ "$g" = "${own_pgid:-}" ]; then
+      echo "$name: refusing to signal process group $g, this wrapper's own" >&2
+    else
+      # Without ps there is no way to find the group's members, and a silent skip would leave a server behind.
+      command -v ps >/dev/null 2>&1 \
+        || echo "$name: no ps on PATH, so a leftover process of this run cannot be found or killed" >&2
+      stop_found "$name" "$grace" group_leftovers "$g"
+    fi
+  fi
+  [ -z "$marker" ] || stop_found "$name" "$grace" run_marker_leftovers "$marker"
+  return 0
 }
 # WS_MEMORY_DIR without a trailing slash. Empty is valid and means no memory; a relative path has no fixed meaning
 # across the sessions and permission rules that use it, so it exits 1.

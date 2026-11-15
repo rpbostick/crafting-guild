@@ -69,13 +69,16 @@ mkdir -p "$cruns"
 branch_commit "$clean" early src/early.txt "early work" "2021-01-01T00:00:20"
 early_tip="$TIP"; write_review "$cruns" early "$early_tip" 2; write_testlog "$cruns" early
 merge_branch "$clean" early "reviewed at $(gt "$clean" rev-parse --short "$early_tip")" "2021-01-01T00:00:30"
+early_merge=$(gt "$clean" rev-parse HEAD)
 branch_commit "$clean" good src/good.txt "good work" "2021-03-04T10:00:00"
 good_tip="$TIP"; write_review "$cruns" good "$good_tip" 2; write_testlog "$cruns" good
 merge_branch "$clean" good "reviewed at $(gt "$clean" rev-parse --short "$good_tip")" "2021-03-04T10:01:00"
+good_merge=$(gt "$clean" rev-parse HEAD)
 branch_commit "$clean" docs docs/guide.md "docs work" "2021-03-04T10:02:00"
 docs_tip="$TIP"; write_review "$cruns" docs "$docs_tip" 1; write_testlog "$cruns" docs
 merge_branch "$clean" docs "reviewed at $(gt "$clean" rev-parse --short "$docs_tip")" "2021-03-04T10:03:00"
 commit_main "$clean" src/direct.txt "direct work" "2021-03-04T10:04:00"
+direct_commit=$(gt "$clean" rev-parse HEAD)
 
 run_verify "$cslug"
 [ "$x" = 0 ] || fail "the clean history exited $x"
@@ -99,13 +102,41 @@ out=$("$WS/bin/ws" verify --project "$cslug" --passes 2 --json 2>&1) && x=0 || x
 [ "$(jq -r '.merges' <<< "$out")" = 3 ] || fail "--json counted $(jq -r '.merges' <<< "$out") merges, not 3"
 [ "$(jq -r '.failures | length' <<< "$out")" = 0 ] || fail "--json reported failures on a clean history"
 
+# --merge checks one merge alone: as merge.sh runs it on the merge it just made. A clean merge passes on its own, a
+# non-merge commit and an unknown sha are refused, and a branch that moved past the merged tip fails a one-merge run
+# while the same history run passes (the branch rule is only visible while the branch still exists).
+run_verify "$cslug" --merge "$good_merge"
+[ "$x" = 0 ] || fail "--merge on a clean merge exited $x: $out"
+has "ok: 1 merge(s) verified, no failures"
+run_verify "$cslug" --merge "$early_merge"
+[ "$x" = 0 ] && has "ok: 1 merge(s) verified, no failures" || fail "--merge on the first-minute merge exited $x: $out"
+run_verify "$cslug" --merge "$direct_commit"
+[ "$x" = 1 ] && has "is not a merge commit" || fail "a non-merge commit was accepted by --merge: $out"
+run_verify "$cslug" --merge 0000000000000000000000000000000000000000
+[ "$x" = 1 ] && has "unknown merge commit" || fail "an unknown --merge sha was accepted: $out"
+branch_commit "$clean" moved src/moved.txt "moved work" "2021-03-04T10:05:00"
+moved_tip="$TIP"; write_review "$cruns" moved "$moved_tip" 2; write_testlog "$cruns" moved
+gt "$clean" checkout -q main
+gtd "$clean" "2021-03-04T10:06:00" merge -q --no-ff agent/moved -m "Merge agent/moved: a title (reviewed at $(gt "$clean" rev-parse --short "$moved_tip"))"
+moved_merge=$(gt "$clean" rev-parse HEAD)
+gt "$clean" checkout -q agent/moved
+echo more >> "$clean/src/moved.txt"; gt "$clean" add src/moved.txt
+gtd "$clean" "2021-03-04T10:07:00" commit -qm "after the merge"
+gt "$clean" checkout -q main
+run_verify "$cslug" --merge "$moved_merge"
+[ "$x" = 1 ] && has_line "^moved at ${moved_merge:0:7}: branch: the branch agent/moved is at [0-9a-f]+, not the merged tip" \
+  || fail "--merge did not name a branch that moved past the merged tip: $out"
+run_verify "$cslug"
+[ "$x" = 0 ] || fail "a history run saw a deleted branch moved: $out"
+has "ok: 4 merge(s) verified, no failures"
+
 # A broken project: one merge per rule. The 2020 merge proves --since drops a merge before the window.
 gt "$bad" init -q -b main
 commit_main "$bad" src/first.txt "first" "2020-01-01T11:00:00"
 printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$bad" > "$bconf"
 mkdir -p "$bruns"
 branch_commit "$bad" old src/old.txt "old work" "2020-06-01T10:00:00"
-merge_branch "$bad" old "merged at $(gt "$bad" rev-parse --short "$TIP") with --no-review: legacy" "2020-06-01T11:00:00"
+merge_branch "$bad" old "merged at $(gt "$bad" rev-parse --short "$TIP") with --no-review" "2020-06-01T11:00:00"
 # reviewed at the tip, but no review record
 branch_commit "$bad" noreview src/noreview.txt "noreview work" "2021-03-04T10:00:00"
 nr_tip="$TIP"; write_testlog "$bruns" noreview
@@ -114,10 +145,15 @@ merge_branch "$bad" noreview "reviewed at $(gt "$bad" rev-parse --short "$nr_tip
 branch_commit "$bad" notest src/notest.txt "notest work" "2021-03-04T10:02:00"
 nt_tip="$TIP"; write_review "$bruns" notest "$nt_tip" 2
 merge_branch "$bad" notest "reviewed at $(gt "$bad" rev-parse --short "$nt_tip")" "2021-03-04T10:03:00"
-# --no-review
+notest_merge=$(gt "$bad" rev-parse HEAD)
+# --no-review with no reason: the shape written before a reason was required, so it must fail.
 branch_commit "$bad" skipped src/skipped.txt "skipped work" "2021-03-04T10:04:00"
 sk_tip="$TIP"; write_testlog "$bruns" skipped
-merge_branch "$bad" skipped "merged at $(gt "$bad" rev-parse --short "$sk_tip") with --no-review: blank" "2021-03-04T10:05:00"
+merge_branch "$bad" skipped "merged at $(gt "$bad" rev-parse --short "$sk_tip") with --no-review" "2021-03-04T10:05:00"
+# --no-review with a reason: the sanctioned override verifies clean.
+branch_commit "$bad" nrreason src/nrreason.txt "nrreason work" "2021-03-04T10:05:20"
+nrr_tip="$TIP"; write_testlog "$bruns" nrreason
+merge_branch "$bad" nrreason "merged at $(gt "$bad" rev-parse --short "$nrr_tip") with --no-review: review tool down" "2021-03-04T10:05:40"
 # a code merge reviewed in 1 pass
 branch_commit "$bad" passlow src/passlow.txt "passlow work" "2021-03-04T10:06:00"
 pl_tip="$TIP"; write_review "$bruns" passlow "$pl_tip" 1; write_testlog "$bruns" passlow
@@ -163,10 +199,27 @@ has_line '^merge [0-9a-f]+: subject: '
 has_line '^nolook at [0-9a-f]+: no-look: '
 has_line "^reused at ${ro_merge:0:7}: tests: no merge test run on record"
 grep -qE "^reused at ${rn_merge:0:7}: " <<< "$out" && fail "the newest merge with a reused name was refused its own review and test log"
-grep -q '^passlow at ' <<< "$out" && fail "a 1-pass code merge failed with no --passes required"
-grep -q '^onepass at ' <<< "$out" && fail "the one-pass review shape review.sh writes failed with no --passes required"
-grep -q '^nopasses at ' <<< "$out" && fail "a review with no passes field failed with no --passes required"
-grep -q '^nolookok at ' <<< "$out" && fail "a --no-look with a reason was refused"
+# The whole-history run's output, kept apart from the --merge runs below: run_verify reassigns $out, and a check
+# read from another run's output matches no line at all and so can never fail.
+hist=$out
+# --merge on one broken merge names that merge's failure and no other merge's, so a merge-time check does not
+# inherit rows for merges that predate the records.
+run_verify "$bslug" --merge "$notest_merge"
+[ "$x" = 1 ] || fail "--merge on a broken merge exited $x, not 1"
+has_line "^notest at ${notest_merge:0:7}: tests: no merge test run on record"
+[ -z "$(grep -vE "^notest at ${notest_merge:0:7}: " <<< "$out")" ] || fail "--merge named another merge: $out"
+run_verify "$bslug" --merge "$rn_merge"
+[ "$x" = 0 ] || fail "--merge on a clean merge in a broken history exited $x: $out"
+has "ok: 1 merge(s) verified, no failures"
+# The overrides the history holds verify clean with no --passes required, asserted on that run's output ($hist).
+grep -q '^passlow at ' <<< "$hist" && fail "a 1-pass code merge failed with no --passes required"
+grep -q '^onepass at ' <<< "$hist" && fail "the one-pass review shape review.sh writes failed with no --passes required"
+grep -q '^nopasses at ' <<< "$hist" && fail "a review with no passes field failed with no --passes required"
+grep -q '^nolookok at ' <<< "$hist" && fail "a --no-look with a reason was refused"
+grep -q '^nrreason at ' <<< "$hist" && fail "a --no-review with a reason was refused"
+# The two shapes of the override, printed so a run's log shows each: an unreasoned subject fails, a reasoned one
+# above it does not.
+grep -E '^(old|skipped) at [0-9a-f]+: no-review: ' <<< "$hist"
 
 # --since drops the 2020 merge; --passes adds the 1-pass code merge.
 run_verify "$bslug" --since 2021-01-01

@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
+import { readGrants, refusalMessage } from "../grant-suggest.js";
 
 // OpenCode matches a permission rule against the command text with its quotes kept, so `python3 "-c" 1` passes the
 // rule `python3 -c*` while the shell runs `python3 -c 1`. This hook runs before the tool and tests the builder's deny
-// list (WS_RUN_DENY, the file bin/ws-run reads) against the same text with the quoting removed.
+// list (WS_RUN_DENY, the file bin/ws-run reads) against the same text with the quoting removed. The refusal names
+// the grant that would have allowed the command (WS_RUN_GRANTS), so a model that lost a turn gets a shape to use.
 //
 // Deliberate: this removes quoting and splits at separators, and stops there, because a full reading of the command
 // is a shell parser. It does not see a word only the shell computes: `x=-c; python3 $x 1`. A separator inside a quoted
@@ -33,6 +35,7 @@ function ruleRegex(rule) {
 export const DenyGuardPlugin = async (_input = {}, options = {}) => {
   const file = options.denyFile ?? process.env.WS_RUN_DENY;
   if (!file) return {};
+  const grants = readGrants(options.grantsFile ?? process.env.WS_RUN_GRANTS);
   const rules = readFileSync(file, "utf8").split("\n").filter(Boolean).map(ruleRegex);
   return {
     "tool.execute.before": async (input = {}, output = {}) => {
@@ -40,7 +43,7 @@ export const DenyGuardPlugin = async (_input = {}, options = {}) => {
       for (const command of simpleCommands(String(output.args?.command ?? ""))) {
         if (rules.some((rule) => rule.test(command))) {
           // "prevents you from using" is the wording scripts/opencode_run.py counts as a denied call.
-          throw new Error(`A deny rule prevents you from using this command with its quotes removed: ${command}`);
+          throw new Error(refusalMessage(command, grants));
         }
       }
     },

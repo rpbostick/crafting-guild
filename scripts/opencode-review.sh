@@ -71,25 +71,32 @@ else
   OPENCODE_CONFIG_CONTENT="$(cat "$config")"; export OPENCODE_CONFIG_CONTENT
 fi
 pid=""
-# A timeout or kill of this script stops OpenCode's whole process group, so a wrapper's child goes too. setsid makes
-# the background opencode a session leader, so its PID is its group's ID; killing the group is safe and by PID.
-trap '[ -n "$pid" ] && kill -- "-$pid" 2>/dev/null; exit 143' TERM INT
+# `opencode run` can exit while a server it started stays up, and a real client's shell runs each command in its own
+# session, so the group alone is not the boundary: stop_run also ends every process the client started, found through
+# the run's marker (WS_RUN_ID).
+# A command substitution runs in a subshell, so run_kill_grace's die only ends the substitution: check it here.
+grace=$(run_kill_grace) || exit 1
+marker=$(run_marker_id)
+# A timeout or kill of this script stops the run the same way a normal exit does.
+trap 'if [ -n "$pid" ]; then stop_run "$pid" "$grace" opencode-review "$marker"; fi; exit 143' TERM INT
 # One OpenCode call with the budget watched across the whole log; stdin closed, or `opencode run` waits on it.
 run() {
   if [ "$line" = 2 ]; then
     # 2.x names the variant in the model reference, has no --variant and no --pure.
     local model_arg="$model"
     [ -n "$variant" ] && model_arg="$model#$variant"
-    setsid opencode run --standalone --format json --model "$model_arg" --title "$title" "$@" < /dev/null &
+    WS_RUN_ID="$marker" setsid opencode run --standalone --format json --model "$model_arg" --title "$title" "$@" < /dev/null &
   else
     local -a varargs=()
     [ -n "$variant" ] && varargs=(--variant "$variant")
-    setsid opencode run --pure --format json "${varargs[@]}" --model "$model" --title "$title" "$@" < /dev/null &
+    WS_RUN_ID="$marker" setsid opencode run --pure --format json "${varargs[@]}" --model "$model" --title "$title" "$@" < /dev/null &
   fi
   pid=$!
   python3 -I "$helper" watch "$log" "$budget" "$pid" & watcher=$!
-  wait "$pid"; pid=""
+  wait "$pid"
   kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null
+  stop_run "$pid" "$grace" opencode-review "$marker"
+  pid=""
 }
 over() { python3 -I "$helper" over "$log" "$budget"; }
 

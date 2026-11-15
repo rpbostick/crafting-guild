@@ -175,7 +175,9 @@ if command -v opencode >/dev/null; then
     latest_oc=$(timeout 5 npm view opencode-ai version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
     if [ -n "$latest_oc" ] && ! newer_or_equal "$ov" "$latest_oc"; then echo "note  opencode $latest_oc is available (installed $ov)"; fi
   fi
-  if timeout 10 opencode auth list 2>/dev/null | grep -q '●'; then ok "opencode has a credential"
+  # 1.19.1 marks a stored credential with `●`; 2.2.7 prints a table whose row ends in `stored`
+  # (`OpenCode Go  API key    stored`), so both spellings count and an empty list still fails.
+  if timeout 10 opencode auth list 2>/dev/null | grep -q -e '●' -e 'stored'; then ok "opencode has a credential"
   elif [ -n "$oc_agents" ]; then fail "opencode has no credential (needed by $oc_agents$auto_note)" "opencode auth login"
   else warn "opencode has no credential: OpenCode builders cannot run" "optional: opencode auth login"; fi
 elif [ -n "$oc_agents" ]; then

@@ -339,9 +339,10 @@ for d in "${interpreter_deny[@]}"; do DENY+=("Bash($d)" "Bash(*/$d)"); done
 # Every backticked command in the task's "## Commands" section is granted by its name: its first word (first two
 # for npx, npm, node, python3, python, git), except a shell, which is granted as the exact entry written so
 # `bash scripts/t.sh` never becomes `Bash(bash*)` and with it `bash -c 'anything'`. A shell entry whose script is
-# a bare glob (`bash *`) is refused: `Bash(bash *)` matches `bash -ecx 'anything'` too. A task therefore never
-# names a command the builder cannot run: an ungranted command is denied silently and the run ends partial
-# (`npm install *` does not cover `npx expo install`). Destructive forms stay in DENY, above. The interpreter
+# a bare glob (`bash *`) is refused: `Bash(bash *)` matches `bash -ecx 'anything'` too. An entry that grants nothing
+# is named below with the shape that would run instead, in dispatch's output and in the builder's prompt: an
+# ungranted command is denied at run time and the run ends partial (`npm install *` does not cover `npx expo
+# install`). Destructive forms stay in DENY, above. The interpreter
 # check below is a convenience for the direct spelling (`python3 -c`, `node -e`); an option after an option
 # value (`perl -I lib -e 1`) slips past it, and the DENY above still refuses that command at run time. A forbidden command
 # ("No `pip`", "no plain `rm` or `mv`", "never run `ws`") is dropped before the backticks are read, or the
@@ -430,7 +431,87 @@ matches_rule() {
   # shellcheck disable=SC2053  # the rule is a glob on purpose, as Claude Code's Bash(...) rules are
   [[ "$cmd" == $pat ]]
 }
-derived=() unsafe=() interp_unsafe=() eval_forms=()
+# Every `## Commands` entry that grants nothing and that no existing grant already runs is listed once, in
+# dispatch's output and in the builder's prompt, with the shape that would run instead: a task naming a command
+# nobody can run looks complete and loses a turn to the silent denial.
+refusals=()
+declare -A refused_seen=()
+refuse_entry() { # <entry> <why, and what to run instead>
+  local entry="$1" why="$2"
+  [ -n "${refused_seen[$entry]:-}" ] && return
+  refused_seen[$entry]=1
+  refusals+=("$entry"$'\t'"$why")
+}
+# A grant pattern, added once to the derived list.
+derive() {
+  local pat="$1"
+  printf '%s\n' "${TOOLS[@]}" "${derived[@]}" | grep -qxF "$pat" || derived+=("$pat")
+}
+# The rule that already runs a command, so an entry naming it needs no rule of its own: a default grant
+# (Bash(git branch -a)) or another entry's broader rule (Bash(npm run*) for `npm run deploy`) runs the command as
+# written, where the pattern an entry would derive is wider than the entry. A DENY rule wins over every grant, so a
+# form denied there (`git push` under a broad --allow) is never covered.
+covered_by_grant() { # <command> <grant name>: sets covered_pat and returns 0 when a grant runs it
+  local probe="$1" d t p
+  covered_pat=""
+  [ "$1" = "$2" ] && probe="$1 "
+  for d in "${DENY[@]}"; do
+    case "$d" in Bash\(*\)) p="${d#Bash(}"; p="${p%)}" ;; *) continue ;; esac
+    matches_rule "$probe" "$p" && return 1
+  done
+  for t in "${TOOLS[@]}" "${derived[@]}"; do
+    case "$t" in Bash\(*\)) p="${t#Bash(}"; p="${p%)}" ;; *) continue ;; esac
+    matches_rule "$probe" "$p" && { covered_pat="$p"; return 0; }
+  done
+  return 1
+}
+# Why a destructive git subcommand is never granted, and the granted shape that does the same job.
+git_refusal() {
+  case "$1" in
+    push) printf '%s\n' "push belongs to the merge, not the builder: commit and leave the push to \`ws merge\`" ;;
+    config) printf '%s\n' "a builder never changes git config; pass the option the command needs instead" ;;
+    reset|rebase) printf '%s\n' "a builder never rewrites history; \`git restore <path>\` brings a file back" ;;
+    worktree) printf '%s\n' "worktrees belong to dispatch; run the command in this worktree" ;;
+    branch) printf '%s\n' "listing is granted as \`git branch --show-current\` and \`git branch -a --contains <sha>\`; switching branches is not" ;;
+    stash) printf '%s\n' "a builder keeps work in commits; \`git diff\` shows uncommitted changes" ;;
+    checkout) printf '%s\n' "\`git checkout -- <path>\` is granted to bring a file back; switching branches is not" ;;
+    rm|mv) printf '%s\n' "removing or moving files is granted only through \`git rm\` and \`git mv\`" ;;
+    clean) printf '%s\n' "\`git clean -f -- <path>\` is granted to delete an untracked file; other clean forms are not" ;;
+    *) printf '%s\n' "not granted; name a granted subcommand" ;;
+  esac
+}
+# Why an entry naming a path above the worktree was refused, and the shape that stays inside it.
+outside_refusal() {
+  printf '%s\n' "a path outside the worktree runs nothing here; name the script inside it with a leading \`./\`, e.g. \`./scripts/<name>.sh *\`"
+}
+# Why a shell entry was refused, and the shape that runs the same thing.
+shell_refusal() {
+  local c="$1" bare w
+  bare=$(bare_entry "$c")
+  # shellcheck disable=SC2086  # word splitting under set -f is intended: one command string becomes its words
+  set -f; set -- $bare; set +f; shift || true
+  [ $# -gt 0 ] || { printf '%s\n' "a bare shell runs any command it is given; put the command in a script and name it, e.g. \`bash scripts/<name>.sh *\`"; return; }
+  for w in "$@"; do
+    case "$w" in
+      --) continue ;;
+      -*) case "$w" in *c*) printf '%s\n' "a shell option word carrying c runs arbitrary code; put the command in a script and name it, e.g. \`bash scripts/<name>.sh *\`"; return ;; esac ;;
+      '*'|'**') printf '%s\n' "a bare glob where the script belongs runs anything; name the script, e.g. \`bash scripts/<name>.sh *\`"; return ;;
+      *) break ;;
+    esac
+  done
+  printf '%s\n' "name the script it runs, e.g. \`bash scripts/<name>.sh *\`"
+}
+# Why an interpreter entry was refused: no [named script], or its own command option.
+interp_refusal() {
+  local base="$1" rc="$2" example="scripts/<name>.js"
+  case "$base" in python|python3) example="scripts/<name>.py" ;; perl) example="scripts/<name>.pl" ;; ruby) example="scripts/<name>.rb" ;; esac
+  if [ "$rc" = 2 ]; then
+    printf '%s\n' "the interpreter's own command or eval option runs arbitrary code; name the script it runs instead, e.g. \`$base $example\`"
+  else
+    printf '%s\n' "an interpreter entry needs a named script; name it, e.g. \`$base $example *\`"
+  fi
+}
+derived=()
 while IFS= read -r c; do
   [ -n "$c" ] || continue
   # No glob expansion: `node *` is a pattern, not this folder's files.
@@ -440,11 +521,25 @@ while IFS= read -r c; do
   # git with an option first: `git -C <dir> <sub>` is granted as exactly that; any other option form is not
   # granted at all, since the fallback below would be Bash(git*), every git command.
   if [ "$w1" = git ] && [ "${w2#-}" != "$w2" ]; then
-    case "$w4" in ''|push|config|reset|rebase|worktree|branch|stash|checkout|clean|rm|mv) continue ;; esac
-    [ "$w2" = -C ] && [ -n "$w3" ] || continue
-    pat="Bash(git -C $w3 $w4*)"; printf '%s\n' "${TOOLS[@]}" "${derived[@]}" | grep -qxF "$pat" || derived+=("$pat"); continue
+    case "$w4" in
+      '') refuse_entry "$c" "git with an option first is granted only as \`git -C <dir> <subcommand>\`"; continue ;;
+      push|config|reset|rebase|worktree|branch|stash|checkout|clean|rm|mv) refuse_entry "$c" "$(git_refusal "$w4")"; continue ;;
+    esac
+    [ "$w2" = -C ] && [ -n "$w3" ] || { refuse_entry "$c" "git with an option first is granted only as \`git -C <dir> <subcommand>\`"; continue; }
+    pat="Bash(git -C $w3 $w4*)"; derive "$pat"; continue
   fi
-  case "$w1" in ''|'<'*|'#'*|'$'*|'-'*) continue ;; rm|mv|sudo|su|dd|mkfs|shutdown|reboot|kill|pkill|killall) continue ;; esac
+  case "$w1" in
+    '') refuse_entry "$c" "an empty entry grants nothing; name the command it runs"; continue ;;
+    '<'*) refuse_entry "$c" "a redirection is not a command; name the command whose input it feeds"; continue ;;
+    '#'*) refuse_entry "$c" "a comment grants nothing; name the command to run, or drop the line"; continue ;;
+    '$'*) refuse_entry "$c" "a command held in a variable is expanded when it runs, so no grant can be derived; write the command out, e.g. \`bash scripts/<name>.sh *\`"; continue ;;
+    '-'*) refuse_entry "$c" "an option alone is not a command; name the command it belongs to"; continue ;;
+    rm) refuse_entry "$c" "plain \`rm\` is never granted; delete a tracked file with \`git rm <path>\` and an untracked one with \`git clean -f -- <path>\`"; continue ;;
+    mv) refuse_entry "$c" "plain \`mv\` is never granted; move a tracked file with \`git mv <path> <path>\`"; continue ;;
+    kill|pkill|killall) refuse_entry "$c" "process control is never granted and no spelling of it is: end a process you start in the same run, or say in open_questions that the task needs it"; continue ;;
+    sudo|su) refuse_entry "$c" "running as another user is never granted"; continue ;;
+    dd|mkfs|shutdown|reboot) refuse_entry "$c" "a destructive or privileged command is never granted"; continue ;;
+  esac
   if base=$(interp_name "$w1"); then
     if pat=$(interp_pattern "$c" "$base"); then
       pat="Bash($pat*)"
@@ -454,13 +549,41 @@ while IFS= read -r c; do
       # not refused; only an entry no grant covers is unsafe.
       pat="Bash($c)"
       printf '%s\n' "${TOOLS[@]}" "${derived[@]}" | grep -qxF "$pat" && continue
-      if [ "$rc" = 2 ]; then eval_forms+=("$c"); else interp_unsafe+=("$c"); fi
+      refuse_entry "$c" "$(interp_refusal "$base" "$rc")"
       continue
     fi
   else
-    case "$w1" in '.'*|*/) continue ;; esac
-    g=$(grant_name "$(bare_entry "$c")") || continue
-    case "$g" in "git push"|"git config"|"git reset"|"git rebase"|"git worktree"|"git branch"|"git stash"|"git checkout") continue ;; esac
+    case "$w1" in
+      ./*)
+        # A relative path is the ordinary way to name a script, so it is granted as written (the trailing `*` takes
+        # its arguments); a glob or a bare directory where the script belongs runs or names anything, so it is not.
+        case "$w1" in
+          *'*'*) refuse_entry "$c" "a glob where the script belongs runs anything; name the script, e.g. \`./scripts/<name>.sh *\`"; continue ;;
+          */) refuse_entry "$c" "a directory names no command; name the script inside it, e.g. \`./scripts/<name>.sh *\`"; continue ;;
+        esac
+        # A leading `./` does not put the path back inside the worktree: `./../x.sh` and `./a/../../x.sh` reach above
+        # it exactly as `../x.sh` does, and the pattern derived from the word as written would grant them. The path is
+        # read component by component after every leading `./` is removed, so no spelling of it is granted.
+        rest="$w1"
+        while [ "$rest" != "${rest#./}" ]; do rest="${rest#./}"; done
+        case "/$rest/" in
+          */../*) refuse_entry "$c" "$(outside_refusal)"; continue ;;
+        esac
+        derive "Bash($w1*)"; continue ;;
+      .) refuse_entry "$c" "\`.\` runs a script in the shell it is typed in; name it with a leading \`./\`, e.g. \`./scripts/<name>.sh *\`"; continue ;;
+      ../*) refuse_entry "$c" "$(outside_refusal)"; continue ;;
+      */) refuse_entry "$c" "a path names no command; name the command that runs on it, or the script with a leading \`./\`"; continue ;;
+      .*) refuse_entry "$c" "a path names no command; name the command that runs on it, e.g. \`grep *\`, or the script with a leading \`./\`"; continue ;;
+    esac
+    g=$(grant_name "$(bare_entry "$c")") || { refuse_entry "$c" "no grant can be derived from this entry; name the command it runs"; continue; }
+    case "$g" in
+      "git push"|"git config"|"git reset"|"git rebase"|"git worktree"|"git branch"|"git stash"|"git checkout")
+        # A form a default grant or another entry already runs (`git branch -a`, `git worktree list`,
+        # `git checkout -- <path>`) is runnable as written, so it is granted by that rule and not refused; only the
+        # forms no rule covers are.
+        covered_by_grant "$c" "$g" && continue
+        refuse_entry "$c" "$(git_refusal "${g#git }")"; continue ;;
+    esac
     case "$w1" in
       bash|sh|dash|zsh)
         if g=$(shell_pattern "$c"); then pat="Bash($g)"; else
@@ -468,67 +591,42 @@ while IFS= read -r c; do
           # not refused; only an entry no grant covers is unsafe.
           pat="Bash($c)"
           printf '%s\n' "${TOOLS[@]}" "${derived[@]}" | grep -qxF "$pat" && continue
-          unsafe+=("$c"); continue
+          refuse_entry "$c" "$(shell_refusal "$c")"; continue
         fi ;;
       *) pat="Bash($g*)" ;;
     esac
   fi
-  printf '%s\n' "${TOOLS[@]}" "${derived[@]}" | grep -qxF "$pat" || derived+=("$pat")
+  derive "$pat"
 done <<< "$cmds"
 [ ${#derived[@]} -gt 0 ] && { TOOLS+=("${derived[@]}"); note "grants from ## Commands: ${derived[*]}"; }
-if [ ${#interp_unsafe[@]} -gt 0 ]; then
-  ulist=$(printf '%s, ' "${interp_unsafe[@]}"); ulist=${ulist%, }
-  note "not granted (an interpreter entry needs a named script): $ulist"
-fi
-if [ ${#eval_forms[@]} -gt 0 ]; then
-  elist=$(printf '%s, ' "${eval_forms[@]}"); elist=${elist%, }
-  note "not granted (interpreter command or eval option): $elist"
-fi
-if [ ${#unsafe[@]} -gt 0 ]; then
-  ulist=$(printf '%s, ' "${unsafe[@]}"); ulist=${ulist%, }
-  note "not granted (bare shell, a shell option word carrying c, or a shell whose command is a bare glob): $ulist"
-fi
 # A command the filter removed was forbidden by the task, but not necessarily unrunnable: a default grant
 # (Bash(git add *)) or a broader grant from another entry (Bash(npm run*) for `npm run deploy`) can still cover
 # it. Reporting "not granted" then would claim the sentence narrowed the grants while the command stays
 # runnable, so a covered command is named in a warning instead and only the rest are listed as refused.
-dropped=()
 covered=()
 while IFS= read -r c; do
   [ -n "$c" ] || continue
   printf '%s\n' "$cmds" | grep -qxF "$c" && continue
   n=$(grant_name "$c") || continue
+  # A command a deny rule matches stays unrunnable however an allow is written, so it is reported as not granted
+  # rather than "still covered"; covered_by_grant applies both halves of that test.
   cov=""
-  # A command a deny rule matches stays unrunnable however an allow is written, so it is reported as not
-  # granted rather than "still covered".
-  # A command with no arguments after its grant name is covered by `word *` and `word*`: the pattern's
-  # trailing `*` matches an empty argument list, but the bare text has no space for it to match.
-  probe="$c"; [ "$c" = "$n" ] && probe="$c "
-  denied=false
-  for d in "${DENY[@]}"; do
-    case "$d" in Bash\(*\)) dp="${d#Bash(}"; dp="${dp%)}" ;; *) continue ;; esac
-    matches_rule "$probe" "$dp" && { denied=true; break; }
-  done
-  if ! $denied; then
-    for t in "${TOOLS[@]}"; do
-      case "$t" in Bash\(*\)) p="${t#Bash(}"; p="${p%)}" ;; *) continue ;; esac
-      matches_rule "$probe" "$p" && { cov="$p"; break; }
-    done
-  fi
+  covered_by_grant "$c" "$n" && cov="$covered_pat"
   if [ -n "$cov" ]; then
     entry="$n (Bash($cov))"
     case " ${covered[*]} " in *" $entry "*) ;; *) covered+=("$entry") ;; esac
     continue
   fi
-  case " ${dropped[*]} " in *" $n "*) ;; *) dropped+=("$n") ;; esac
+  refuse_entry "$c" "the task itself forbids it in ## Commands, so no grant is derived; name it only if the task really needs it, and say so in open_questions"
 done <<< "$all_cmds"
 if [ ${#covered[@]} -gt 0 ]; then
   covlist=$(printf '%s, ' "${covered[@]}"); covlist=${covlist%, }
   note "warning: forbidden in ## Commands but still covered by an existing grant: $covlist"
 fi
-if [ ${#dropped[@]} -gt 0 ]; then
-  refused=$(printf '%s, ' "${dropped[@]}"); refused=${refused%, }
-  note "not granted (forbidden in ## Commands): $refused"
+if [ ${#refusals[@]} -gt 0 ]; then
+  for r in "${refusals[@]}"; do
+    note "not granted: \`${r%%$'\t'*}\`: ${r#*$'\t'}"
+  done
 fi
 # Both commands in a compound entry can be granted and the call is still denied as one Bash call. Say it at
 # dispatch: the audit found the denied-call class the most recurrent defect, and a lost turn is silent.
@@ -557,6 +655,20 @@ if [ -f "$PROJECT_PATH/.worktree-links" ]; then
   [ -n "$lk" ] && links_note="
 Linked paths: $lk are links into the main checkout. Read them; writing through them is denied (they resolve outside the worktree). Save files that must outlive this run under \`.ws-evidence/\` (kept at merge) and say in the result where they should go."
 fi
+# The same refused entries dispatch printed, just above the task: a builder that tries one loses a turn and gets
+# nothing back. Each line names the shape that would run instead.
+refused_note=""
+if [ ${#refusals[@]} -gt 0 ]; then
+  refused_note="
+# Commands refused
+This task names commands you are not granted; each line says what would run instead. Do not run one: a refused
+call costs a turn and returns nothing. Use the named shape, and when none fits what the task needs, say so in
+\`open_questions\` rather than retrying."
+  for r in "${refusals[@]}"; do
+    refused_note+="
+- \`${r%%$'\t'*}\`: ${r#*$'\t'}"
+  done
+fi
 prompt="You are a headless builder launched by Crafting Guild. Working directory: $wt (a git worktree of $PROJECT_PATH on branch $br). Do only the task below, then answer with the JSON result.
 
 # Your role
@@ -574,6 +686,7 @@ Evidence: run every check you will cite (test files, typecheck, render scripts) 
 Dependencies: \`node_modules\` (and \`.venv\`) may be a link to the main checkout, outside the worktree, so Bash \`cat\`, \`ls\`, \`grep\` and \`stat\` on paths inside it are denied; read them with the Read, Grep and Glob tools, which are allowed there.
 Paths: work inside \`$wt\` and read files from it. The main checkout at \`$PROJECT_PATH\` is outside the worktree, so every read there (the read tool and Bash \`cat\`/\`find\`/\`sed\`) is denied; your worktree is the full checkout of the same branch, so read the same path under it.$links_note$arm_note
 Files: delete a tracked file with \`git rm <path>\` and an untracked one (a scratch test, a probe) with \`git clean -f -- <path>\`; bring a file back from a commit with \`git restore --source=<ref> -- <path>\`. Plain \`rm\`, \`mv\`, \`git checkout <ref> -- <path>\`, \`git stash\` and \`git reset\` are not granted.
+$refused_note
 
 # Task
 $(cat "$task")

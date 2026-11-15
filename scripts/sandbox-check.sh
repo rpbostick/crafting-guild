@@ -127,13 +127,28 @@ else
   no "bin/ws-run failed inside the sandbox: $out"
 fi
 # A grant the deny rules refuse must stay refused: ws-run only checks the deny list it is handed, so without the
-# wrapper binding WS_RUN_DENY it sees an empty list and runs the command.
+# wrapper binding WS_RUN_DENY it sees an empty list and runs the command. The refusal names the grant the command
+# would have needed, from the suggester beside bin/, which the wrapper has to bind too.
 if out=$(in_sandbox "ws-run sandbox-check-deny git log --output=x"); then
   no "bin/ws-run ran a command matching a deny rule inside the sandbox"
 else
   case "$out" in
-    *"matches one of this builder's deny rules"*) ok "bin/ws-run refuses a command matching a deny rule" ;;
-    *) no "bin/ws-run refused for another reason: $out" ;;
+    *"matches one of this builder's deny rules"*"closest grant: Bash(git log*)"*)
+      ok "bin/ws-run refuses a command matching a deny rule, naming the grant it would have needed" ;;
+    *) no "bin/ws-run refused a denied command without naming its grant: $out" ;;
+  esac
+fi
+# A command matching no grant must print the suggestion too: the helper lives in the workspace's scripts/, which
+# is outside the worktree, so a sandbox without that bind answers every such refusal with "Cannot find module".
+if out=$(in_sandbox "ws-run sandbox-check-ungranted git status"); then
+  no "bin/ws-run ran a command matching no grant inside the sandbox"
+else
+  case "$out" in
+    *"matches none of this builder's Bash grants"*"closest grant: Bash(git log*)"*)
+      ok "bin/ws-run names the closest grant for a command no grant covers" ;;
+    *"no suggestion for"*)
+      no "bin/ws-run could not reach the grant suggester inside the sandbox: $out" ;;
+    *) no "bin/ws-run refused an ungranted command without naming its grant: $out" ;;
   esac
 fi
 # A host tool under the masked home is bound by its real install directory, so the sandbox must run that same

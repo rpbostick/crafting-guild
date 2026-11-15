@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
 import { Plugin } from "@opencode/plugin";
+import { readGrants, refusalMessage } from "../grant-suggest.js";
 
 // OpenCode 2.x keeps matching a shell permission rule against the command text with its quotes kept, so
 // `python3 "-c" 1` passes the rule `python3 -c*` while the shell runs `python3 -c 1`. This plugin registers the
 // tool hook that runs before a tool call and tests the builder's deny list (WS_RUN_DENY, the file bin/ws-run reads)
-// against the same text with the quoting removed. V2's shell action is named `shell`, not `bash`.
+// against the same text with the quoting removed. The refusal names the grant that would have allowed the command
+// (WS_RUN_GRANTS), so a model that lost a turn gets a shape to use. V2's shell action is named `shell`, not `bash`.
 //
 // Deliberate: this removes quoting and splits at separators, and stops there, because a full reading of the command
 // is a shell parser. It does not see a word only the shell computes: `x=-c; python3 $x 1`. A separator inside a quoted
@@ -45,6 +47,7 @@ export default Plugin.define({
   async setup(ctx) {
     const file = ctx.options?.denyFile ?? process.env.WS_RUN_DENY;
     if (!file) return;
+    const grants = readGrants(ctx.options?.grantsFile ?? process.env.WS_RUN_GRANTS);
     const rules = denyRules(file);
     await ctx.tool.hook("execute.before", (event) => {
       if (!SHELL_TOOLS.has(event.tool)) return;
@@ -53,7 +56,7 @@ export default Plugin.define({
       for (const simple of simpleCommands(command)) {
         if (rules.some((rule) => rule.test(simple))) {
           // "prevents you from using" is the wording scripts/opencode_run.py counts as a denied call.
-          throw new Error(`A deny rule prevents you from using this command with its quotes removed: ${simple}`);
+          throw new Error(refusalMessage(simple, grants));
         }
       }
     });

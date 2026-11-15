@@ -67,6 +67,8 @@ for f in "${changed[@]}"; do
   if is_test "$f"; then tests+=("$f"); else code+=("$f"); fi
 done
 testline=""; [ ${#tests[@]} -gt 0 ] && testline="test files: ${tests[*]}"
+# The fast path, before any worktree: with no changed test file there is nothing a bite could be proved by, so the
+# test command is not run at all. Called from every review it keeps a docs or production-only branch cheap.
 if [ ${#tests[@]} -eq 0 ]; then
   finish 0 "teeth: n/a the branch changes no test file" "" ""
 fi

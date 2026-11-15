@@ -9,7 +9,7 @@ The model remembers nothing between sessions. Everything it needs is in files an
 | `CLAUDE.md` | How the orchestrator works: the loop, the rules, where things are | You, rarely | By Claude Code, at every session start |
 | `CLAUDE.local.md` | Your own preferences: how to ask you, previews, budgets | You | By Claude Code, after `CLAUDE.md` |
 | `.claude/settings.json` | A `SessionStart` hook that runs `scripts/cold-start.sh --brief` | The tool | On startup, resume, compaction and `/clear` |
-| `.opencode/plugins/cold-start.js`, `.opencode/commands/cold-start.md` | The same brief for an OpenCode orchestrator: the plugin appends it once per session and again at compaction, and `/cold-start` refreshes it mid-session | The tool | By OpenCode (see `docs/opencode-orchestrator.md`) |
+| `.opencode/plugins-1x/cold-start.js`, `.opencode/plugins-2x/cold-start-2x.js`, `.opencode/commands/cold-start.md` | The same brief for an OpenCode orchestrator: the plugin appends it once per session and again at compaction, and `/cold-start` refreshes it mid-session. `ws oc` gives the installed line only its own directory's plugins | The tool | By OpenCode (see `docs/opencode-orchestrator.md`) |
 | `state/current`, `WS_PROJECT` | Which project this session acts on (`ws <slug>` pins it) | `ws <slug>` | By cold start and every `ws` command |
 | `projects/<slug>.conf` | The project's path, branch, test command, grants, preview | `ws init`, then you | By every `ws` command |
 | `plans/<slug>/<plan>.md` | The plan, topped by an **In flight right now** block: what is running, what just finished, what is next, decisions made | The orchestrator, at every dispatch, merge and decision | Printed by cold start |

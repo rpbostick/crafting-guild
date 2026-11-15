@@ -19,6 +19,7 @@ WS_CLAUDE_DAY_CAP="${WS_CLAUDE_DAY_CAP-}"
 WS_DEFAULT_TIMEOUT="120m"       # wall-clock cap for a builder run (timeout(1) form)
 WS_LIGHT_TIMEOUT="45m"          # cap for a task marked 'Track: light'
 WS_BUILDER_MEM="4G"             # memory cap for a builder and everything it runs (systemd MemoryMax); empty = no cap
+WS_RUN_KILL_GRACE="${WS_RUN_KILL_GRACE:-15}"  # seconds a finished builder run's leftover processes get after SIGTERM before SIGKILL
 WS_SERVE_MEM="3G"               # memory cap for a `ws serve` preview and everything it starts; empty = no cap
 WS_OC_PORT="${WS_OC_PORT:-4096}"                     # ws oc starts the session's server on the first free port from here up (runs/<slug>/oc.port)
 WS_WAKE_URL="${WS_WAKE_URL:-}"                        # the server ws wake sends to: --url, else this when set, else http://127.0.0.1:<runs/<slug>/oc.port>, else http://127.0.0.1:4096

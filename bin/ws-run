@@ -6,29 +6,57 @@
 #   time, label, exit, seconds, command. The reviewer, the precheck and `ws audit` read runs.tsv.
 # The command must match one of the builder's own Bash grants (dispatch exports WS_RUN_GRANTS, a file
 # outside the worktree) and none of its deny rules (WS_RUN_DENY, likewise), so the runner adds no permission
-# the builder did not already have. It runs the command directly, never through a shell: no pipes, redirects
-# or `&&`.
+# the builder did not already have. Every refusal names the grant the command would have needed
+# (scripts/grant-suggest.js), the suggestion the deny guard prints: a command matching no grant and a command a
+# deny rule refuses both get it, the second with the note that the rule overrides that grant. It runs the command
+# directly, never through a shell: no pipes, redirects or `&&`.
 set -uo pipefail
 label="${1:-}"; shift || true
 [ -n "$label" ] && [ $# -gt 0 ] || { echo "usage: ws-run <label> <command> [args...]" >&2; exit 2; }
 case "$label" in *[!A-Za-z0-9._-]*) echo "ws-run: label '$label' may use only letters, digits, '.', '_' and '-'" >&2; exit 2 ;; esac
 grants="${WS_RUN_GRANTS:-}"
 [ -n "$grants" ] && [ -f "$grants" ] || { echo "ws-run: no grant list (WS_RUN_GRANTS); it runs only inside a dispatched builder" >&2; exit 2; }
-cmd="$*"; allowed=false
+cmd="$*"
+# The helper sits beside this script's folder, under the workspace's scripts/, which the builder shell sandbox
+# binds read-only for this reason. A bare name on PATH is resolved through it first, so the helper is found
+# whether the caller named ws-run by path or by name.
+self=${BASH_SOURCE[0]:-$0}
+case "$self" in */*) ;; *) self=$(command -v "$self" 2>/dev/null || printf '%s' "$self") ;; esac
+suggester=$(dirname -- "$self")/../scripts/grant-suggest.js
+# The suggestion alone, on its own line after the refusal, so a lost turn leaves a shape to use.
+suggest() {
+  local suggestion
+  if ! suggestion=$(node "$suggester" "$grants" "$@" 2>&1); then
+    echo "ws-run: no suggestion for '$cmd' ($suggester failed: $suggestion)" >&2
+    return 1
+  fi
+  echo "ws-run: $suggestion" >&2
+}
 denies="${WS_RUN_DENY:-}"
+denied=false
 if [ -n "$denies" ] && [ -f "$denies" ]; then
   while IFS= read -r pat; do
     [ -n "$pat" ] || continue
     # shellcheck disable=SC2053  # the rule is a glob on purpose, as Claude Code's Bash(...) rules are
-    [[ "$cmd" == $pat ]] && { echo "ws-run: '$cmd' matches one of this builder's deny rules" >&2; exit 2; }
+    [[ "$cmd" == $pat ]] && { denied=true; break; }
   done < "$denies"
 fi
+if $denied; then
+  echo "ws-run: '$cmd' matches one of this builder's deny rules" >&2
+  suggest "$@"
+  exit 2
+fi
+allowed=false
 while IFS= read -r pat; do
   [ -n "$pat" ] || continue
   # shellcheck disable=SC2053  # the grant is a glob on purpose, as Claude Code's Bash(...) rules are
   [[ "$cmd" == $pat ]] && { allowed=true; break; }
 done < "$grants"
-$allowed || { echo "ws-run: '$cmd' matches none of this builder's Bash grants" >&2; exit 2; }
+$allowed || {
+  echo "ws-run: '$cmd' matches none of this builder's Bash grants" >&2
+  suggest "$@"
+  exit 2
+}
 mkdir -p .ws-evidence
 log=".ws-evidence/$label.log"; t0=$(date +%s)
 { echo "\$ $cmd"; echo "# started $(date '+%Y-%m-%d %H:%M:%S %Z')"; } > "$log"

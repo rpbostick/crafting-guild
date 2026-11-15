@@ -12,8 +12,8 @@ Plain Claude Code is a capable agent; Crafting Guild adds the layer above it for
 
 - **A fresh context per step:** each task runs in its own builder and worktree, so the orchestrator never fills up and compacts.
 - **A gate before main:** one review per branch, then a merge at the reviewed commit with your tests run on the merged tree; red undoes it.
-- **Claims checked, limits per run:** commits and test logs are checked against the branch; every builder has a budget, a timeout and a memory cap.
-- **Work that outlives the session:** queued steps run detached and resume after a restart.
+- **Claims checked, limits per run:** commits and test logs are checked against the branch, then `ws teeth` proves the branch's new tests fail without its change, `ws precheck` and `ws evidence-claims` hand the reviewer the mechanical findings and the done-when claims with no evidence behind them, and the review summary repeats every evidence-claim flag, so no flag is dropped silently; `ws review` does not review a branch whose tests still pass without its change; every builder has a budget, a timeout and a memory cap.
+- **Work that outlives the session:** queued steps run detached and resume after a restart, and what they did can be checked afterwards: `ws merge` runs `ws verify` on the merge it is making before the push, and `ws verify` re-reads every older merge's review, test run and reasons, while `ws orchestrator-record` totals what was committed, where a chain stopped and what was looked at.
 
 It costs immediacy (a change is minutes, not seconds) and it is shell for one person at a terminal. Use plain Claude Code for quick fixes and line-by-line review, the Agent SDK for services and products. [COMPARISON.md](COMPARISON.md) has the evidence and a table against Claude Code in a terminal, in VS Code, and the Agent SDK.
 
@@ -98,8 +98,8 @@ agent:  ws merge hats-1 3f2a9c1  -> tests passed, pushed, worktree removed
 2. **Dispatch** one builder per step into its own worktree and branch, with a dollar budget, a wall-clock cap and a grant of exactly the commands it needs.
 3. **Wait**, then read the checked result: claimed commits must exist on the branch, a claimed test log must be where it says, and denied calls are listed whether or not the builder mentions them. The builder reports each done-when item as met, partial or open, and whether it ran something to show it (observed) or reasoned it (inferred); a `done` with an item open fails the check, and observed evidence must exist in the worktree.
 4. **Preview** a visible change from the worktree.
-5. **Review** the whole branch once against `checklist.md`, after a mechanical precheck. Blocking findings go back to the builder; suggestions carry forward.
-6. **Merge** the reviewed SHA: the project's tests run on the merged tree, a red suite undoes the merge, a green one pushes.
+5. **Review** the whole branch once against `checklist.md`, after `ws teeth` (a branch whose tests pass without its change is not reviewed) and a mechanical precheck. Blocking findings go back to the builder; suggestions carry forward.
+6. **Merge** the reviewed SHA: the project's tests run on the merged tree, then `ws verify` checks the merge's own record; a red suite or a failed check undoes the merge, a green one pushes.
 7. **Chain** sequential steps (`ws chain <queue>`), which runs 2, 3, 5 and 6 unattended and stops only for what needs a person.
 
 Builders never push and never touch the main checkout.
@@ -124,10 +124,10 @@ The orchestrator itself runs under OpenCode too: start `opencode` in this folder
 | `ws dispatch [--budget N] [--timeout T] [--model M] [--effort E] [--temperature T] [--top-p P] [--agent claude\|opencode] [--allow RULE]... <name> <task-file>` | run a builder (`--dry-run` or `--print-prompt` to see what it would get) |
 | `ws wait <name>`, `ws tail <name>`, `ws runs`, `ws stop <name>` | wait for, watch, list, stop runs |
 | `ws serve <name\|main> [port]`, `ws serve stop [name\|main]`, `ws serve list` | preview server from a worktree or the main checkout |
-| `ws review [--agent claude\|opencode] <name>`, `ws precheck <name>` | review the branch (prints the verdict and the SHA to merge); the mechanical checks alone |
+| `ws review [--agent claude\|opencode] <name>`, `ws precheck <name>` | run `ws teeth` and then review the branch (prints the verdict and the SHA to merge); the mechanical checks alone |
 | `ws evidence-claims <name>` | the done-when evidence claims a script can check (the evidence-claim input to `ws review`) |
 | `ws review-compare <name>...` | run an OpenCode review beside the recorded Claude one: verdicts, blocking counts, matched findings; never merges |
-| `ws merge [--no-review "<reason>"] [--no-look "<reason>"] <name> <sha>` | merge a reviewed branch, run the tests, push on green, clean up |
+| `ws merge [--no-review "<reason>"] [--no-look "<reason>"] <name> <sha>` | merge a reviewed branch, run the tests, verify the merge's record, push on green, clean up |
 | `ws chain <queue>`, `ws chain-wait` | run a queue of steps unattended; wait on a running chain (exit 5 when a running status has no live chain) |
 | `ws wake <session> "<message>" [--at <time>\|--when-chain-stops\|--every <OnCalendar> [--until YYYY-MM-DD]]` | send one message into an idle OpenCode session |
 | `ws audit [days]` | what builders keep doing by hand, from the run logs |

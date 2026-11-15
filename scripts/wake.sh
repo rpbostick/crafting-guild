@@ -6,9 +6,10 @@
 #        wake.sh [--project slug] list | cancel <id> | failed [--clear] | status-lines | fire <id>
 # State: runs/<slug>/wake/<id>.job and .msg while pending, wake.log for what was sent, wake.failed for what was not.
 # A recurring wake writes persistent units under WS_WAKE_UNIT_DIR, since transient units do not survive a reboot.
-# A password reaches a recurring service through PassEnvironment=, imported into the user manager's memory; that copy
-# does not survive a reboot, so a password-protected recurring wake has to be rescheduled after one. A failed import
-# stops the schedule with an error instead of leaving a timer that would fail every fire.
+# A password reaches a recurring service through a 0600 environment file under runs/<slug>/wake/, named by
+# EnvironmentFile= and removed when the wake is cancelled or ends: the user manager's own memory does not survive a
+# reboot, so PassEnvironment= would leave a timer that fails every fire after one. A one-shot transient unit gets it
+# with --setenv instead.
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 slug=""; if [ "${1:-}" = --project ]; then slug="${2:?--project needs a slug}"; shift 2; fi
@@ -20,8 +21,8 @@ unit_of() { echo "ws-wake-$SLUG-$1"; }
 one_line() { printf '%s' "$1" | tr '\n\r\t' '   '; }
 # The password variables the line's client reads: 2.x takes OPENCODE_PASSWORD for the fixed `opencode` user and still
 # reads OPENCODE_SERVER_PASSWORD; 1.x takes the OPENCODE_SERVER_* pair. Forward whichever is set, so naming the
-# variable the help and docs name reaches the server on either line. They reach a recurring unit through
-# PassEnvironment= and a transient one through --setenv.
+# variable the help and docs name reaches the server on either line. They reach a recurring unit through a 0600
+# environment file under runs/<slug>/wake/ and a transient one through --setenv, never on a command line.
 password_vars() {
   if [ "$(opencode_line)" = 2 ]; then printf 'OPENCODE_PASSWORD\nOPENCODE_SERVER_PASSWORD\n'; else printf 'OPENCODE_SERVER_PASSWORD\nOPENCODE_SERVER_USERNAME\n'; fi
 }
@@ -49,8 +50,8 @@ remove_units() { # <id> [running]: disable and delete a recurring wake's persist
   systemctl --user daemon-reload >/dev/null 2>&1 || true
 }
 
-write_units() { # <id> <oncalendar spec> <pass names>: the persistent timer and service that fire the existing job
-  local id="$1" spec="$2" pass="$3" unit
+write_units() { # <id> <oncalendar spec> <env file>: the persistent timer and service that fire the existing job
+  local id="$1" spec="$2" env_file="$3" unit
   unit=$(unit_of "$id")
   cat > "$WAKE_UNIT_DIR/$unit.timer" <<EOF
 [Unit]
@@ -72,7 +73,7 @@ EOF
     echo "Type=oneshot"
     echo "WorkingDirectory=$WS"
     printf 'Environment="PATH=%s"\n' "$PATH"
-    [ -z "$pass" ] || echo "PassEnvironment=$pass"
+    [ -z "$env_file" ] || echo "EnvironmentFile=$env_file"
     echo "ExecStart=$WS/scripts/wake.sh --project $SLUG fire $id"
   } > "$WAKE_UNIT_DIR/$unit.service"
 }
@@ -80,7 +81,7 @@ EOF
 schedule() {
   # --session and --wake name the session as a flag, the spelling ws bg run uses.
   case "${1:-}" in --session|--wake) shift ;; esac
-  local session="${1:-}" message="${2:-}" at="" chain=false every="" until="" url="" when="now" epoch id unit calendar pass="" var
+  local session="${1:-}" message="${2:-}" at="" chain=false every="" until="" url="" when="now" epoch id unit calendar env_file="" svc_password="" var
   local -a pvars
   mapfile -t pvars < <(password_vars)
   [ $# -ge 2 ] || usage
@@ -125,29 +126,59 @@ schedule() {
     chain_running || die "no chain is running for $SLUG"
     when="when the chain stops"
   fi
-  # A unit file cannot name a variable's value; PassEnvironment= takes it from the user manager's copy.
-  # That copy lives only in the user manager's memory and does not survive a reboot, so a password-protected
-  # recurring wake has to be rescheduled after one. A failed import is fatal: the timer would fail every fire.
-  for var in "${pvars[@]}"; do
-    if [ -n "$every" ] && [ -n "${!var:-}" ]; then
-      pass+="$var "
-      systemctl --user import-environment "$var" >/dev/null 2>&1 \
-        || die "systemctl --user import-environment $var failed, so the timer cannot pass it to its service; nothing is scheduled (reschedule a password-protected wake after a reboot)"
+  # A 2.x client has to authenticate to the server the session started, and nothing in the environment names its
+  # password: the service writes it to its own state file. It is read here, when the wake is scheduled (a watchdog
+  # schedules its wake as its timer fires), so a value that changed since a unit was armed is picked up rather than
+  # shadowed by an older copy. Keep it in the environment only, so systemd-run imports it by name below and no command
+  # line records it. An unreadable file uses WS_WAKE_FALLBACK_PASSWORD, the copy a persistent watchdog's unit carries;
+  # with neither, the old behaviour stays: one note, and the wake still goes out.
+  if [ "$(opencode_line)" = 2 ] && [ -z "${OPENCODE_PASSWORD:-}" ] && [ -z "${OPENCODE_SERVER_PASSWORD:-}" ]; then
+    if [ -n "${WS_WAKE_FALLBACK_PASSWORD:-}" ]; then
+      svc_password=$("$WS/scripts/oc-service-password.sh" 2>/dev/null) || svc_password=""
+    else
+      svc_password=$("$WS/scripts/oc-service-password.sh" --note) || svc_password=""
     fi
-  done
+    if [ -n "$svc_password" ]; then
+      export OPENCODE_PASSWORD="$svc_password"
+    elif [ -n "${WS_WAKE_FALLBACK_PASSWORD:-}" ]; then
+      export OPENCODE_PASSWORD="$WS_WAKE_FALLBACK_PASSWORD"
+    fi
+  fi
   mkdir -p "$WAKE_DIR"
   id="$(date -u +%Y%m%dT%H%M%SZ)-$$"; unit=$(unit_of "$id")
+  # A recurring unit cannot take a value from a command line and the user manager's memory does not survive a
+  # reboot, so the password goes into a 0600 file the unit reads; cancel and an ended wake remove it.
+  if [ -n "$every" ]; then
+    for var in "${pvars[@]}"; do
+      [ -n "${!var:-}" ] || continue
+      if [ -z "$env_file" ]; then
+        env_file="$WAKE_DIR/$id.env"
+        ( umask 077; : > "$env_file" ) || die "cannot write $env_file"
+        chmod 600 "$env_file" || die "cannot restrict $env_file to its owner"
+      fi
+      # systemd re-parses the environment file, so a value it would read differently is refused before it is written:
+      # an unquoted `#` starts a comment, a backslash or quote is an escape, and whitespace is stripped or splits the
+      # value. Refusing loudly beats a timer that fails to authenticate on every fire with nothing in the log to say why.
+      case "${!var}" in
+        *$'\n'*) rm -f "$env_file"; die "the value of $var has a newline, which a systemd EnvironmentFile cannot hold; nothing is scheduled" ;;
+        *\\*|*\"*|*\'*) rm -f "$env_file"; die "the value of $var has a backslash or quote, which a systemd EnvironmentFile would read differently; nothing is scheduled" ;;
+        '#'*) rm -f "$env_file"; die "the value of $var starts with '#', which a systemd EnvironmentFile reads as a comment; nothing is scheduled" ;;
+        *[[:space:]]*) rm -f "$env_file"; die "the value of $var has whitespace, which a systemd EnvironmentFile would not read as written; nothing is scheduled" ;;
+      esac
+      printf '%s=%s\n' "$var" "${!var}" >> "$env_file" || die "cannot write $env_file"
+    done
+  fi
   printf '%s' "$message" > "$WAKE_DIR/$id.msg"
   { echo "session=$session"; echo "url=$url"; echo "when=$when"; echo "chain=$chain"
     if [ -n "$every" ]; then echo "recurring=true"; echo "every=$every"; fi
     [ -z "$until" ] || echo "until=$until"; } > "$WAKE_DIR/$id.job"
   if [ -n "$every" ]; then
     mkdir -p "$WAKE_UNIT_DIR"
-    write_units "$id" "$every" "$pass"
+    write_units "$id" "$every" "$env_file"
     if ! systemctl --user daemon-reload || ! systemctl --user enable --now "$unit.timer"; then
       rm -f "$WAKE_UNIT_DIR/$unit.timer" "$WAKE_UNIT_DIR/$unit.service"
       systemctl --user daemon-reload >/dev/null 2>&1 || true
-      rm -f "$WAKE_DIR/$id.job" "$WAKE_DIR/$id.msg"
+      rm -f "$WAKE_DIR/$id.job" "$WAKE_DIR/$id.msg" "$env_file"
       die "systemctl could not write and enable the timer; nothing is scheduled"
     fi
     echo "wake $id: $session, $when (ws wake list; ws wake cancel $id)"
@@ -161,7 +192,7 @@ schedule() {
   done
   if ! systemd-run --user --quiet --collect --unit="$unit" --description="ws wake $SLUG $id" --working-directory="$WS" \
     --timer-property=AccuracySec=1s "${timer[@]}" "${env_args[@]}" "$WS/scripts/wake.sh" --project "$SLUG" fire "$id"; then
-    rm -f "$WAKE_DIR/$id.job" "$WAKE_DIR/$id.msg"
+    rm -f "$WAKE_DIR/$id.job" "$WAKE_DIR/$id.msg" "$WAKE_DIR/$id.env"
     die "systemd-run could not start the timer; nothing is scheduled"
   fi
   echo "wake $id: $session, $when (ws wake list; ws wake cancel $id)"
@@ -170,7 +201,7 @@ schedule() {
 fail_delivery() { # <id> <recurring> <session> <url> <reason> <message>
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(now_local)" "$1" "$3" "$4" "$(one_line "$5")" "$(one_line "$6")" >> "$FAILED"
   # A recurring job keeps its files so the timer fires again; only a one-shot is finished by a failure.
-  if [ "$2" != true ]; then rm -f "$WAKE_DIR/$1.job" "$WAKE_DIR/$1.msg" "$WAKE_DIR/$1.backstop"; fi
+  if [ "$2" != true ]; then rm -f "$WAKE_DIR/$1.job" "$WAKE_DIR/$1.msg" "$WAKE_DIR/$1.backstop" "$WAKE_DIR/$1.env"; fi
 }
 
 # One more delivery on a timer after the in-process attempts run out, so a failure that outlasts them (a server
@@ -197,7 +228,7 @@ fire() {
   if [ "$recurring" = true ] && [ -n "$until" ] && [[ "$(local_date +%F)" > "$until" ]]; then
     remove_units "$id" running
     echo "$(now_local) $id ended: the recurring wake passed $until; its timer and units are removed" >> "$WAKE_LOG"
-    rm -f "$job" "$WAKE_DIR/$id.msg" "$output"
+    rm -f "$job" "$WAKE_DIR/$id.msg" "$WAKE_DIR/$id.env" "$output"
     exit 0
   fi
   session=$(hold_field "$job" session); url=$(hold_field "$job" url); message=$(cat "$WAKE_DIR/$id.msg")
@@ -231,11 +262,14 @@ fire() {
     done
     if ! $delivered && ! $timed_out && sent; then delivered=true; fi
     if $delivered; then
-      if [ "$recurring" != true ]; then rm -f "$job" "$WAKE_DIR/$id.msg" "$WAKE_DIR/$id.backstop"; fi
-      echo "$(now_local) $id delivered to $session" >> "$WAKE_LOG"
-      # The session's turn is still running: the client stays attached until it ends, so a kill cannot cut it short.
-      wait "$pid"; code=$?
-      echo "$(now_local) $id turn ended, exit $code" >> "$WAKE_LOG"
+      if [ "$recurring" != true ]; then rm -f "$job" "$WAKE_DIR/$id.msg" "$WAKE_DIR/$id.backstop" "$WAKE_DIR/$id.env"; fi
+      # The turn runs on the server, not in this client: on 2.2.7 the assistant message completed on the server after
+      # the client was killed before it had written an event. A client left attached is the harm: while it lives the
+      # session is a non-interactive run and refuses the question tool, so release it at once. SIGKILL, not TERM, so a
+      # client's own shutdown cannot ask the server to cancel the turn.
+      kill -KILL "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      echo "$(now_local) $id delivered to $session, client detached" >> "$WAKE_LOG"
       rm -f "$output"
       exit 0
     fi
@@ -302,7 +336,7 @@ cancel_wake() {
     systemctl --user stop "$unit.timer" "$unit.service" 2>/dev/null || true
   fi
   systemctl --user stop "$(unit_of "$id")-backstop" >/dev/null 2>&1 || true
-  rm -f "$WAKE_DIR/$id.job" "$WAKE_DIR/$id.msg" "$WAKE_DIR/$id.out" "$WAKE_DIR/$id.backstop"
+  rm -f "$WAKE_DIR/$id.job" "$WAKE_DIR/$id.msg" "$WAKE_DIR/$id.out" "$WAKE_DIR/$id.backstop" "$WAKE_DIR/$id.env"
   echo "wake $id cancelled"
 }
 

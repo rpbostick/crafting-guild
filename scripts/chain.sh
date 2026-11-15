@@ -37,6 +37,18 @@ stop() {
   local noting="before the next run, note this stop: ws stop-note $1 handled|re-explained \"<note>\""
   status stopped "$1: $2; $noting"; log "STOP at $1: $2"; log "$noting"; exit "${3:-1}"
 }
+# ws review refuses a toothless tip before the reviewer runs, so a step whose new tests prove nothing stops with
+# the teeth verdict and its result rather than a review that never happened. toothless_at is false when teeth left
+# no result for the tip: ws review then runs teeth itself, so the chain checks again after that call returns.
+toothless_at() { # <name> <tip>
+  [ "$(sed -n 's/^sha: //p' "$RUNS/$1.teeth.txt" 2>/dev/null | head -1)" = "$2" ] || return 1
+  case "$(head -1 "$RUNS/$1.teeth.txt" 2>/dev/null)" in "teeth: toothless"*) return 0 ;; esac
+  return 1
+}
+stop_toothless() { # <name> <tip>
+  toothless_at "$1" "$2" || return 0
+  stop "$1" "the teeth verdict at $(short "$2") is toothless: the branch's new tests still pass with its non-test changes reverted, so they prove nothing about the change (runs/$SLUG/$1.teeth.txt)"
+}
 # An unfinished merge holds a commit on the main branch whose tests never ran. A chain would skip that step as
 # already merged, so it refuses until the merge is finished by hand; a held lock means the merge is still running.
 ufline=$(unfinished_merge_line "$RUNS" "$PROJECT_PATH" "$PROJECT_BRANCH")
@@ -122,8 +134,8 @@ for i in "${!steps[@]}"; do
     [ "${nweb:-0}" -gt 0 ] && stop "$name" "web requests: the builder asked for $nweb source(s); list them with ws web $name, approve or deny each, then ws web $name resume and run the chain again"
     grep -q '^done:' "$RUNS/$name.result.txt" || stop "$name" "the builder did not finish (status $(head -1 "$RUNS/$name.result.txt" | cut -d: -f1)); see its open questions"
     tip=$(git -C "$wt" rev-parse HEAD)
-    # Do the new tests bite? A toothless result is handed to the review, never a stop. A result for another SHA
-    # (a fix round's earlier attempt) is stale, so it runs again.
+    # Do the new tests bite? A result for another SHA (a fix round's earlier attempt) is stale, so it runs again;
+    # the verdict at the tip decides whether a review runs at all.
     if [ "$(sed -n 's/^sha: //p' "$RUNS/$name.teeth.txt" 2>/dev/null | head -1)" != "$tip" ]; then
       ws teeth "$name" >> "$logf" 2>&1 || true
     fi
@@ -134,10 +146,12 @@ for i in "${!steps[@]}"; do
     rv="$RUNS/$name.review.json"
     if [ -f "$rv" ] && [ "$(jq -r .reviewed_sha "$rv")" = "$tip" ]; then log "$name: review on record for $(short "$tip")"
     else
+      stop_toothless "$name" "$tip"
       # A review that dies on the usage limit waits for the reset and runs again, like a builder (up to 3 times).
       rlimits=0
       while :; do
         ws review "$name" >> "$logf" 2>&1; [ -f "$rv" ] && [ "$(jq -r .reviewed_sha "$rv")" = "$tip" ] && break
+        stop_toothless "$name" "$tip"
         if [ "$(jq -r '.api_error_status // empty' "$rv.raw" 2>/dev/null)" = 429 ]; then
           msg=$(jq -r '.result // ""' "$rv.raw"); when=$(printf '%s' "$msg" | sed -nE 's/.*resets ([A-Z][a-z]{2} [0-9]{1,2}, )?([0-9]{1,2}(:[0-9]{2})? ?[ap]m).*/\1\2/p' | tr -d ,); dated=$(printf '%s' "$when" | grep -c '^[A-Z]'); tz=$(printf '%s' "$msg" | sed -nE 's/.*resets [^(]*\(([^)]+)\).*/\1/p')
           ep=""; [ -n "$when" ] && ep=$(TZ="${tz:-${WS_TZ:-}}" date -d "$when" +%s 2>/dev/null); [ -n "$ep" ] && [ "$dated" = 0 ] && [ "$ep" -le "$(date +%s)" ] && ep=$((ep + 86400))

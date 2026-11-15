@@ -28,8 +28,6 @@ cat > "$bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STANDIN_LOG/systemctl.args"
 case "$*" in
-  *import-environment*)
-    if [ "${STANDIN_IMPORT:-ok}" = refuse ]; then echo "Failed to connect to bus: No such file or directory" >&2; exit 1; fi ;;
   *is-active*) [ -f "$STANDIN_LOG/active" ] ;;
   *list-timers*) echo "Tue 2026-11-04 09:00:00 MST  8h left  n/a  ws-wake-x.timer ws-wake-x.service" ;;
 esac
@@ -56,6 +54,9 @@ case "${STANDIN_OC:-ok}" in
          if [ "$n" -le "${STANDIN_OC_FAILS:-1}" ]; then printf 'Error: server down\n' >&2; exit 1; fi
          echo '{"type":"step_start","sessionID":"ses_x"}' ;;
   silent) exec sleep 30 ;;
+  # Delivered, but the session's turn keeps running: a client that stays attached to it is the case below. The pid is
+  # written before the event, so the case can check the process itself instead of trusting the sender's own log line.
+  hold) echo $$ > "$STANDIN_LOG/oc.pid"; echo '{"type":"step_start","sessionID":"ses_x"}'; exec sleep 30 ;;
   # A provider error arrives after the user message exists, so the message was delivered.
   apierror) echo '{"type":"error","sessionID":"ses_x","error":{"name":"APIError","data":{"message":"Cannot connect to API"}}}' ;;
 esac
@@ -63,6 +64,9 @@ EOF
 chmod +x "$bin/systemd-run" "$bin/systemctl" "$bin/systemd-analyze" "$bin/opencode"
 export PATH="$bin:$PATH" STANDIN_LOG="$log" WS_PROJECT="$slug" WS_OPENCODE_LINE="${WS_OPENCODE_LINE:-1}"
 export WS_WAKE_URL=http://127.0.0.1:1
+# A 2.x wake reads the service's password from XDG_STATE_HOME; this case's own empty state directory keeps the machine's
+# real service password out of the stand-in's log and the assertions below.
+export XDG_STATE_HOME="$repo/state"
 # retries are real but instant here; the down case disables them.
 export WS_WAKE_RETRY_DELAY=0
 export WS_WAKE_UNIT_DIR="$repo/systemd"; mkdir -p "$WS_WAKE_UNIT_DIR"
@@ -80,6 +84,26 @@ grep -q 'delivered' "$runs/wake.log" || fail "no delivered line in wake.log"
 grep -qx -- "--on-active=1s" "$log/systemd-run.args" || fail "no timer for a wake with no time"
 grep -q -- "^--setenv=PATH=$bin:" "$log/systemd-run.args" || fail "the timer does not carry PATH"
 echo "ws wake delivers one message through a transient timer ok"
+
+# A delivered wake lets go of the client: the turn runs on the server, and a client left attached keeps the session
+# from taking a structured question until that turn ends, so the sender kills its client once the message is delivered
+# instead of exiting and leaving it attached for the turn's full length. The stand-in's pid is checked directly: a sender
+# that logs "detached" and exits without killing or waiting for its client passes every other assertion here.
+: > "$runs/wake.log"
+rm -f "$log/oc.pid"
+export STANDIN_OC=hold
+started=$(date +%s)
+out=$(ws wake ses_abc123 "released after delivery" 2>&1) || fail "a delivered wake that stays attached failed: $out"
+attached=$(( $(date +%s) - started ))
+[ "$attached" -lt 10 ] || fail "the sender stayed attached $attached s after delivery"
+grep -q 'delivered to ses_abc123, client detached' "$runs/wake.log" || fail "no detached line in wake.log: $(tail -n 2 "$runs/wake.log")"
+[ ! -f "$runs/wake.failed" ] || fail "a detached wake left wake.failed"
+[ -z "$(ls "$runs/wake" 2>/dev/null)" ] || fail "a detached wake left files: $(ls "$runs/wake")"
+standin_pid=$(cat "$log/oc.pid" 2>/dev/null)
+[ -n "$standin_pid" ] || fail "the stand-in client recorded no pid, so the case cannot tell whether it was left attached"
+! kill -0 "$standin_pid" 2>/dev/null || fail "the sender exited but left its client (pid $standin_pid) attached"
+unset STANDIN_OC
+echo "a delivered wake kills its client, logs it and cleans up ok"
 
 # The password goes by name only: not in systemd-run's arguments, not in the files, and still reaches opencode.
 : > "$log/systemd-run.args"
@@ -107,6 +131,36 @@ grep -qx -- "--setenv=OPENCODE_SERVER_PASSWORD" "$log/systemd-run.args" || fail 
 grep -q 's3cret-2x-legacy' "$log/systemd-run.args" && fail "the 2.x legacy password is on systemd-run's command line"
 grep -rq 's3cret-2x-legacy' "$runs" && fail "the 2.x legacy password was written under runs/"
 [ "$(cat "$log/opencode.password")" = s3cret-2x-legacy ] || fail "opencode did not get OPENCODE_SERVER_PASSWORD"
+# Nothing in the environment: the service's own state file is the source, and the value stays off every command line
+# and out of runs/.
+mkdir -p "$XDG_STATE_HOME/opencode"
+printf '{"url":"http://127.0.0.1:1","password":"svc-file-pw","pid":4243}\n' > "$XDG_STATE_HOME/opencode/service.json"
+: > "$log/systemd-run.args"; rm -f "$log/opencode.password"
+out=$(ws wake ses_abc123 "from the service file" 2>&1) || fail "a 2.x wake with the service file exited non-zero: $out"
+grep -qx -- "--setenv=OPENCODE_PASSWORD" "$log/systemd-run.args" || fail "the resolved password is not passed by name"
+grep -q 'svc-file-pw' "$log/systemd-run.args" && fail "the resolved password is on systemd-run's command line"
+grep -rq 'svc-file-pw' "$runs" && fail "the resolved password was written under runs/"
+[ "$(cat "$log/opencode.password")" = svc-file-pw ] || fail "opencode did not get the resolved password"
+# An unreadable file: today's behaviour, one note, and the wake still goes out with no password.
+rm -f "$XDG_STATE_HOME/opencode/service.json"; : > "$log/systemd-run.args"; rm -f "$log/opencode.password"
+out=$(ws wake ses_abc123 "no service file" 2>&1) || fail "a 2.x wake with no service file exited non-zero: $out"
+grep -q 'service\.json' <<< "$out" || fail "no note for the absent service file: $out"
+[ -z "$(cat "$log/opencode.password")" ] || fail "a password appeared with no service file"
+echo "ws wake 2.x resolves the service password from its state file and falls back with one note ok"
+
+# A fallback value (the copy a watchdog's unit carries) never shadows the state file: the file is read first, so a wake
+# scheduled after a password change authenticates with the current value, not the older copy.
+printf '{"url":"http://127.0.0.1:1","password":"svc-current-pw","pid":4243}\n' > "$XDG_STATE_HOME/opencode/service.json"
+rm -f "$log/opencode.password"
+out=$(WS_WAKE_FALLBACK_PASSWORD=svc-arm-pw ws wake ses_abc123 "file over fallback" 2>&1) || fail "a 2.x wake with a fallback exited non-zero: $out"
+[ "$(cat "$log/opencode.password")" = svc-current-pw ] || fail "the fallback shadowed the state file: $(cat "$log/opencode.password" 2>/dev/null)"
+# With the file gone, the fallback authenticates and no note says the wake has to be authenticated by hand.
+rm -f "$XDG_STATE_HOME/opencode/service.json" "$log/opencode.password"
+out=$(WS_WAKE_FALLBACK_PASSWORD=svc-arm-pw ws wake ses_abc123 "fallback only" 2>&1) || fail "a 2.x wake with only a fallback exited non-zero: $out"
+[ "$(cat "$log/opencode.password")" = svc-arm-pw ] || fail "the fallback did not reach opencode: $(cat "$log/opencode.password" 2>/dev/null)"
+grep -q 'service\.json' <<< "$out" && fail "a wake with a fallback in hand warned about the missing file: $out"
+grep -rq 'svc-current-pw\|svc-arm-pw' "$runs" && fail "a password was written under runs/"
+echo "ws wake 2.x reads the state file before a fallback, and uses the fallback when it is unreadable ok"
 unset OPENCODE_PASSWORD OPENCODE_SERVER_PASSWORD; export WS_OPENCODE_LINE=1
 echo "ws wake 2.x uses --server and forwards OPENCODE_PASSWORD or OPENCODE_SERVER_PASSWORD ok"
 
@@ -163,30 +217,55 @@ ws wake cancel "$rid" >/dev/null 2>&1 || fail "cancel a recurring wake"
 [ ! -e "$runs/wake/$rid.job" ] || fail "cancel left the job"
 echo "ws wake cancel removes a recurring timer and its unit files ok"
 
-# A recurring wake whose password cannot reach the user manager fails loud instead of
-# scheduling a timer that would land in wake.failed on every fire.
+# A recurring wake with a password keeps it in a 0600 environment file the unit reads with EnvironmentFile=, so the
+# timer still works after a reboot; the value is in no unit file, no systemd-run argument and no log.
 : > "$log/systemctl.args"
-units_before=$(ls "$WS_WAKE_UNIT_DIR"); jobs_before=$(ls "$runs/wake" 2>/dev/null)
-out=$(STANDIN_IMPORT=refuse OPENCODE_SERVER_PASSWORD=s3cret-word ws wake ses_abc123 "pass" --every daily 2>&1) \
-  && fail "scheduled a recurring wake the user manager cannot pass a password to"
-grep -q 'import-environment' <<< "$out" || fail "the refusal does not name import-environment: $out"
-[ "$(ls "$WS_WAKE_UNIT_DIR")" = "$units_before" ] || fail "a failed import wrote units"
-[ "$(ls "$runs/wake" 2>/dev/null)" = "$jobs_before" ] || fail "a failed import left a job"
-grep -q 'enable' "$log/systemctl.args" && fail "a failed import reached enable"
-echo "ws wake --every fails loud when the password cannot reach the user manager ok"
+out=$(OPENCODE_SERVER_PASSWORD=s3cret-rec ws wake ses_abc123 "pass" --every daily 2>&1) || fail "a recurring wake with a password failed: $out"
+pid_id=$(sed -n 's/^wake \([0-9A-Za-z-]*\):.*/\1/p' <<< "$out")
+[ -n "$pid_id" ] || fail "no id for the password wake: $out"
+penv="$runs/wake/$pid_id.env"; punit="$WS_WAKE_UNIT_DIR/ws-wake-$slug-$pid_id.service"
+[ -f "$penv" ] || fail "no environment file for a recurring wake with a password"
+[ "$(stat -c %a "$penv")" = 600 ] || fail "the environment file is not 0600: $(stat -c %a "$penv")"
+grep -qx 'OPENCODE_SERVER_PASSWORD=s3cret-rec' "$penv" || fail "the environment file does not hold the password: $(cat "$penv")"
+grep -qx "EnvironmentFile=$penv" "$punit" || fail "the service does not read the environment file: $(cat "$punit")"
+grep -q 'PassEnvironment' "$punit" && fail "the service still depends on the user manager's memory"
+grep -q 's3cret-rec' "$punit" && fail "the password is in the unit file"
+grep -q 's3cret-rec' "$log/systemctl.args" && fail "the password reached systemctl"
+out=$(ws wake cancel "$pid_id" 2>&1) || fail "cancel a password wake"
+[ -e "$penv" ] && fail "cancel left the environment file"
+echo "ws wake --every keeps its password in a 0600 environment file the unit reads ok"
 
-# A fire past --until ends the job, removes its units and logs it without sending the message.
+# A value systemd would re-read differently is refused before a unit is written: the timer would otherwise start and
+# fail to authenticate on every fire, with nothing in the log to say why. A backslash, a quote, a leading '#' and
+# whitespace are the characters that change meaning in an EnvironmentFile; a plain value still schedules.
+: > "$log/systemctl.args"
+for bad in 'a\b' 'a"b' "a'b" '#leading' ' leading' 'trailing '; do
+  out=$(OPENCODE_SERVER_PASSWORD="$bad" ws wake ses_abc123 "mangled" --every daily 2>&1) && fail "accepted a password systemd would mangle: $bad"
+  grep -q 'nothing is scheduled' <<< "$out" || fail "no refusal reason for '$bad': $out"
+  grep -q 'OPENCODE_SERVER_PASSWORD' <<< "$out" || fail "the refusal does not name the variable: $out"
+done
+[ -s "$log/systemctl.args" ] && fail "a refused recurring wake reached systemctl: $(cat "$log/systemctl.args")"
+[ -z "$(ls "$runs/wake"/*.env 2>/dev/null)" ] || fail "a refused recurring wake left an environment file"
+out=$(OPENCODE_SERVER_PASSWORD='plain-value-9x' ws wake ses_abc123 "plain" --every daily 2>&1) || fail "a plain password was refused: $out"
+nid=$(sed -n 's/^wake \([0-9A-Za-z-]*\):.*/\1/p' <<< "$out")
+[ -f "$runs/wake/$nid.env" ] || fail "a plain password wrote no environment file: $out"
+ws wake cancel "$nid" >/dev/null 2>&1 || fail "cancel a plain password wake"
+echo "a recurring wake refuses a value a systemd EnvironmentFile would mangle, and keeps a plain one ok"
+
+# A fire past --until ends the job, removes its units and its password file, and logs it without sending the message.
 : > "$log/opencode.args"
-out=$(ws wake ses_abc123 "stop after" --every daily --until "$(date -d yesterday +%F)" 2>&1) || fail "wake --until: $out"
+out=$(OPENCODE_SERVER_PASSWORD=s3cret-end ws wake ses_abc123 "stop after" --every daily --until "$(date -d yesterday +%F)" 2>&1) || fail "wake --until: $out"
 eid=$(sed -n 's/^wake \([0-9A-Za-z-]*\):.*/\1/p' <<< "$out")
 etimer="$WS_WAKE_UNIT_DIR/ws-wake-$slug-$eid.timer"; eservice="$WS_WAKE_UNIT_DIR/ws-wake-$slug-$eid.service"
+[ -f "$runs/wake/$eid.env" ] || fail "the ended wake's password file was never written"
 "$WS/scripts/wake.sh" --project "$slug" fire "$eid" || fail "fire past --until"
 [ ! -e "$runs/wake/$eid.job" ] || fail "an ended job remains"
+[ ! -e "$runs/wake/$eid.env" ] || fail "an ended wake keeps its password file"
 [ ! -e "$etimer" ] || fail "an ended wake keeps its timer file"
 [ ! -e "$eservice" ] || fail "an ended wake keeps its service file"
 grep -q "$eid ended" "$runs/wake.log" || fail "no end line in wake.log"
 [ ! -s "$log/opencode.args" ] || fail "an ended wake was still sent"
-echo "a recurring fire past --until removes the job and logs the end ok"
+echo "a recurring fire past --until removes the job, its password file and logs the end ok"
 
 # Refused before anything is scheduled.
 : > "$log/systemd-run.args"

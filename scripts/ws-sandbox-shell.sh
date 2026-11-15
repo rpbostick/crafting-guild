@@ -261,6 +261,9 @@ args+=(
   --bind "$COMMON/refs" "$COMMON/refs"
   --bind "$COMMON/logs" "$COMMON/logs"
   --ro-bind "$WORKSPACE/bin" "$WORKSPACE/bin"
+  # bin/ws-run reads its grant suggestion from scripts/grant-suggest.js under scripts/, so scripts/ is bound for
+  # the same reason bin/ is: without it every sandboxed refusal loses its suggestion to a "Cannot find module".
+  --ro-bind "$WORKSPACE/scripts" "$WORKSPACE/scripts"
   --ro-bind "$WS_RUN_GRANTS" "$WS_RUN_GRANTS"
 )
 [ -z "${WS_RUN_DENY:-}" ] || args+=(

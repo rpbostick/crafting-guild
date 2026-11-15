@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-const pluginPath = new URL("../.opencode/plugins/reply-log.js", import.meta.url);
+const pluginPath = new URL("../.opencode/plugins-1x/reply-log.js", import.meta.url);
 
 test("the reply-log plugin writes one banner and one dated entry per reply", async () => {
   delete process.env.WS_RUN_EVENTS;

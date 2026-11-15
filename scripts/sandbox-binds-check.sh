@@ -59,6 +59,13 @@ done < <(ro_after_wt)
 ro_bound "$proj/deps" || fail "the link target $proj/deps is not bound"
 rm -f "$wt/up-project" "$wt/app/up-worktrees" "$wt/node_modules"
 
+# --- the suggester beside bin/ is bound, not only bin/ ---
+# bin/ws-run reads scripts/grant-suggest.js from the workspace, which is outside the worktree and so hidden by the
+# masked home unless it is bound like bin/; without it every refusal inside the sandbox loses its suggestion.
+wrap "/nonexistent" || fail "the wrapper refused a plain worktree: $out"
+ro_bound "$WS/bin" || fail "$WS/bin is not bound read-only"
+ro_bound "$WS/scripts" || fail "$WS/scripts is not bound read-only, so the refusal suggestion is unreachable"
+
 # --- a dangling link has nothing to bind and stops nothing ---
 # Both shapes: with its target's folder gone readlink -f fails, and with only the last part gone it succeeds and
 # would hand bwrap a source path that does not exist, which bwrap refuses.

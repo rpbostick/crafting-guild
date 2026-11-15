@@ -45,6 +45,8 @@ ws runs [slug]                  runs and their results
 ws replies [--project slug] [--last N] [--follow] [--since <time>]   the last replies saved in
                                 runs/<slug>/replies.md (default 5); --follow tails new entries
 ws review [--agent claude|opencode] [flags] <name>   review the branch; prints the verdict and the SHA to merge
+                                ws teeth runs first at the branch tip: a toothless verdict (its new tests pass with
+                                its non-test changes reverted) stops the review, ok, n/a and error go on
                                 --agent opencode runs the review on OpenCode (--model provider/model, WS_REVIEW_AGENT)
                                 --passes N (1-3, WS_REVIEW_PASSES) runs N reviews and unions their findings
                                 --variant <name> runs an OpenCode review at that model variant (its reasoning effort)
@@ -66,14 +68,17 @@ ws orchestrator-record [--project slug|--all] [--since YYYY-MM-DD] [--runs DIR] 
                                 bookkeeping commits, test runs on record, gates, chain stops by how they were noted,
                                 each --no-review and --no-look reason, visible merges with and without a look; "not recorded" when no
                                 source holds a number; owners from WS_ORCHESTRATOR_OPENCODE
-ws verify [--project slug] [--since YYYY-MM-DD] [--passes N] [--json]   check every merge's recorded invariants:
-                                reviewed at the merged SHA with verdict merge, a test run on record, no --no-review and
-                                a --no-look reason, and (with --passes N or WS_VERIFY_PASSES) N passes on a merge that
-                                changes code; exits 1 naming each broken rule, --json prints the record
+ws verify [--project slug] [--since YYYY-MM-DD] [--passes N] [--merge SHA] [--json]   check every merge's recorded invariants:
+                                reviewed at the merged SHA with verdict merge, a test run on record, no unreasoned
+                                --no-review and no unreasoned --no-look, and (with --passes N or WS_VERIFY_PASSES) N
+                                passes on a merge that changes code; --merge checks that one merge alone, which is what
+                                ws merge runs on its own before the push; exits 1 naming each broken rule, --json prints
+                                the record
 ws teeth <name>                 check the branch tip without its non-test changes: ok (its tests fail), toothless
                                 (they pass), n/a or error; runs/<slug>/<name>.teeth.txt, chain runs it before review
-ws merge [--no-review "<reason>"] [--no-look "<reason>"] <name> <sha>   merge a reviewed branch, test, push, clean up;
-                                a reason goes in the merge subject; a visible branch with no look at its tip is refused
+ws merge [--no-review "<reason>"] [--no-look "<reason>"] <name> <sha>   merge a reviewed branch, test, verify its record,
+                                push, clean up; a failed test or verify undoes the merge; a reason goes in the merge
+                                subject; a visible branch with no look at its tip is refused
                                 until ws look records one or --no-look overrides it; a gated chain step passes
 ws look <name> "<what they said>"   record that the operator saw the branch at its tip (runs/<slug>/<name>.look)
 ws hold <name> "<note>"         record the operator's fault note on a step: the merge refuses the held SHA until a
@@ -261,7 +266,60 @@ case "$cmd" in
   models) exec "$WS/scripts/models.sh" "$@" ;;
   maintenance) "$WS/scripts/maintenance.sh" ${proj:+--project "$proj"} "$@" ;;
   dispatch) "$WS/scripts/dispatch.sh" ${proj:+--project "$proj"} "$@" ;;
-  review) "$WS/scripts/review.sh" ${proj:+--project "$proj"} "$@" ;;
+  review)
+    # teeth runs before the reviewer: a branch whose new tests still pass with its non-test changes reverted proves
+    # nothing about the change and is not reviewed. It runs once per branch tip, so a chain that already ran it
+    # there pays nothing twice. A toothless verdict stops the review; ok, n/a and error proceed (a suite that cannot
+    # run reverted is not a gate). --print-prompt and a review of another checkout (--worktree, --base, --out) run no
+    # reviewer of this branch, so they run no teeth.
+    # --project is read from its value wherever it sits among the arguments, not only as the leading one: review.sh
+    # takes it too, and the gate and the reviewer must resolve the same project, or the gate reads one project's
+    # branch and the reviewer another's. The resolved slug goes to review.sh as the leading flag for that reason.
+    tname=""; tval=0; tgate=true; rproj="$proj"; tprev=""
+    for a in "$@"; do
+      [ "$tprev" = "--project" ] && rproj="$a"
+      tprev="$a"
+    done
+    for a in "$@"; do
+      if [ "$tval" = 1 ]; then tval=0; continue; fi
+      case "$a" in
+        --agent|--budget|--model|--passes|--variant|--project) tval=1 ;;
+        --worktree|--base|--out) tval=1; tgate=false ;;
+        --print-prompt) tgate=false ;;
+        -*) ;;
+        *) tname="$a"; break ;;
+      esac
+    done
+    if $tgate && [ -n "$tname" ]; then
+      load_project "$rproj"
+      if [ ! -d "$(worktree_dir "$tname")" ]; then
+        note "teeth not run for $tname: no worktree to review"
+      elif [ ! -x "$WS/scripts/teeth.sh" ]; then
+        note "teeth not run for $tname: $WS/scripts/teeth.sh is missing, so the branch's tests are unproven"
+      else
+        ttip=$(git -C "$PROJECT_PATH" rev-parse --verify "agent/$tname^{commit}" 2>/dev/null || true)
+        tfile="$RUNS/$tname.teeth.txt"
+        if [ -z "$ttip" ] || [ "$(sed -n 's/^sha: //p' "$tfile" 2>/dev/null | head -1)" != "$ttip" ]; then
+          trc=0; "$WS/scripts/teeth.sh" --project "$SLUG" "$tname" >/dev/null 2>&1 || trc=$?
+          note "teeth: $(grep -m1 '^teeth:' "$tfile" 2>/dev/null)"
+        fi
+        tverdict=$(grep -m1 '^teeth:' "$tfile" 2>/dev/null || true)
+        case "$tverdict" in
+          "teeth: toothless"*)
+            echo "ws review: teeth: toothless — the branch's tests still pass with its non-test changes reverted, so they do not prove the change" >&2
+            echo "ws review: result: ${tfile#"$WS/"} (the test files that pass either way are named there)" >&2
+            tail -n 8 "$tfile" >&2
+            echo "ws review: not reviewed. Fix the tests on the branch, then review again (ws teeth $tname)." >&2
+            exit 1 ;;
+          "teeth: error"*)
+            note "teeth: error, the reverted test run crashed before reporting a failing test; the review proceeds (result: ${tfile#"$WS/"})" ;;
+          "teeth: ok"*|"teeth: n/a"*) ;;
+          *)
+            note "teeth wrote no verdict for $tname at ${ttip:0:7} (exit ${trc:-?}); the review proceeds (result: ${tfile#"$WS/"})" ;;
+        esac
+      fi
+    fi
+    "$WS/scripts/review.sh" ${rproj:+--project "$rproj"} "$@" ;;
   review-compare) "$WS/scripts/review-compare.sh" ${proj:+--project "$proj"} "$@" ;;
   review-shadow) "$WS/scripts/review-shadow.sh" ${proj:+--project "$proj"} "$@" ;;
   orchestrator-record) "$WS/scripts/orchestrator-record.sh" ${proj:+--project "$proj"} "$@" ;;
@@ -346,10 +404,12 @@ case "$cmd" in
       # 2.x process does not read the 1.x keys. The inline copy is exported too: an inline config is applied after
       # the project config, so the project's own `instructions` cannot drop the lesson.
       jq -n --slurpfile org "$cfg" --slurpfile proj "$WS/opencode.json" --arg ws "$WS" \
-        --arg line "$WS/lessons/opencode-2.md" \
+        --arg line "$WS/lessons/opencode-2.md" --argjson plugins "$(oc_plugins_json 2)" \
         '($proj[0].instructions // []) as $base
          | $org[0]
          | .instructions = (($base | map(if startswith("/") then . else ($ws + "/" + .) end)) + [$line] | unique)
+         | .plugins = $plugins
+         | del(.plugin)
          | (if (.permission | type) == "object" then
               .permissions = (
                 [{"action": "*", "resource": "*", "effect": "allow"}]
@@ -389,6 +449,14 @@ case "$cmd" in
       # The service reads its config at start; a restart after setting the port is the per-run config path.
       opencode service set port "$port" >/dev/null || die "opencode service set port $port failed"
       opencode service restart >/dev/null || die "opencode service restart failed"
+      # The service writes its password and port to its own state file; a wake scheduled from inside this session
+      # carries it only if this shell exports it. A missing file exports nothing and does not fail the session.
+      if [ -z "${OPENCODE_PASSWORD:-}" ] && [ -z "${OPENCODE_SERVER_PASSWORD:-}" ]; then
+        # The line is already detected above, so the helper is told it instead of spawning a second
+        # `opencode --version`; that call would land between the service restart and the TUI's own start.
+        svc_password=$(WS_OPENCODE_LINE="$line" "$WS/scripts/oc-service-password.sh") || svc_password=""
+        [ -z "$svc_password" ] || export OPENCODE_PASSWORD="$svc_password"
+      fi
       exec opencode "${tui[@]+"${tui[@]}"}"
     fi
     # The TUI opens a server only when given --port; ws wake and ws bg --wake current send to the port recorded here.
@@ -402,13 +470,20 @@ case "$cmd" in
       done
       args=(--port "$port" --hostname 127.0.0.1 ${args[@]+"${args[@]}"})
     fi
+    # 1.x takes its plugins as a list of file URLs, one per file. The session's config is the orchestrator's with that
+    # key set, written under runs/<slug>/ like the 2.x one, so OpenCode reads exactly this line's plugins.
+    oc_cfg="$WS/runs/$slug/oc.config.1x.json"
+    mkdir -p "$WS/runs/$slug"
+    jq --argjson plugins "$(oc_plugins_json 1)" '.plugin = $plugins | del(.plugins)' "$cfg" > "$oc_cfg.tmp" \
+      || die "could not build the 1.x session config from $cfg"
+    mv "$oc_cfg.tmp" "$oc_cfg"
     if $print; then
-      printf 'cd %s\nWS_PROJECT=%s OPENCODE_CONFIG=%s opencode' "$WS" "$slug" "$cfg"
+      printf 'cd %s\nWS_PROJECT=%s OPENCODE_CONFIG=%s opencode' "$WS" "$slug" "$oc_cfg"
       printf ' %s' "${args[@]+"${args[@]}"}"; echo; exit 0
     fi
     command -v opencode >/dev/null || die "opencode not found; install it, or start Claude with: ws <slug>"
     if [ -n "$port" ]; then mkdir -p "$WS/runs/$slug"; echo "$port" > "$WS/runs/$slug/oc.port"; fi
-    cd "$WS" && WS_PROJECT="$slug" OPENCODE_CONFIG="$cfg" exec opencode "${args[@]+"${args[@]}"}" ;;
+    cd "$WS" && WS_PROJECT="$slug" OPENCODE_CONFIG="$oc_cfg" exec opencode "${args[@]+"${args[@]}"}" ;;
   # exec: rolling the workspace back rewrites bin/ws too, and bash reads a running script from disk.
   rollback) exec "$WS/scripts/rollback.sh" ${proj:+--project "$proj"} "$@" ;;
   check) "$WS/scripts/check-result.sh" ${proj:+--project "$proj"} "$@" ;;
@@ -460,7 +535,13 @@ case "$cmd" in
         "$WS/scripts/check-result.sh" --project "$SLUG" ${since:+--since "$since"} "$name" > "$RUNS/$name.result.txt.new" 2>&1 || true
         mv "$RUNS/$name.result.txt.new" "$RUNS/$name.result.txt"
       fi
-      if [ -f "$RUNS/$name.result.txt" ] && [ ! -f "$RUNS/$name.pid" ]; then cat "$RUNS/$name.result.txt"; grep -q '^FAIL\|^NO RESULT\|^TIMEOUT\|^LIMIT' "$RUNS/$name.result.txt" && exit 1 || exit 0; fi
+      if [ -f "$RUNS/$name.result.txt" ] && [ ! -f "$RUNS/$name.pid" ]; then
+        cat "$RUNS/$name.result.txt"
+        # The refused calls and the grant each one needed, so a model that lost a turn leaves a way to fix the gap.
+        python3 -I "$WS/scripts/denied-summary.py" "$RUNS/$name.jsonl" "$RUNS/$name.grants" \
+          || echo "ws: denial summary failed; the run's result above stands" >&2
+        grep -q '^FAIL\|^NO RESULT\|^TIMEOUT\|^LIMIT' "$RUNS/$name.result.txt" && exit 1 || exit 0
+      fi
       [ -f "$RUNS/$name.pid" ] || [ -f "$RUNS/$name.jsonl" ] || die "no run named $name"
       # A run whose wrapper died with it (the usage limit can take both) never writes its result: write it here.
       if [ -f "$RUNS/$name.pid" ] && ! pid_file_alive "$RUNS/$name.pid"; then

@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 # Check that every merge on a project branch since a date kept the record's invariants: the subject names the
-# reviewed SHA and the step; a review at that SHA says merge; a merge test run is on record; no --no-review, and a
-# --no-look carries its reason; with --passes N a merge that changes code was reviewed with at least N passes.
+# reviewed SHA and the step; a review at that SHA says merge; a merge test run is on record; no unreasoned
+# --no-review and no unreasoned --no-look (an override with a reason is a sanctioned one); with --passes N a merge
+# that changes code was reviewed with at least N passes.
+# --merge <sha> checks that one merge alone, which is what merge.sh runs on the merge it is making: a whole-history
+# run reports merges that predate the records and would block every merge. It also names a branch that moved away
+# from the merged tip, which a history run cannot see (the branch is gone by then).
 # Read-only: no model call, no network. Exits 1 naming each broken rule, 0 when none is broken.
-# Usage: verify.sh [--project slug] [--since YYYY-MM-DD] [--passes N] [--json]
+# Usage: verify.sh [--project slug] [--since YYYY-MM-DD] [--passes N] [--merge SHA] [--json]
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
-slug="" since="" passes="" json=false
+slug="" since="" passes="" merge="" json=false
 while [ $# -gt 0 ]; do case "$1" in
   --project) slug="${2:?--project needs a slug}"; shift 2 ;;
   --since) since="${2:?--since needs a date}"; shift 2 ;;
   --passes) passes="${2:?--passes needs a number}"; shift 2 ;;
+  --merge) merge="${2:?--merge needs a merge SHA}"; shift 2 ;;
   --json) json=true; shift ;;
-  *) die "usage: ws verify [--project slug] [--since YYYY-MM-DD] [--passes N] [--json]" ;;
+  *) die "usage: ws verify [--project slug] [--since YYYY-MM-DD] [--passes N] [--merge SHA] [--json]" ;;
 esac; done
 [ -n "$passes" ] || passes="${WS_VERIFY_PASSES:-}"
 if [ -n "$passes" ]; then case "$passes" in 1|2|3) ;; *) die "--passes and WS_VERIFY_PASSES take 1, 2 or 3, not '$passes'" ;; esac; fi
@@ -33,6 +38,14 @@ test_cmd=$(conf_var "$conf" TEST_CMD)
 runs="$WS/runs/$s"
 if [ -z "$path" ] || ! git -C "$path" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1; then
   die "no branch $branch in a checkout at ${path:-no PROJECT_PATH} for $s"
+fi
+# One merge alone: the commit has to exist and to be a merge, since the loop reads its second parent as the branch
+# tip the review and the test run must name.
+merge_full=""
+if [ -n "$merge" ]; then
+  merge_full=$(git -C "$path" rev-parse --verify "$merge^{commit}" 2>/dev/null) || die "unknown merge commit $merge in $path"
+  merge_parents=$(git -C "$path" rev-list --parents -n 1 "$merge_full" | awk 'NR==1 { print NF - 1 }')
+  [ "${merge_parents:-0}" -ge 2 ] || die "$(git -C "$path" rev-parse --short "$merge_full") is not a merge commit; --merge takes a merge sha"
 fi
 # Documentation and tests are the files the passes rule does not count: a documentation or test-only merge can be
 # reviewed in one pass even when a code merge needs more.
@@ -78,7 +91,11 @@ while IFS=$'\t' read -r sha parents _ subject; do
     continue
   fi
   if [ "$kind" = no-review ]; then
-    add_failure no-review "$mshort" "$name" "merged with --no-review: ${no_review_reason:-reason not recorded}"
+    # A --no-review with a reason is the sanctioned override the lessons allow; only an unreasoned one fails, as with
+    # --no-look below.
+    if [ -z "${no_review_reason//[[:space:]]/}" ]; then
+      add_failure no-review "$mshort" "$name" "--no-review carries no reason"
+    fi
   else
     if [[ "$tip" != "$reviewed"* ]]; then
       add_failure subject "$mshort" "$name" "the subject names $reviewed, not the merged branch tip ${tip:0:7}"
@@ -128,7 +145,15 @@ while IFS=$'\t' read -r sha parents _ subject; do
   if $no_look_present && [ -z "${no_look_reason//[[:space:]]/}" ]; then
     add_failure no-look "$mshort" "$name" "--no-look carries no reason"
   fi
-done < <(git -C "$path" log "$branch" --first-parent --merges ${since_args[@]+"${since_args[@]}"} --format=$'%H\t%P\t%ct\t%s')
+  # Only a one-merge run can see this: history runs find the branch deleted after its merge. A branch that moved
+  # past the merged tip during the test run means commits the merge does not carry, which nothing else would name.
+  if [ -n "$merge" ] && [ -n "$name" ]; then
+    moved_to=$(git -C "$path" rev-parse --verify --quiet "refs/heads/$(branch_of "$name")") || moved_to=""
+    if [ -n "$moved_to" ] && [ "$moved_to" != "$tip" ]; then
+      add_failure branch "$mshort" "$name" "the branch $(branch_of "$name") is at ${moved_to:0:7}, not the merged tip ${tip:0:7}"
+    fi
+  fi
+done < <(if [ -n "$merge" ]; then git -C "$path" log -1 --format=$'%H\t%P\t%ct\t%s' "$merge_full"; else git -C "$path" log "$branch" --first-parent --merges ${since_args[@]+"${since_args[@]}"} --format=$'%H\t%P\t%ct\t%s'; fi)
 
 if $json; then
   failures_json=$(

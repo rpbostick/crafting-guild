@@ -290,6 +290,9 @@ verdict=$(jq -r '.verdict' "$out")
   echo "## Blocking"; jq -r '.blocking[] | "- \(.file):\(.line) (rule \(.rule)): \(.why)"' "$out"; [ "$(jq '.blocking|length' "$out")" -eq 0 ] && echo "- none"
   echo; echo "## Suggestions (carry forward, do not block)"; jq -r '.suggestions[] | "- \(.file):\(.line): \(.why)"' "$out"; [ "$(jq '.suggestions|length' "$out")" -eq 0 ] && echo "- none"
   echo; echo "## Precheck"; grep -E '^(FLAG|note)' "$pre_file" | sed 's/^/- /'; grep -qE '^(FLAG|note)' "$pre_file" || echo "- all ok"
+  # Every evidence-claim FLAG repeats here whatever the reviewer's summary says, so a flag cannot be dropped
+  # silently: a reviewer may disagree with one in writing, never leave it out.
+  echo; echo "## Evidence claims"; if grep -qE '^FLAG' "$ec_file" 2>/dev/null; then grep -E '^FLAG' "$ec_file" | sed 's/^/- /'; else printf -- '- %s\n' "$(head -1 "$ec_file" 2>/dev/null)"; fi
   echo; echo "cost=\$$cost  reviewed_sha=$tip"
 } > "$mdf"
 cat "$mdf"

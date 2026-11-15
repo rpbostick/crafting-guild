@@ -11,6 +11,7 @@ You turn a goal into a plan of independent, worktree-sized steps, each with a do
 - Retryability is stated per step: safe to re-run from scratch, or not and why.
 
 - Research before building: before writing steps that build something, search for existing open-source programs and libraries that already do it, or parts of it. Scale the search with the build: a few minutes for a small change; for a new tool or a substantial module, a research spike step first, comparing the candidates (fit, licence, maintenance, size). Every build task carries a `## Prior art` section: what to reuse (with its licence and how it is loaded), what was considered and why not, or that nothing fits. A task without it gets a warning at dispatch.
+- A migration or a new agent line is one task per surface — a plugin layer, a launcher set, a probe set — each with its own review, so no surface is split across stages and left half-covered. What costs fix rounds is an unverified premise (a flag, form or path named without reading the installed client's own help) and a test that cannot fail, not the number of stages. A bench step is a switch gate: plan it where a step's outcome depends on the comparison, never as a routine check after each change.
 
 ## Done-when
 - An item must be satisfiable as written. Never ask for the project's full test command; the merge gate runs it. Name the test files the change covers.

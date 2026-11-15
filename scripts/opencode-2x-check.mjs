@@ -6,8 +6,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-// Proves the 2.x plugins in .opencode/plugins/ load through the V2 default-definition shape, register the hooks
-// they need, and write records the existing readers (scripts/opencode_run.py, scripts/check-result.sh) read.
+// Proves the 2.x plugins in .opencode/plugins-2x/ and scripts/opencode-plugins-2x/ load through the V2
+// default-definition shape, register the hooks they need, and write records the existing readers
+// (scripts/opencode_run.py, scripts/check-result.sh) read.
 // The scripts/selftest.sh copy passes the generated deny list; a direct run uses a small one with the same rules.
 // `--live-guard` and `--live-reply` run the same plugins against a real 2.2.7 CLI; the default path never starts one.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -15,7 +16,7 @@ const liveIndex = process.argv.findIndex((arg) => arg === "--live-guard" || arg 
 const positional = process.argv.slice(2, liveIndex === -1 ? undefined : liveIndex);
 const denyGuardPath = resolve(positional[0] ?? join(root, "scripts/opencode-plugins-2x/deny-guard.js"));
 const runEventsPath = resolve(positional[1] ?? join(root, "scripts/opencode-plugins-2x/run-events.js"));
-const replyLogPath = join(root, ".opencode/plugins/reply-log-2x.js");
+const replyLogPath = join(root, ".opencode/plugins-2x/reply-log-2x.js");
 const denyFile = positional[2] ? resolve(positional[2]) : join(mkdtempSync(join(tmpdir(), "cg-oc2-check-")), "deny.txt");
 const temp = mkdtempSync(join(tmpdir(), "cg-oc2-check-"));
 

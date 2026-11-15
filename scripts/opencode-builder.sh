@@ -72,9 +72,15 @@ else
 fi
 export OPENCODE_CONFIG_CONTENT
 pid=""
-# A timeout or kill of this script stops OpenCode's whole process group, so a wrapper's child goes too. setsid makes
-# the background opencode a session leader, so its PID is its group's ID; killing the group is safe and by PID.
-trap '[ -n "$pid" ] && kill -- "-$pid" 2>/dev/null; exit 143' TERM INT
+# `opencode run` can exit while a server it started stays up: the run is finished, the scope still holds that
+# process (and its memory cap) and the project looks busy. setsid gives the client its own group, and every process
+# the client starts carries the run's marker (WS_RUN_ID), so a server that daemonized into a session of its own is
+# found through the marker even though neither the group nor the client's session holds it.
+# A command substitution runs in a subshell, so run_kill_grace's die only ends the substitution: check it here.
+grace=$(run_kill_grace) || exit 1
+marker=$(run_marker_id)
+# A timeout or kill of this script ends the run the same way a normal exit does.
+trap 'if [ -n "$pid" ]; then stop_run "$pid" "$grace" opencode-builder "$marker"; fi; exit 143' TERM INT
 over() { python3 -I "$helper" over "$log" "$budget"; }
 # One OpenCode call with the budget watched across the whole log; stdin closed, or `opencode run` waits on it.
 run() {
@@ -82,16 +88,19 @@ run() {
     # 2.x names the variant in the model reference and has no --variant flag.
     local model_arg="$model"
     [ -n "$variant" ] && model_arg="$model#$variant"
-    setsid opencode run --standalone --format json --model "$model_arg" --title "$title" "$@" < /dev/null &
+    WS_RUN_ID="$marker" setsid opencode run --standalone --format json --model "$model_arg" --title "$title" "$@" < /dev/null &
   else
     local -a varargs=()
     [ -n "$variant" ] && varargs=(--variant "$variant")
-    setsid opencode run "${varargs[@]}" --format json --model "$model" --title "$title" "$@" < /dev/null &
+    WS_RUN_ID="$marker" setsid opencode run "${varargs[@]}" --format json --model "$model" --title "$title" "$@" < /dev/null &
   fi
   pid=$!
   python3 -I "$helper" watch "$log" "$budget" "$pid" & watcher=$!
-  wait "$pid"; pid=""
+  wait "$pid"
   kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null
+  # Success or failure, the client is gone and whatever it started goes with it.
+  stop_run "$pid" "$grace" opencode-builder "$marker"
+  pid=""
 }
 
 opencode_prompt_args "$pf"
