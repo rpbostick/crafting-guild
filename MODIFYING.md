@@ -71,7 +71,15 @@ scripts/claims.py       the scan behind claims.sh: the added prose and comment l
                         alone; C-style `//` and `/* */` comments are read on their own.
 scripts/dispatch.sh     creates the worktree, builds the builder prompt and grant, runs claude -p in the background,
                         then runs check-result.sh when it ends. `--agent opencode` (or WS_AGENT) runs opencode-builder.sh
-                        in its place, with the grants written to runs/<slug>/<name>.opencode.json. `--effort E` is
+                        in its place, with the grants written to runs/<slug>/<name>.opencode.json. The base grant is
+                        the worktree edit, the read-only file, git and test commands, and the read-only probes and
+                        system diagnostics a run reaches for when it looks stuck: the version and lookup probes,
+                        `du`, and the four system checks `free`, `df`, `nproc` and `uptime`. None of these four
+                        writes, installs, signals, starts another program or reads a file's contents; like `cat`,
+                        `ls` and `find` already do in the base grant, `df` and `du` take whatever path their
+                        command line names, and no entry that reads a file keeps its path inside the worktree, so
+                        the reads outside it that the prompt forbids rest on the prompt, not on the grant. Anything
+                        else comes from `EXTRA_TOOLS` or `--allow`. `--effort E` is
                         then a model variant, passed as `--variant E` after `opencode_run.py variants` checks it
                         against `opencode models <provider> --verbose`; an unknown variant stops the dispatch with
                         the model's list, and no `--effort` passes no variant. `--temperature T`
@@ -336,6 +344,8 @@ scripts/rollback.sh     `ws rollback`: restores the published files to a public 
 scripts/site.sh         `ws site`: copies a project's SITE_SYNC files (or its GitHub release) into its SITE_PROJECT,
                         checks each copy byte for byte, runs the site's tests, commits, pushes, waits until live.
 scripts/audit.py        `ws audit`: repeated hand work in the run logs. Writes runs/<slug>/audit.last for cold-start.
+                        A missing argument or a non-numeric `days` prints the usage line and exits 2, as `--help`
+                        prints it and exits 0.
 scripts/transcript.py   reads a run log (runs/<slug>/<name>.jsonl): its events, and a run's turns, peak and mean
                         context (once per message id, or per step_finish in an OpenCode log), output tokens, cache
                         reads, cost, minutes, denied calls.

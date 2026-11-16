@@ -5178,6 +5178,21 @@ printf '#!/bin/sh\nexit 0\n' > "$H/scripts/unmarked-check.sh"
 git -C "$H" add -A
 au=$(python3 "$WS/scripts/audit.py" demo "$H" "bash scripts/run-all-tests.sh" "$T/no-runs" "$T/no-plans" 30 2>&1 || true)
 grep -q 'scripts/unmarked-check.sh' <<< "$au" && ! grep -q 'scripts/marked-check.sh' <<< "$au" && echo "audit leaves out a hand-run script ok" || { echo "audit hand-run FAILED:"; echo "$au"; exit 1; }
+# audit.py's usage: --help prints it on stdout with exit 0; a missing argument and an unknown one print it on stderr
+# with exit 2; none prints a traceback, so `ws audit --status` reads as a usage error instead of a crash.
+AU="$T/audit-usage"; mkdir -p "$AU"
+auh=$(python3 "$WS/scripts/audit.py" --help 2>"$AU/help.err") && aurc=0 || aurc=$?
+[ "$aurc" = 0 ] && grep -q '^usage: audit.py ' <<< "$auh" && [ ! -s "$AU/help.err" ] \
+  && echo "audit.py --help prints usage on stdout ok" \
+  || { echo "audit.py --help FAILED (exit $aurc):"; echo "$auh"; cat "$AU/help.err"; exit 1; }
+aun=$(python3 "$WS/scripts/audit.py" 2>"$AU/noarg.err") && aurc=0 || aurc=$?
+[ "$aurc" = 2 ] && [ -z "$aun" ] && grep -q '^usage: audit.py ' "$AU/noarg.err" && ! grep -q Traceback "$AU/noarg.err" \
+  && echo "audit.py with no argument prints usage on stderr ok" \
+  || { echo "audit.py no argument FAILED (exit $aurc):"; echo "$aun"; cat "$AU/noarg.err"; exit 1; }
+aut=$(python3 "$WS/scripts/audit.py" demo "$T" true "$T/no-runs" "$T/no-plans" --status 2>&1) && aurc=0 || aurc=$?
+[ "$aurc" = 2 ] && grep -q '^usage: audit.py ' <<< "$aut" && ! grep -q Traceback <<< "$aut" \
+  && echo "audit.py refuses an unknown argument with usage and exit 2 ok" \
+  || { echo "audit.py unknown argument FAILED (exit $aurc):"; echo "$aut"; exit 1; }
 # denied.py: one command per class lands in its own class, the full command is named (not its first word), and
 # the audit finding reads the same class and command. The fixture lives in .ws-evidence/ so it never reaches the tree.
 DD="$T/.ws-evidence"; mkdir -p "$DD"
@@ -5448,7 +5463,7 @@ x=0; out=$(wsb bench run "$slug2" --arm "eff=HEAD,agent=opencode,model=opencode-
   && echo "bench refuses a resumed arm with different effort ok" || ofail "bench resumed effort" "$out"
 # With an orchestrator config under XDG_CONFIG_HOME, the builder's generated config still holds only allow/deny:
 # the launchers drop OPENCODE_CONFIG so the orchestrator's ask rules cannot merge under the inline permissions.
-out=$(XDG_CONFIG_HOME="$OC" OPENCODE_CONFIG="$OC/opencode/orchestrator.json" "$WS/scripts/dispatch.sh" --project "$slug" --dry-run --agent opencode demo "$T/task.md" 2>&1) && x=0 || x=1
+out=$(XDG_CONFIG_HOME="$OC" OPENCODE_CONFIG="$OC/opencode/orchestrator.json" "$WS/scripts/dispatch.sh" --project "$slug" --dry-run --print-prompt --agent opencode demo "$T/task.md" 2>&1) && x=0 || x=1
 cfg="$ocr/demo.opencode.json"; allowed=$(jq -r '.permission.bash | to_entries[] | select(.value == "allow") | .key' "$cfg" 2>/dev/null | sort)
 [ "$x" = 0 ] && grep -qx 'agent: opencode model: opencode-go/deepseek-v4.1-flash' <<< "$out" && grep -qF '"git push *": "deny"' <<< "$out" \
   && [ -s "$ocr/demo.grants" ] && [ -z "$(sort "$ocr/demo.grants" | comm -23 - <(printf '%s\n' "$allowed"))" ] \
@@ -5458,14 +5473,15 @@ cfg="$ocr/demo.opencode.json"; allowed=$(jq -r '.permission.bash | to_entries[] 
   && echo "dispatch --agent opencode dry run shows the agent, model and permissions ok" || ofail "opencode dry run" "$out"
 # Default builder grants: the audit's denied read-only probes (command lookup, printed versions, jq, echo, a
 # syntax compile, sorting, test and true, a sqlite version, branch --contains, bare env, printenv, du, Firefox's
-# version) reach both agents, and the interpreter eval forms and the file-writing or program-running forms of
-# sort, find, env and firefox stay denied.
+# version) and the read-only system diagnostics (free, df, nproc, uptime) reach both agents, and the interpreter
+# eval forms and the file-writing or program-running forms of sort, find, env and firefox stay denied.
 grants_ok=1; tools_line=$(grep '^tools:' <<< "$out"); deny_line=$(grep '^deny:' <<< "$out")
 for p in 'command -v *' 'jq *' 'echo *' 'python3 -m py_compile *' \
          'bash --version' 'opencode --version' 'node --version' 'python3 --version' 'npm --version' \
          'sort *' 'sort' 'test *' 'true' 'sqlite3 --version' \
          'git branch --contains *' 'git branch -a --contains *' \
-         'env' 'printenv *' 'du *' 'firefox --version'; do
+         'env' 'printenv *' 'du *' 'firefox --version' \
+         'free *' 'df *' 'nproc' 'uptime'; do
   grep -qF "Bash($p)" <<< "$tools_line" || grants_ok=0
   [ "$(jq -r --arg p "$p" '.permission.bash[$p]' "$cfg" 2>/dev/null)" = allow ] || grants_ok=0
   grep -qxF "$p" "$ocr/demo.grants" || grants_ok=0
@@ -5497,7 +5513,8 @@ oc_chain_action() { # <config> <command line>
 }
 chain_ok=1; chain_why=""
 for c in 'find src -type f | sort' 'test -d x && echo yes || echo no' 'which sqlite3 || true' \
-         'git branch -a --contains abc'; do
+         'git branch -a --contains abc' \
+         'free -m' 'df -h' 'du -sh .' 'nproc' 'uptime'; do
   [ "$(oc_chain_action "$cfg" "$c")" = allow ] || { chain_ok=0; chain_why+=" not allowed: $c;"; }
 done
 for c in 'sort -o out f' 'sort --out=x f' 'sort --o=x f' \
@@ -5511,7 +5528,8 @@ cl_ok=1; out_cl=$("$WS/scripts/dispatch.sh" --project "$slug" --agent claude --d
 cl_tools=$(grep '^tools:' <<< "$out_cl"); cl_deny=$(grep '^deny:' <<< "$out_cl")
 for p in 'sort *' 'sort' 'test *' 'true' 'sqlite3 --version' \
          'git branch --contains *' 'git branch -a --contains *' \
-         'env' 'printenv *' 'du *' 'firefox --version'; do
+         'env' 'printenv *' 'du *' 'firefox --version' \
+         'free *' 'df *' 'nproc' 'uptime'; do
   grep -qF "Bash($p)" <<< "$cl_tools" || cl_ok=0
 done
 for p in 'sort -o*' 'sort * -o*' 'sort *--output*' \
@@ -5519,8 +5537,15 @@ for p in 'sort -o*' 'sort * -o*' 'sort *--output*' \
          'find * -ok*' 'find * -okdir*' 'find * -fprint*' 'find * -fls*'; do
   grep -qF "Bash($p)" <<< "$cl_deny" || cl_ok=0
 done
+# The builder sheet names the five diagnostics, so a dispatched builder's prompt carries them and no task has to
+# spell one out.
+prompt_text=$(sed -n '/^--- prompt ---$/,$p' <<< "$out")
+grep -qF 'The read-only system checks a slow or crashed run reaches for are already granted' <<< "$prompt_text" || cl_ok=0
+for p in '`free -m`' '`df -h`' '`du -sh .`' '`nproc`' '`uptime`'; do
+  grep -qF "$p" <<< "$prompt_text" || cl_ok=0
+done
 [ "$grants_ok" = 1 ] && [ "$chain_ok" = 1 ] && [ "$cl_ok" = 1 ] \
-  && echo "read-only probe grants reach both agents; eval and file-writing forms stay denied ok" \
+  && echo "read-only probe grants reach both agents and the prompt; eval and file-writing forms stay denied ok" \
   || ofail "read-only probe grants" "$chain_why
 $(jq -r '.permission.bash' "$cfg" 2>/dev/null)
 $(cat "$ocr/demo.grants" 2>/dev/null)

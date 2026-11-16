@@ -218,7 +218,12 @@ TOOLS=(Read Grep Glob "Edit(./**)"
   # Read-only probes the denied-calls grouping still found: bare `env`, printenv, du and Firefox's version.
   # Deliberate: the grants name the bare command or the exact option, so `env <command>` and `firefox <url>`
   # stay outside them and a broad --allow cannot turn these into a way to run another command.
-  "Bash(env)" "Bash(printenv *)" "Bash(du *)" "Bash(firefox --version)")
+  "Bash(env)" "Bash(printenv *)" "Bash(du *)" "Bash(firefox --version)"
+  # Read-only system diagnostics a run reaches for when it gets slow or a probe looks heavy: memory, free space,
+  # the CPU count and its load. None of the four writes, installs, signals, runs another program from an option or
+  # reads a file's contents, so granting the command and its options cannot widen the rest of the list. `df` and
+  # `du` take a path the command line names, as `cat`, `ls` and `find` already do.
+  "Bash(free *)" "Bash(df *)" "Bash(nproc)" "Bash(uptime)")
 [ -z "$from" ] && TOOLS+=("Bash(git merge $PROJECT_BRANCH)" "Bash(git merge $PROJECT_BRANCH --no-edit)")
 [ -n "$TEST_CMD" ] && TOOLS+=("Bash($TEST_CMD)" "Bash($TEST_CMD *)")
 # Per-project extras from projects/<slug>.conf (EXTRA_TOOLS), then this dispatch's --allow flags.

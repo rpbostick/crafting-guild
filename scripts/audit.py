@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
 """Automation audit: what builders and the orchestrator keep doing by hand, read from the run logs.
 
-Usage: audit.py <slug> <project_path> <test_cmd> <runs_dir> <plans_dir> [days]
 Prints the findings, most repeated first, and writes <runs_dir>/audit.last (cold-start reminds when it is old).
 Each finding is something a script could do instead: turn the top one into the next tool fix or light task.
 """
 import collections, glob, os, re, subprocess, sys, time
 from denied import classify
 from transcript import events
+
+USAGE = ("usage: audit.py <slug> <project_path> <test_cmd> <runs_dir> <plans_dir> [days]"
+         "  (days: how many days of run logs to read, default 30)")
+
+if sys.argv[1:2] in (["--help"], ["-h"]):
+    print(USAGE)
+    sys.exit(0)
+# A usage error is not a finding: a missing argument unpacked and a non-numeric `days` raised, so `ws audit --status`
+# printed a traceback instead of the usage line.
+if len(sys.argv) not in (6, 7) or (len(sys.argv) == 7 and not sys.argv[6].isdigit()):
+    print(USAGE, file=sys.stderr)
+    sys.exit(2)
 
 slug, path, test_cmd, runs_dir, plans_dir = sys.argv[1:6]
 days = int(sys.argv[6]) if len(sys.argv) > 6 else 30

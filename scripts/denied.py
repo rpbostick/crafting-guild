@@ -48,7 +48,7 @@ GRANTED_WORDS = frozenset({
     "git", "stat", "sha256sum", "file", "ls", "cat", "grep", "wc", "head", "tail",
     "mkdir", "cp", "chmod", "expr", "date", "diff", "bash", "pwd", "find", "sed",
     "which", "sort", "test", "true", "sqlite3", "command", "jq", "echo",
-    "printenv", "du", "python3", "opencode", "node", "npm",
+    "printenv", "du", "free", "df", "nproc", "uptime", "python3", "opencode", "node", "npm",
 })
 
 INTERPRETERS = frozenset({"python", "python3", "node", "bash", "sh", "dash", "zsh", "perl", "ruby"})

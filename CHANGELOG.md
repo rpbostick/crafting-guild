@@ -2,6 +2,10 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.9.2
+
+- **The public documents match the tool.** `README.md` now carries the OpenCode 2.x line beside 1.x, what `WS_OPENCODE_LINE` does, the `docs/version-upgrade.md` procedure and the 2.x one-shared-service limit; `COMPARISON.md` states the measured basis of its claims and what is still unmeasured (the full-task comparison on 2.x has not been run), and its sentence about which client runs a review now matches the code.
+
 ## 2.9.1
 
 - **An OpenCode 2.x session loads all of its plugins.** Each line gets its own plugin directory (`plugins-1x`, `plugins-2x`), so a 2.x session no longer reports three plugins failed and a 1.x rollback still loads its own set; `ws oc` hands each line its own `plugin` list.
@@ -12,6 +16,7 @@ Versions of Crafting Guild. `ws version` prints the current one.
 - **A reasoned `--no-review` merge verifies clean**; an unreasoned one still fails.
 - **The suite leaves no scratch behind.** New cases had replaced the single EXIT trap, so every gate run left `plans/tmp-*`; the trap is single again and the scratch lives under it.
 - **`ws doctor` accepts OpenCode 2.x's `auth list` output**, so a working credential no longer reads as missing.
+- **A builder's default grants include the read-only system checks** — `free`, `df`, `du`, `nproc` and `uptime` — so a run that gets slow or looks heavy checks memory, disk and load without losing a turn to a refusal.
 - **Smaller fixes:** the sandbox binds `scripts` so `bin/ws-run` can print a suggestion inside bwrap; `ws audit` no longer crashes on a bad flag; a task that edits the suite is told to run it before answering.
 
 ## 2.9.0
