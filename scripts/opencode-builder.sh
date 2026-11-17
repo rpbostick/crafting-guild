@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Run one builder through OpenCode (`opencode run`) in place of `claude -p`; dispatch.sh launches it in the worktree.
 # Usage: opencode-builder.sh --model provider/model --budget USD --config <opencode.json> --log <run .jsonl>
-#                            --name <title> [--variant <name>] <prompt-file>
+#                            --name <title> [--variant <name>] [--plain] <prompt-file>
 # Stdout is the run's log (OpenCode's JSON events); this script appends the Claude-shaped result line check-result reads.
+# --plain ends the run when the model stops: the reply is not validated against a schema and no repair turn follows.
 # The model must pass scripts/zdr-check.sh first (WS_ZDR_PAGE: a saved copy of the page, for tests).
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
-model="" budget="" config="" log="" title="" variant=""
+model="" budget="" config="" log="" title="" variant="" plain=false; plain_arg=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --model) model="$2"; shift 2 ;;
@@ -15,6 +16,7 @@ while [ $# -gt 0 ]; do
     --log) log="$2"; shift 2 ;;
     --name) title="$2"; shift 2 ;;
     --variant) variant="$2"; shift 2 ;;
+    --plain) plain=true; plain_arg=(--plain); shift ;;
     -*) die "unknown flag $1" ;;
     *) break ;;
   esac
@@ -30,7 +32,10 @@ WS_RUN_OPENCODE_VERSION=$(opencode --version 2>/dev/null | grep -oE '[0-9]+\.[0-
 export WS_RUN_MODEL WS_RUN_VARIANT WS_RUN_OPENCODE_VERSION="${WS_RUN_OPENCODE_VERSION:-unknown}"
 helper="$WS/scripts/opencode_run.py" schema="$WS/schema/result.json"
 t0=$(date +%s%3N)
-finish() { python3 -I "$helper" result "$log" "$schema" "$budget" "$(( $(date +%s%3N) - t0 ))" "$@"; }
+client_rc=""; client_args=()
+# The client's own exit status goes into the result line beside the run's cost and version: a plain run that exited
+# cleanly finished, whatever retries its events record, so plain-result can tell a recovered retry from a stop.
+finish() { python3 -I "$helper" result "$log" "$schema" "$budget" "$(( $(date +%s%3N) - t0 ))" ${plain_arg[@]+"${plain_arg[@]}"} ${client_args[@]+"${client_args[@]}"} "$@"; }
 WS_RUN_EVENTS="${log%.jsonl}.events.jsonl"; [ "$WS_RUN_EVENTS" = "$log" ] && WS_RUN_EVENTS="$log.events.jsonl"
 export WS_RUN_EVENTS
 : > "$WS_RUN_EVENTS" || die "cannot write the run events file $WS_RUN_EVENTS"
@@ -97,6 +102,8 @@ run() {
   pid=$!
   python3 -I "$helper" watch "$log" "$budget" "$pid" & watcher=$!
   wait "$pid"
+  client_rc=$?
+  client_args=(); [ -n "$client_rc" ] && client_args=(--client-exit "$client_rc")
   kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null
   # Success or failure, the client is gone and whatever it started goes with it.
   stop_run "$pid" "$grace" opencode-builder "$marker"
@@ -107,7 +114,8 @@ opencode_prompt_args "$pf"
 run "${OPENCODE_PROMPT_ARGS[@]}"
 # A reply that is not a valid result gets one continue of the same session, unless the budget is spent. The marker
 # beside the log records that turn and its errors, so a repair-rate measurement counts repairs instead of guessing.
-if ! over && ! errs=$(python3 -I "$helper" check "$log" "$schema"); then
+# A plain run has no result to validate, so it ends when the model stops.
+if ! $plain && ! over && ! errs=$(python3 -I "$helper" check "$log" "$schema"); then
   if sid=$(python3 -I "$helper" session "$log"); then
     printf '%s\t%s\n' "$(date '+%F %T %Z')" "${errs//$'\n'/; }" >> "${log}.repair"
     run --session "$sid" "Your last reply is not a valid JSON result. Errors:

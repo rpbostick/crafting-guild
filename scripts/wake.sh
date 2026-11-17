@@ -82,6 +82,7 @@ schedule() {
   # --session and --wake name the session as a flag, the spelling ws bg run uses.
   case "${1:-}" in --session|--wake) shift ;; esac
   local session="${1:-}" message="${2:-}" at="" chain=false every="" until="" url="" when="now" epoch id unit calendar env_file="" svc_password="" var
+  local url_source="default"
   local -a pvars
   mapfile -t pvars < <(password_vars)
   [ $# -ge 2 ] || usage
@@ -95,6 +96,9 @@ schedule() {
     --url) url="${2:?--url needs a server}"; shift 2 ;;
     *) die "unknown flag $1" ;;
   esac; done
+  # A url the caller named is pinned to this job; anything wake_url derives is only a default, resolved again at each
+  # fire, because a sibling project's `ws oc` moves the one shared 2.x service between arming and firing.
+  if [ -n "$url" ] || [ -n "${WS_WAKE_URL:-}" ]; then url_source="explicit"; fi
   if [ -z "$url" ]; then url=$(wake_url) || exit 1; fi
   [[ $session =~ ^ses_[A-Za-z0-9]+$ ]] || die "not a session id: $session (OpenCode's look like ses_...)"
   [ -n "$message" ] || die "the message is empty"
@@ -169,7 +173,7 @@ schedule() {
     done
   fi
   printf '%s' "$message" > "$WAKE_DIR/$id.msg"
-  { echo "session=$session"; echo "url=$url"; echo "when=$when"; echo "chain=$chain"
+  { echo "session=$session"; echo "url=$url"; echo "url_source=$url_source"; echo "when=$when"; echo "chain=$chain"
     if [ -n "$every" ]; then echo "recurring=true"; echo "every=$every"; fi
     [ -z "$until" ] || echo "until=$until"; } > "$WAKE_DIR/$id.job"
   if [ -n "$every" ]; then
@@ -232,6 +236,13 @@ fire() {
     exit 0
   fi
   session=$(hold_field "$job" session); url=$(hold_field "$job" url); message=$(cat "$WAKE_DIR/$id.msg")
+  # A default url is resolved again here, not only when the wake was armed: a sibling project's `ws oc` moves the one
+  # shared 2.x service between arming and firing, so the armed url is only the fallback for a resolution that fails.
+  # An explicit --url or WS_WAKE_URL is pinned, and a job written before url_source existed keeps its armed url, since
+  # its origin is unknown and redirecting a wake that named a server would be worse than a stale default.
+  if [ "$(hold_field "$job" url_source)" = default ]; then
+    fresh=$(wake_url) && [ -n "$fresh" ] && url="$fresh"
+  fi
   if [ "$(hold_field "$job" chain)" = true ]; then
     status=$("$WS/bin/ws" --project "$SLUG" chain-wait 2>&1 | grep '^status: ')
     [ -f "$job" ] || exit 0
@@ -264,9 +275,10 @@ fire() {
     if $delivered; then
       if [ "$recurring" != true ]; then rm -f "$job" "$WAKE_DIR/$id.msg" "$WAKE_DIR/$id.backstop" "$WAKE_DIR/$id.env"; fi
       # The turn runs on the server, not in this client: on 2.2.7 the assistant message completed on the server after
-      # the client was killed before it had written an event. A client left attached is the harm: while it lives the
-      # session is a non-interactive run and refuses the question tool, so release it at once. SIGKILL, not TERM, so a
-      # client's own shutdown cannot ask the server to cancel the turn.
+      # the client was killed before it had written an event. Detaching is still right, but it does not make the turn
+      # interactive: a turn submitted by this client is either not offered the question tool (a throwaway 2.2.7 server)
+      # or offered it and refused (this workspace), and the probes covered 2.2.7 only (docs/opencode-orchestrator.md,
+      # "Waking an idle session"). SIGKILL, not TERM, so a client's own shutdown cannot ask the server to cancel the turn.
       kill -KILL "$pid" 2>/dev/null
       wait "$pid" 2>/dev/null
       echo "$(now_local) $id delivered to $session, client detached" >> "$WAKE_LOG"

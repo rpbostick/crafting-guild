@@ -10,25 +10,13 @@ load_project "$slug"; wt="$(worktree_dir "$name")"
 log="$RUNS/$name.jsonl"
 ev="${log%.jsonl}.events.jsonl"; [ "$ev" = "$log" ] && ev="$log.events.jsonl"
 res=$(result_json "$log")
-# A run stopped by the usage limit: say so, with the reset time as an epoch, so ws chain can wait and resume.
-if [ -n "$res" ] && [ "$(printf '%s' "$res" | jq -r '.api_error_status // empty')" = 429 ]; then
-  msg=$(printf '%s' "$res" | jq -r '.result // ""')
-  when=$(printf '%s' "$msg" | sed -nE 's/.*resets ([A-Z][a-z]{2} [0-9]{1,2}, )?([0-9]{1,2}(:[0-9]{2})? ?[ap]m).*/\1\2/p' | tr -d ,); dated=$(printf '%s' "$when" | grep -c '^[A-Z]'); tz=$(printf '%s' "$msg" | sed -nE 's/.*resets [^(]*\(([^)]+)\).*/\1/p')
-  ep=""; [ -n "$when" ] && ep=$(TZ="${tz:-${WS_TZ:-}}" date -d "$when" +%s 2>/dev/null); # The reset is the next such clock time after the run stopped (the log's last write), not after this check:
-  # a result rebuilt once the reset has passed must not land a day late. A weekly limit names its day ("resets Oct 19, 4am"): never rolled.
-  stopped=$(stat -c %Y "$log" 2>/dev/null || date +%s); [ -n "$ep" ] && [ "$dated" = 0 ] && [ "$ep" -le "$stopped" ] && ep=$((ep + 86400))
-  echo "LIMIT: $msg"; echo "reset_epoch=${ep:-unknown}"; echo "partial work, if any, is in $wt"; exit 3
-fi
 # An OpenCode run that reported a retry or error in its event file: a recovered retry leaves a valid result, so
 # the outcome is a limit only when the run has no valid result to show for it.
 result_ok=0
 if [ -n "$res" ] && [ "$(printf '%s' "$res" | jq -r 'if .structured_output == null then "null" else "ok" end' 2>/dev/null)" = ok ]; then result_ok=1; fi
-if [ "$result_ok" = 0 ] && [ -f "$ev" ]; then
-  lim=$(python3 -I "$WS/scripts/opencode_run.py" limit "$ev" 2>/dev/null) || lim=""
-  if [ -n "$lim" ]; then
-    IFS=$'\t' read -r msg ep <<< "$lim"
-    echo "LIMIT: $msg"; echo "reset_epoch=${ep:-unknown}"; echo "partial work, if any, is in $wt"; exit 3
-  fi
+# A run stopped by the usage limit: say so, with the reset time as an epoch, so ws chain can wait and resume.
+if limit_report "$name" "$([ "$result_ok" = 0 ] && echo 1 || echo 0)"; then
+  echo "partial work, if any, is in $wt"; exit 3
 fi
 if [ -z "$res" ]; then
   echo "NO RESULT: no result event in $log (still running, killed, or crashed). Last line:"; tail -c 300 "$log" 2>/dev/null; exit 2

@@ -22,7 +22,7 @@ WS_BUILDER_MEM="4G"             # memory cap for a builder and everything it run
 WS_RUN_KILL_GRACE="${WS_RUN_KILL_GRACE:-15}"  # seconds a finished builder run's leftover processes get after SIGTERM before SIGKILL
 WS_SERVE_MEM="3G"               # memory cap for a `ws serve` preview and everything it starts; empty = no cap
 WS_OC_PORT="${WS_OC_PORT:-4096}"                     # ws oc starts the session's server on the first free port from here up (runs/<slug>/oc.port)
-WS_WAKE_URL="${WS_WAKE_URL:-}"                        # the server ws wake sends to: --url, else this when set, else http://127.0.0.1:<runs/<slug>/oc.port>, else http://127.0.0.1:4096
+WS_WAKE_URL="${WS_WAKE_URL:-}"                        # the server ws wake sends to: --url, else this when set, else on 2.x the shared service's own url (scripts/lib.sh wake_url), else http://127.0.0.1:<runs/<slug>/oc.port>, else http://127.0.0.1:4096
 WS_WAKE_TIMEOUT="${WS_WAKE_TIMEOUT:-900}"             # seconds ws wake waits for the session's first event before it records a failure
 WS_WAKE_ATTEMPTS="${WS_WAKE_ATTEMPTS:-3}"             # delivery attempts for one wake before it gives up (a timeout is not retried)
 WS_WAKE_RETRY_DELAY="${WS_WAKE_RETRY_DELAY:-20}"       # seconds between those attempts

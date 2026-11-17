@@ -204,6 +204,14 @@ def done_when_from_check(result_txt):
     return sum(mark != "FAIL" and status == "met" for mark, status in lines), len(lines)
 
 
+def result_is_plain(result_txt):
+    """Whether the result file is a plain run's: it names itself on its first line ("DONE (plain)", "PARTIAL (plain)"
+    or "NO RESULT (plain)"). A limit line is not one of them: no run finished there."""
+    if not os.path.exists(result_txt):
+        return False
+    return open(result_txt, errors="replace").readline().rstrip().endswith("(plain)")
+
+
 def done_when_counts(result_txt):
     """Items the builder claimed met, those check-result confirmed, and those met on inference alone. Empty when
     check-result graded no item (no result.txt, or one from before the field existed): unknown, not zero."""
@@ -269,7 +277,15 @@ def runs_finish(path, run, tests, result_txt, review_json, jsonl, task_md, teeth
         mine = [r for r in rows if r["run"] == run]
         if not mine:
             sys.exit(f"bench: no row for run {run} in {path}")
-        mine[0].update({"state": "done", "tests": tests, "dw_met": met, "dw_total": max(reported, done_when_items(task_md)),
+        # Only a plain run answers no result contract, so only its two columns stay empty (the report says n/a). A
+        # full-contract result with no graded done-when line (a reply that never matched the schema, or one whose
+        # done_when array is empty) keeps 0 of the task's items: it failed the contract, and blanking its columns
+        # would read better than it is.
+        if result_is_plain(result_txt):
+            dw_met = dw_total = ""
+        else:
+            dw_met, dw_total = met, max(reported, done_when_items(task_md))
+        mine[0].update({"state": "done", "tests": tests, "dw_met": dw_met, "dw_total": dw_total,
                         "verdict": verdict, "blocking": blocking, "teeth": teeth, **measures})
         write_tsv(path, RUNS_COLS, rows)
 
@@ -294,9 +310,13 @@ def measure(row, key):
 
 
 def claimed(row):
-    """A row with no graded lines falls back on dw_met, the only count it has."""
+    """Items a row claims met: check-result's count when it graded any, else the row's own dw_met.
+
+    A row with neither is unknown (None), never 0: a plain run answers no done-when, so there is nothing to score."""
     value = number(row.get("dw_claimed"))
-    return number(row["dw_met"]) if value is None else value
+    if value is not None:
+        return value
+    return number(row.get("dw_met"))
 
 
 def done_when_rate(rows, key):
@@ -307,12 +327,17 @@ def done_when_rate(rows, key):
 
 
 def claimed_rate(rows):
-    total = sum(number(r["dw_total"]) or 0 for r in rows)
-    return sum(claimed(r) or 0 for r in rows) / total if total else None
+    """Share of the done-when items claimed met, over the rows that have a total; a run with none is unknown."""
+    known = [r for r in rows if number(r["dw_total"]) is not None]
+    total = sum(number(r["dw_total"]) for r in known)
+    return sum(claimed(r) or 0 for r in known) / total if total else None
 
 
 def done_when_text(rows):
-    """One task's done-when, claimed beside confirmed."""
+    """One task's done-when, claimed beside confirmed; n/a when nothing graded it (a plain run)."""
+    rows = [r for r in rows if number(r["dw_total"]) is not None]
+    if not rows:
+        return "done-when n/a"
     total = sum(int(number(r["dw_total"]) or 0) for r in rows)
     known = [r for r in rows if number(r.get("dw_confirmed")) is not None]
     said = f"done-when claimed {sum(int(claimed(r) or 0) for r in rows)}/{total}"
@@ -412,7 +437,12 @@ def report(title, rows, baseline, arm_info):
               "are known only where no later round followed")
     for arm in arms:
         if all(r["verdict"] == UNREVIEWED for r in done if r["arm"] == arm):
-            print(f"arm {arm}: not reviewed (--review none), so its merge verdicts and blocking columns are empty by choice")
+            print(f"arm {arm}: not reviewed (no judge), so its merge verdicts and blocking columns are empty by choice")
+        # A plain run answers no result contract, so its row has no done-when to score; a recorded first run that
+        # graded none has none on record. Say so instead of reading 0; a full-contract run always keeps a number.
+        if not any(number(r["dw_total"]) is not None for r in done if r["arm"] == arm):
+            print(f"arm {arm}: no run answers a done-when (n/a): a plain run answers no result contract, and a "
+                  "recorded first run that graded none has none on record")
         unreviewable = sum(r["verdict"] == UNREVIEWABLE for r in done if r["arm"] == arm)
         if unreviewable:
             print(f"arm {arm}: {unreviewable} run(s) unreviewable (they could not be reviewed from their saved "
@@ -441,7 +471,7 @@ def report(title, rows, baseline, arm_info):
     if any(effort_of.values()):
         line("effort", [effort_of[a] or "-" for a in arms])
     line("tests passed", [fmt(arm_rate(by_arm[a], "tests passed"), "%") for a in arms])
-    line("done-when claimed", [fmt(claimed_rate(by_arm[a]), "%") for a in arms])
+    line("done-when claimed", [fmt(claimed_rate(by_arm[a]), "%", "n/a") for a in arms])
     line("done-when confirmed", [fmt(done_when_rate(by_arm[a], "dw_confirmed"), "%", "n/a") for a in arms])
     line("done-when inferred", [fmt(done_when_rate(by_arm[a], "dw_inferred"), "%", "n/a") for a in arms])
     line("merge verdicts", [fmt(arm_rate(by_arm[a], "merge verdicts"), "%") for a in arms])

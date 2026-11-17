@@ -102,6 +102,13 @@ $hits"; fi
 since="nothing (first release)"; [ -n "$prev" ] && since="the last public release (${prev:0:7})"
 echo "audit: $lines added lines since $since; no home paths, user name, e-mail, keys or attribution"
 
+# 3b. the links: a relative link in a shipped Markdown file must name a file that ships too, or it 404s on the
+# public repository while nothing on the private side fails. The same list builds the set, so the check reads the
+# tree this release publishes.
+link_out=$("$WS/scripts/link-check.sh" --project "$SLUG" 2>&1) || die "the release link check failed on the files this release would publish (fix them on $PROJECT_BRANCH, merge, and run again):
+$link_out"
+echo "$link_out"
+
 # The public branch's commits must not carry a personal address: the author is checked here because the
 # release audit reads file contents, not commit metadata (see plans/crafting-guild/email-history-rewrite.md).
 if git_ rev-parse -q --verify public-release >/dev/null; then

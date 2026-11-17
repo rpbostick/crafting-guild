@@ -13,8 +13,10 @@ watch    <log> <budget> <pid>          stop <pid> once the step costs in <log> p
 check    <log> <schema>                exit 0 when the last text part is a valid result; else print the errors
 over     <log> <budget>                exit 0 when the step costs in <log> are past <budget>
 session  <log>                         the session ID the log's events carry
-result   <log> <schema> <budget> <duration_ms> [--refused <reason>]
-                                       the Claude-shaped result line scripts/lib.sh result_json finds
+result   <log> <schema> <budget> <duration_ms> [--plain] [--client-exit N] [--refused <reason>]
+                                       the Claude-shaped result line scripts/lib.sh result_json finds; --plain reports
+                                       no structured output, since a plain run's reply is never validated, and
+                                       --client-exit records the client's own exit status
 events-denials <events>                JSON array of denied permissions the run-events plugin recorded
 limit    <events>                      print "<message>\t<reset epoch>" for a run that stopped on a provider
                                        limit, exit 0; exit 1 when the last retry or error is not a limit
@@ -596,7 +598,10 @@ def end_log_line(log):
             print()
 
 
-def result(log, schema_path, budget, duration_ms, refused=None):
+def result(log, schema_path, budget, duration_ms, refused=None, plain=False, client_exit=None):
+    """The Claude-shaped result line. `plain` skips the schema check: a plain run answers no contract, so its reply is
+    never validated and no structured output is reported. `client_exit` is the client's own exit status, which tells a
+    plain run that finished from one that stopped."""
     cost, out, cache = totals(log)
     text = last_text(log)
     so = None
@@ -604,12 +609,17 @@ def result(log, schema_path, budget, duration_ms, refused=None):
         # No text part means OpenCode itself failed (missing auth, a provider error): its stderr lines are the reason.
         if text is None:
             text = last_unparsed(log)
-        so, _ = checked(log, schema_path)
+        if not plain:
+            so, _ = checked(log, schema_path)
         if cost > float(budget):
             reason = f"stopped: OpenCode steps cost ${cost:.4f}, over the ${budget} budget"
             if so is None:
-                so = {"status": "partial", "summary": reason, "files_changed": [], "commits": [], "tests": None,
-                      "denied": [], "done_when": [], "unknowns": [reason], "open_questions": []}
+                if plain:
+                    # Nothing grades a plain answer, so the stop itself is the only thing to report in the result text.
+                    text = f"{text}\n{reason}" if text else reason
+                else:
+                    so = {"status": "partial", "summary": reason, "files_changed": [], "commits": [], "tests": None,
+                          "denied": [], "done_when": [], "unknowns": [reason], "open_questions": []}
             else:
                 so["status"] = "partial"
                 so["unknowns"] = so["unknowns"] + [reason]
@@ -628,6 +638,8 @@ def result(log, schema_path, budget, duration_ms, refused=None):
             "opencode_version": os.environ.get("WS_RUN_OPENCODE_VERSION", ""),
             "usage": {"output_tokens": out, "cache_read_input_tokens": cache},
             "permission_denials": denied_calls, "structured_output": so, "result": text}
+    if client_exit is not None:
+        line["client_exit"] = int(client_exit)
     if cost_unknown(log):
         line["cost_unknown"] = True
     end_log_line(log)
@@ -1364,8 +1376,21 @@ def main(argv):
             return 1
         print(sid)
     elif cmd == "result":
+        plain = "--plain" in args
+        if plain:
+            args = [arg for arg in args if arg != "--plain"]
         refused = args[args.index("--refused") + 1] if "--refused" in args else None
-        result(*args[:4], refused=refused)
+        client_exit = None
+        if "--client-exit" in args:
+            at = args.index("--client-exit")
+            if at + 1 >= len(args):
+                sys.exit("opencode_run: --client-exit needs a value")
+            try:
+                client_exit = int(args[at + 1])
+            except ValueError:
+                sys.exit(f"opencode_run: --client-exit takes an integer, not {args[at + 1]!r}")
+            del args[at:at + 2]
+        result(*args[:4], refused=refused, plain=plain, client_exit=client_exit)
     elif cmd == "events-denials":
         print(json.dumps(event_denials(args[0])))
     elif cmd == "limit":

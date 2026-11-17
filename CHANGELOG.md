@@ -2,6 +2,15 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.9.3
+
+- **A turn a wake starts cannot ask a structured question, on OpenCode 2.2.7.** The question tool is either not offered there or refused in the measured configuration, so a decision that falls in such a turn ends with the choice stated in one line and the next message opens an interactive turn; releasing the wake's client does not change that.
+- **A wake still lands after another project moves OpenCode's 2.x service.** Each project used to record the service's port once, so the next project's `ws oc` left every other session's wake pointing at a closed port. A wake now reads the shared service's own address, and re-reads it when it fires, so a wake armed before the move still reaches the session.
+- **The harness can be measured against a plain prompt.** `ws dispatch --plain` and `ws bench run --plain` replay a recorded task with no result contract, no structured-result check and no review, so a bench arm can compare the harness with a plain instruction set; such a run's done-when rows score n/a and its judge is named on the command line.
+- **A release checks the links of what it publishes.** `ws release` now fails when a file it would publish links to a path that does not exist in the tree being released, instead of shipping a broken link.
+- **The tool-call model is written down.** `docs/tool-calls.md` says which tools each role gets, how a call is chosen, and what a denial does; the release publishes it.
+- **Smaller fixes.** Builders may run `free`, `df`, `nproc` and `uptime` without asking, and `ws audit --status` prints usage instead of a traceback. The zero-retention check reads the Go privacy page's two-column table, so a provider whose training column has gone is still judged on its retention.
+
 ## 2.9.2
 
 - **The public documents match the tool.** `README.md` now carries the OpenCode 2.x line beside 1.x, what `WS_OPENCODE_LINE` does, the `docs/version-upgrade.md` procedure and the 2.x one-shared-service limit; `COMPARISON.md` states the measured basis of its claims and what is still unmeasured (the full-task comparison on 2.x has not been run), and its sentence about which client runs a review now matches the code.
@@ -9,7 +18,7 @@ Versions of Crafting Guild. `ws version` prints the current one.
 ## 2.9.1
 
 - **An OpenCode 2.x session loads all of its plugins.** Each line gets its own plugin directory (`plugins-1x`, `plugins-2x`), so a 2.x session no longer reports three plugins failed and a 1.x rollback still loads its own set; `ws oc` hands each line its own `plugin` list.
-- **A wake reaches a 2.x session and lets go.** The service's own password is read from its state file (a throwaway-venv measurement shows it is stable across restarts), a delivered wake releases its client instead of holding the session non-interactive, and the chain watchdog carries the password the same way.
+- **A wake reaches a 2.x session and lets go.** The service's own password is read from its state file (a throwaway-venv measurement shows it is stable across restarts), a delivered wake releases its client as soon as the session takes the message, and the chain watchdog carries the password the same way.
 - **A builder's run owns the processes it starts.** Every run is stamped with `WS_RUN_ID`; on exit the wrapper kills the process group and then sweeps any process still carrying the stamp, because a real client runs each shell command in its own session.
 - **A refused command names the grant it needed** — in dispatch's output, in the builder's prompt's `# Commands refused` block, in the deny guard's refusal, in `bin/ws-run`, and in `ws wait`'s summary. `./../x.sh` and every `..` component are refused instead of granted, and `./script` entries are granted.
 - **The review and merge check the claims.** `ws review` runs `ws teeth` first (a branch that changes no test file reports `n/a` without a test run), the review summary repeats every evidence-claims flag, and `ws merge` runs `ws verify` on the merge it is making before pushing; a failure undoes the merge and leaves the branch in place.

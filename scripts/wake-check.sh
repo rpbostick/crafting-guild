@@ -85,10 +85,12 @@ grep -qx -- "--on-active=1s" "$log/systemd-run.args" || fail "no timer for a wak
 grep -q -- "^--setenv=PATH=$bin:" "$log/systemd-run.args" || fail "the timer does not carry PATH"
 echo "ws wake delivers one message through a transient timer ok"
 
-# A delivered wake lets go of the client: the turn runs on the server, and a client left attached keeps the session
-# from taking a structured question until that turn ends, so the sender kills its client once the message is delivered
-# instead of exiting and leaving it attached for the turn's full length. The stand-in's pid is checked directly: a sender
-# that logs "detached" and exits without killing or waiting for its client passes every other assertion here.
+# A delivered wake lets go of the client: the turn runs on the server, so the sender kills its client once the message
+# is delivered rather than leaving a process attached for the turn's full length. Detaching does not make the turn
+# interactive (docs/opencode-orchestrator.md, "Waking an idle session"): a turn submitted by this client on 2.2.7 had
+# no question tool with or without a client attached, and a wake-started turn in this workspace has its question calls
+# refused. The stand-in's pid is checked directly: a sender that logs "detached" and exits without killing or
+# waiting for its client passes every other assertion here.
 : > "$runs/wake.log"
 rm -f "$log/oc.pid"
 export STANDIN_OC=hold
@@ -380,3 +382,91 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f "$log/opencode.args" ] && break; sleep 1;
 grep -qx 'ses_cur123' "$log/opencode.args" 2>/dev/null && grep -qx 'http://127.0.0.1:47123' "$log/opencode.args" \
   || fail "bg --wake current: $(cat "$log/opencode.args" 2>/dev/null)"
 echo "ws wake current and ws bg run --wake current use the recorded id and port, and WS_WAKE_URL wins ok"
+
+# A wake armed with the default url follows the shared service: a sibling project's `ws oc` moves the one 2.x service
+# between arming and firing, so a job armed without --url records that its url is a default and fire() resolves it
+# again, with the armed url kept only as the fallback.
+export WS_OPENCODE_LINE=2
+unset WS_WAKE_URL OPENCODE_PASSWORD OPENCODE_SERVER_PASSWORD
+mkdir -p "$XDG_STATE_HOME/opencode"
+printf '{"url":"http://127.0.0.1:7001","password":"pw"}\n' > "$XDG_STATE_HOME/opencode/service.json"
+: > "$log/opencode.args"
+out=$(STANDIN_RUN=hold ws wake ses_abc123 "armed before the move" 2>&1) || fail "arming a default-url wake: $out"
+did=$(sed -n 's/^wake \([0-9A-Za-z-]*\):.*/\1/p' <<< "$out")
+[ -n "$did" ] || fail "no id for the default-url wake: $out"
+jobtext=$(cat "$runs/wake/$did.job")
+printf '{"url":"http://127.0.0.1:7002","password":"pw"}\n' > "$XDG_STATE_HOME/opencode/service.json"
+"$WS/scripts/wake.sh" --project "$slug" fire "$did" || fail "firing a default-url wake failed"
+grep -qx 'http://127.0.0.1:7002' "$log/opencode.args" \
+  || fail "the wake kept the armed url instead of the service's new one: $(cat "$log/opencode.args")"
+grep -qx 'url_source=default' <<< "$jobtext" || fail "the job does not record a default url: $jobtext"
+# A recurring job re-fires from the same file, so it has to re-resolve at each fire too: arm it while the service is on
+# 7001, move the service to 7006, and the fire must reach 7006 rather than the armed url.
+: > "$log/opencode.args"
+printf '{"url":"http://127.0.0.1:7001","password":"pw"}\n' > "$XDG_STATE_HOME/opencode/service.json"
+out=$(STANDIN_RUN=hold ws wake ses_abc123 "recurring before the move" --every daily 2>&1) || fail "arming a recurring default-url wake: $out"
+rid2=$(sed -n 's/^wake \([0-9A-Za-z-]*\):.*/\1/p' <<< "$out")
+[ -n "$rid2" ] || fail "no id for the recurring default-url wake: $out"
+grep -qx 'url=http://127.0.0.1:7001' "$runs/wake/$rid2.job" \
+  || fail "the recurring wake was not armed on 7001: $(cat "$runs/wake/$rid2.job")"
+printf '{"url":"http://127.0.0.1:7006","password":"pw"}\n' > "$XDG_STATE_HOME/opencode/service.json"
+"$WS/scripts/wake.sh" --project "$slug" fire "$rid2" || fail "firing a recurring default-url wake failed"
+grep -qx 'http://127.0.0.1:7006' "$log/opencode.args" \
+  || fail "a recurring wake re-fired on its armed url instead of the service's new one: $(cat "$log/opencode.args")"
+[ -f "$runs/wake/$rid2.job" ] || fail "a recurring fire removed its job"
+ws wake cancel "$rid2" >/dev/null 2>&1 || fail "cancel the recurring default-url wake"
+echo "a wake armed with the default url goes to the service's new url after a sibling launch ok"
+
+# An explicit url is pinned: a move of the shared service does not redirect a wake that named --url or WS_WAKE_URL.
+: > "$log/opencode.args"
+printf '{"url":"http://127.0.0.1:7001","password":"pw"}\n' > "$XDG_STATE_HOME/opencode/service.json"
+out=$(STANDIN_RUN=hold ws wake ses_abc123 "pinned url" --url http://127.0.0.1:7003 2>&1) || fail "arming an explicit-url wake: $out"
+pid_id2=$(sed -n 's/^wake \([0-9A-Za-z-]*\):.*/\1/p' <<< "$out")
+[ -n "$pid_id2" ] || fail "no id for the explicit-url wake: $out"
+grep -qx 'url_source=explicit' "$runs/wake/$pid_id2.job" || fail "an --url wake is not marked explicit: $(cat "$runs/wake/$pid_id2.job")"
+printf '{"url":"http://127.0.0.1:7002","password":"pw"}\n' > "$XDG_STATE_HOME/opencode/service.json"
+"$WS/scripts/wake.sh" --project "$slug" fire "$pid_id2" || fail "firing an explicit-url wake failed"
+grep -qx 'http://127.0.0.1:7003' "$log/opencode.args" \
+  || fail "an explicit --url was redirected to the service: $(cat "$log/opencode.args")"
+: > "$log/opencode.args"
+out=$(STANDIN_RUN=hold WS_WAKE_URL=http://127.0.0.1:7004 ws wake ses_abc123 "pinned by the setting" 2>&1) || fail "arming a WS_WAKE_URL wake: $out"
+wid=$(sed -n 's/^wake \([0-9A-Za-z-]*\):.*/\1/p' <<< "$out")
+[ -n "$wid" ] || fail "no id for the WS_WAKE_URL wake: $out"
+grep -qx 'url_source=explicit' "$runs/wake/$wid.job" || fail "a WS_WAKE_URL wake is not marked explicit: $(cat "$runs/wake/$wid.job")"
+"$WS/scripts/wake.sh" --project "$slug" fire "$wid" || fail "firing a WS_WAKE_URL wake failed"
+grep -qx 'http://127.0.0.1:7004' "$log/opencode.args" \
+  || fail "a set WS_WAKE_URL was redirected to the service: $(cat "$log/opencode.args")"
+echo "a wake armed with --url or WS_WAKE_URL keeps that server after the service moves ok"
+
+# A default url that cannot be resolved again falls back to the armed one, and its one attempt still reports a failed
+# delivery instead of crashing. wake_url's own silences (no state file, no jq) still answer with the recorded port, so
+# the resolution fails only on a recorded port that is not a port.
+export STANDIN_OC=down WS_WAKE_ATTEMPTS=1 WS_WAKE_BACKSTOP=0
+rm -f "$runs/wake.failed" "$log/opencode.args"
+printf '{"url":"http://127.0.0.1:7001","password":"pw"}\n' > "$XDG_STATE_HOME/opencode/service.json"
+out=$(STANDIN_RUN=hold ws wake ses_abc123 "keep the armed url" 2>&1) || fail "arming the fallback wake: $out"
+fid=$(sed -n 's/^wake \([0-9A-Za-z-]*\):.*/\1/p' <<< "$out")
+[ -n "$fid" ] || fail "no id for the fallback wake: $out"
+rm -f "$XDG_STATE_HOME/opencode/service.json"
+printf 'not-a-port\n' > "$runs/oc.port"
+x=0; "$WS/scripts/wake.sh" --project "$slug" fire "$fid" || x=$?
+[ "$x" = 1 ] || fail "a fire whose default url could not be resolved exited $x, not 1: $(cat "$runs/wake.log" 2>/dev/null)"
+grep -qx 'http://127.0.0.1:7001' "$log/opencode.args" \
+  || fail "the armed url was not the fallback: $(cat "$log/opencode.args" 2>/dev/null)"
+grep -q 'keep the armed url' "$runs/wake.failed" || fail "a failed delivery was not recorded: $(cat "$runs/wake.failed" 2>/dev/null)"
+echo "a default url that cannot be resolved again falls back to the armed url and records the failure ok"
+
+# A job file written before the url_source field existed keeps its stored url: its origin is unknown, and redirecting
+# a wake that named an explicit server would be worse than a stale default.
+export STANDIN_OC=ok WS_WAKE_ATTEMPTS=1 WS_WAKE_BACKSTOP=0
+printf '{"url":"http://127.0.0.1:7002","password":"pw"}\n' > "$XDG_STATE_HOME/opencode/service.json"
+oid="20261117T000000Z-old"
+printf 'session=ses_abc123\nurl=http://127.0.0.1:7005\nwhen=now\nchain=false\n' > "$runs/wake/$oid.job"
+printf '%s' "written by an older wake" > "$runs/wake/$oid.msg"
+: > "$log/opencode.args"
+"$WS/scripts/wake.sh" --project "$slug" fire "$oid" || fail "firing a job with no url_source failed"
+grep -qx 'http://127.0.0.1:7005' "$log/opencode.args" \
+  || fail "a job with no url_source lost its stored url: $(cat "$log/opencode.args" 2>/dev/null)"
+echo "a job file with no url_source keeps the url it was armed with ok"
+unset STANDIN_OC WS_WAKE_ATTEMPTS WS_WAKE_BACKSTOP
+export WS_OPENCODE_LINE=1 WS_WAKE_URL=http://127.0.0.1:1

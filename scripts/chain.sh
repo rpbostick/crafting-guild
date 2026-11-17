@@ -132,7 +132,8 @@ for i in "${!steps[@]}"; do
     # A builder asking for web sources waits on a decision only the orchestrator makes: what to fetch.
     nweb=$(grep -c '^web   request' "$RUNS/$name.result.txt" 2>/dev/null || true)
     [ "${nweb:-0}" -gt 0 ] && stop "$name" "web requests: the builder asked for $nweb source(s); list them with ws web $name, approve or deny each, then ws web $name resume and run the chain again"
-    grep -q '^done:' "$RUNS/$name.result.txt" || stop "$name" "the builder did not finish (status $(head -1 "$RUNS/$name.result.txt" | cut -d: -f1)); see its open questions"
+    # A plain run's result file says DONE (plain): it finished, with no contract to check.
+    grep -qE '^(done:|DONE \(plain\))' "$RUNS/$name.result.txt" || stop "$name" "the builder did not finish (status $(head -1 "$RUNS/$name.result.txt" | cut -d: -f1)); see its open questions"
     tip=$(git -C "$wt" rev-parse HEAD)
     # Do the new tests bite? A result for another SHA (a fix round's earlier attempt) is stale, so it runs again;
     # the verdict at the tip decides whether a review runs at all.

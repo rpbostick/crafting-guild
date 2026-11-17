@@ -4,7 +4,8 @@
 # saved copy when given one (--page, WS_ZDR_PAGE) or from a cache under runs/zdr-page-<go|zen>.html.
 # Usage: zdr-check.sh [--page file] [--provider opencode-go|opencode]
 #                     [model name as the page writes it, default "DeepSeek V4.1 Flash"]
-# Exit 0 when the Go table lists the model as "Not used" (training) and "0 days" (retention), or the Zen list says
+# Exit 0 when the Go table gives the model "0 days" retention (the training cell, while the page still carries one,
+# must say "Not used"), or the Zen list says
 # its provider follows a zero-retention policy and does not train on your data, and, when a dated ZDR agreement
 # covers it, that agreement has not lapsed; 1 otherwise, with the reason. Private code goes only to models
 # that pass (the operator's rule), so a launcher refuses a model this fails on.
@@ -96,12 +97,16 @@ if provider == "opencode":
         sys.exit(print(f"zdr-check: {model}: not zero-retention with no training: {passage.strip()}") or 1)
     print(f"ok: {model}: no training, zero retention")
     sys.exit(0)
-m = re.search(re.escape(model) + r" (Not used|Yes) (0 days|Not ZDR|\d+ days)(\*?)", text)
+m = re.search(re.escape(model) + r"(?: (Not used|Yes))? (0 days|Not ZDR|\d+ days)(\*?)", text)
 if not m:
     sys.exit(print(f"zdr-check: {model!r} not found in the privacy table") or 1)
 training, retention, starred = m.groups()
-if training != "Not used" or retention != "0 days":
-    sys.exit(print(f"zdr-check: {model}: training {training}, retention {retention}") or 1)
+# The Go page's privacy table carried a training column ("Not used" / "Yes") until 2026-11-17; it now has only
+# "Model | Data retention" and marks the models that take part of your data as "Not ZDR" there. Read both shapes:
+# the training cell is optional, a row that states it must say "Not used", and the retention must be "0 days".
+if (training and training != "Not used") or retention != "0 days":
+    detail = f"training {training}, retention {retention}" if training else f"retention {retention}"
+    sys.exit(print(f"zdr-check: {model}: {detail}") or 1)
 if provider != "opencode" and starred:
     # The star points at a vendor note: "<Vendor>: ZDR agreement is renewed monthly. The current agreement is valid through <date>."
     vendor = model.split()[0]
@@ -111,7 +116,7 @@ if provider != "opencode" and starred:
     until = datetime.datetime.strptime(d.group(1), "%B %d, %Y").date()
     if until < today:
         sys.exit(print(f"zdr-check: {model}: the {vendor} ZDR agreement lapsed {until}") or 1)
-    print(f"ok: {model}: no training, 0 days, agreement valid through {until}")
+    print(f"ok: {model}: {'no training, ' if training else ''}0 days retention, agreement valid through {until}")
 else:
-    print(f"ok: {model}: no training, 0 days")
+    print(f"ok: {model}: {'no training, ' if training else ''}0 days retention")
 EOF

@@ -2,8 +2,13 @@
 # Run one builder on one task, headless, in its own worktree on branch agent/<name>.
 # Usage: dispatch.sh [--project slug] [--budget USD] [--model M] [--effort E] [--timeout 90m]
 #                    [--temperature T] [--top-p P] [--allow "Bash(cmd *)"]... [--dry-run] [--print-prompt]
-#                    [--names-ok] [--base <sha>] [--instructions <dir>] [--input <file>]...
+#                    [--names-ok] [--base <sha>] [--instructions <dir>] [--input <file>]... [--plain]
 #                    [--agent claude|opencode] <name> <task-file>
+# --plain removes the result contract and nothing else: the sheet's contract paragraphs (between the markers this
+# script strips) and the result schema and block after the task are dropped, a Claude run gets no --json-schema, an
+# OpenCode run gets no validation or repair turn, and no check-result runs (scripts/plain-result.sh writes the result
+# from the branch instead). An arm's sheet from before the markers keeps its own contract text. The same grants and
+# deny list apply, with the same budget, wall-clock timeout, memory cap and evidence runner.
 # --agent opencode runs the builder through scripts/opencode-builder.sh (default WS_AGENT); --model is then a
 # provider/model ID, WS_OPENCODE_MODEL when not given. --effort is a model variant there (`opencode run --variant`),
 # checked against `opencode models <provider> --verbose` before anything starts. --temperature and --top-p set the
@@ -17,12 +22,15 @@
 # and builder.local.md when present), each where the directory has it, the workspace's otherwise. Every other file
 # under <dir> is copied to the worktree's .ws-evidence/given/arm/ and the prompt names it.
 # The builder gets: the builder sheet, lessons/builder.md (and builder.local.md), the task file, a grant to edit inside its
-# worktree and commit on its branch plus the project's test command and EXTRA_TOOLS, a budget, a timeout,
-# and a JSON result schema. Logs to runs/<slug>/<name>.jsonl; the result check lands in <name>.result.txt.
+# worktree and commit on its branch plus the project's test command and EXTRA_TOOLS, a budget, a timeout, and a JSON result
+# schema; --plain leaves out the schema, the sheet's contract paragraphs and the result check, and writes the result from
+# the branch. Logs to runs/<slug>/<name>.jsonl; the result check, or with --plain plain-result.sh's own result,
+# lands in <name>.result.txt.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 slug="" budget="$WS_DEFAULT_BUDGET" model="$WS_MODEL" effort="$WS_EFFORT" tmo="" dry=false show_prompt=false names_ok=false from="" instr=""; extra=() inputs=()
 temperature="" top_p=""; agent="$WS_AGENT" model_flag=false
+plain=false; plain_args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --project) slug="$2"; shift 2 ;;
@@ -34,6 +42,7 @@ while [ $# -gt 0 ]; do
     --top-p) top_p="$2"; shift 2 ;;
     --timeout) tmo="$2"; shift 2 ;;
     --allow) extra+=("$2"); shift 2 ;;
+    --plain) plain=true; plain_args=(--plain); shift ;;
     --dry-run) dry=true; shift ;;
     --print-prompt) dry=true; show_prompt=true; shift ;;
     --names-ok) names_ok=true; shift ;;
@@ -664,20 +673,46 @@ fi
 # nothing back. Each line names the shape that would run instead.
 refused_note=""
 if [ ${#refusals[@]} -gt 0 ]; then
+  # A plain run answers no contract, so it has no open_questions field to point at; it says so when it stops instead.
+  if $plain; then refused_tail="say so when you stop"; else refused_tail="say so in \`open_questions\`"; fi
   refused_note="
 # Commands refused
 This task names commands you are not granted; each line says what would run instead. Do not run one: a refused
-call costs a turn and returns nothing. Use the named shape, and when none fits what the task needs, say so in
-\`open_questions\` rather than retrying."
+call costs a turn and returns nothing. Use the named shape, and when none fits what the task needs, $refused_tail
+rather than retrying."
   for r in "${refusals[@]}"; do
     refused_note+="
 - \`${r%%$'\t'*}\`: ${r#*$'\t'}"
   done
 fi
-prompt="You are a headless builder launched by Crafting Guild. Working directory: $wt (a git worktree of $PROJECT_PATH on branch $br). Do only the task below, then answer with the JSON result.
+# A plain run answers no result contract, so the sheet's own contract paragraphs (between the markers) are dropped
+# from its prompt. An arm's sheet from before the markers keeps them, and the plain tail says they do not apply.
+if $plain && grep -qx '<!-- result-contract -->' "$sheet" && grep -qx '<!-- /result-contract -->' "$sheet"; then
+  sheet_text=$(sed '/^<!-- result-contract -->$/,/^<!-- \/result-contract -->$/d' "$sheet")
+else
+  sheet_text=$(sed '/^<!-- \?\/\?result-contract -->$/d' "$sheet")
+fi
+# A plain run answers no result contract: its prompt says to stop, and no schema or result block follows the task.
+if $plain; then
+  closing="Do only the task below, then stop."
+  result_tail="
+No result contract: nothing checks this run's answer. Where the role text asks for a result schema or a report on
+done-when, this run answers neither. Stop when the task is done, or when you cannot go further; the harness writes the
+run's result from its branch."
+else
+  closing="Do only the task below, then answer with the JSON result."
+  result_tail="
+# Result schema
+The schema your final answer is validated against. It is here so you do not need to read the workspace's \`schema/result.json\`:
+$(cat "$WS/schema/result.json")
+
+# Result
+Your final answer is validated against the schema above: status (done|partial|blocked), summary, files_changed, commits (SHAs you made), tests (command, passed, failed, log_path, or null), denied (every denied call), done_when, edge_cases (platform, time, stored_data, state_resets), unknowns, open_questions, and web_requests when you need web sources you do not have."
+fi
+prompt="You are a headless builder launched by Crafting Guild. Working directory: $wt (a git worktree of $PROJECT_PATH on branch $br). $closing
 
 # Your role
-$(cat "$sheet")
+$sheet_text
 
 # Review checklist (the reviewer applies it to your whole branch)
 $(cat "$WS/checklist.md")
@@ -695,17 +730,13 @@ $refused_note
 
 # Task
 $(cat "$task")
+$result_tail"
 
-# Result schema
-The schema your final answer is validated against. It is here so you do not need to read the workspace's \`schema/result.json\`:
-$(cat "$WS/schema/result.json")
-
-# Result
-Your final answer is validated against the schema above: status (done|partial|blocked), summary, files_changed, commits (SHAs you made), tests (command, passed, failed, log_path, or null), denied (every denied call), done_when, edge_cases (platform, time, stored_data, state_resets), unknowns, open_questions, and web_requests when you need web sources you do not have."
-
+# A plain run drops the schema flag with the block: nothing validates its answer, so nothing asks for one.
 cmd=(claude -p "$prompt" --allowedTools "${TOOLS[@]}" --disallowedTools "${DENY[@]}"
-  --permission-prompts none --json-schema "$(cat "$WS/schema/result.json")"
+  --permission-prompts none
   --max-budget-usd "$budget" --output-format stream-json --verbose --name "ws:$SLUG:$name")
+$plain || cmd+=(--json-schema "$(cat "$WS/schema/result.json")")
 [ -n "$model" ] && cmd+=(--model "$model")
 [ -n "$effort" ] && cmd+=(--effort "$effort")
 # OpenCode: the same grants as an OpenCode permission config, the prompt from a file, the result line written by
@@ -720,7 +751,7 @@ if [ "$agent" = opencode ]; then
   variant_args=()
   [ -n "$variant" ] && variant_args=(--variant "$variant")
   printf '%s\n' "$prompt" > "$oc_prompt"
-  cmd=("$WS/scripts/opencode-builder.sh" --model "$model" --budget "$budget" --config "$oc_config" --log "$RUNS/$name.jsonl" --name "ws:$SLUG:$name" "${variant_args[@]}" "$oc_prompt")
+  cmd=("$WS/scripts/opencode-builder.sh" --model "$model" --budget "$budget" --config "$oc_config" --log "$RUNS/$name.jsonl" --name "ws:$SLUG:$name" "${variant_args[@]}" ${plain_args[@]+"${plain_args[@]}"} "$oc_prompt")
 fi
 
 # The agent matches a grant as written, quotes included; ws-run matches the words the shell passed it, so its copy
@@ -730,6 +761,7 @@ printf '%s\n' "${DENY[@]}" | sed -n 's/^Bash(\(.*\))$/\1/p' > "$RUN_DENY"
 if $dry; then
   [ "$agent" = opencode ] && { echo "agent: opencode model: $model${variant:+ variant: $variant}"; echo "opencode config ($oc_config):"; cat "$oc_config"; }
   echo "cwd: $wt"; echo "tools: ${TOOLS[*]}"; echo "deny: ${DENY[*]}"; echo "budget: \$$budget timeout: $tmo model: ${model:-default} memory cap: ${WS_BUILDER_MEM:-none}"
+  $plain && echo "plain: no # Result schema or # Result block in the prompt, no --json-schema, no result validation or repair turn, no result check; grants, deny list, budget, timeout, memory cap and the evidence runner are unchanged"
   echo "prompt bytes: ${#prompt}"; echo "evidence: $wt/.ws-evidence"; echo "base: $(git -C "$wt" rev-parse HEAD)"
   if $show_prompt; then echo "--- prompt ---"; printf '%s\n' "$prompt"; fi
   # A dry run leaves nothing behind: a worktree (and branch) it made goes again, so a later dispatch branches from
@@ -747,7 +779,7 @@ claude_version=""
 if [ "$agent" = claude ]; then
   claude_version=$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 fi
-{ echo "task=$(cd "$(dirname "$task")" && pwd)/$(basename "$task")"; echo "started=$(now_local)"; echo "budget=$budget"; echo "timeout=$tmo"; echo "worktree=$wt"; if [ -n "$claude_version" ]; then echo "claude_version=$claude_version"; fi; } > "$RUNS/$name.task.txt"
+{ echo "task=$(cd "$(dirname "$task")" && pwd)/$(basename "$task")"; echo "started=$(now_local)"; echo "budget=$budget"; echo "timeout=$tmo"; echo "worktree=$wt"; if [ -n "$claude_version" ]; then echo "claude_version=$claude_version"; fi; if $plain; then echo "plain=1"; fi; } > "$RUNS/$name.task.txt"
 start_sha=$(git -C "$wt" rev-parse HEAD); echo "since=$start_sha" >> "$RUNS/$name.task.txt"
 # Memory cap: the run gets its own systemd scope, so a runaway script is killed alone (OOMPolicy=continue
 # keeps the builder alive to see it) instead of the kernel taking out the editor the session runs in.
@@ -763,8 +795,16 @@ fi
   if [ "$agent" = claude ] && [ "$rc" -ne 127 ]; then
     claude_ledger_append "$SLUG" "$name" builder "$budget" "$(result_json "$RUNS/$name.jsonl")"
   fi
-  "$WS/scripts/check-result.sh" --project "$SLUG" --since "$start_sha" "$name" > "$RUNS/$name.result.txt" 2>&1 || true
-  [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] && sed -i "1i TIMEOUT after $tmo (exit $rc); partial work may be in $wt" "$RUNS/$name.result.txt"
+  if $plain; then
+    # No contract to check: the result file states the branch, and the run's own exit code says whether a timeout
+    # ended it. ws wait reads the first word, so the shape stays what a checked result gives it.
+    prc=()
+    if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then prc=(--timeout-rc "$rc"); fi
+    "$WS/scripts/plain-result.sh" --project "$SLUG" --since "$start_sha" ${prc[@]+"${prc[@]}"} "$name" > "$RUNS/$name.result.txt" 2>&1 || true
+  else
+    "$WS/scripts/check-result.sh" --project "$SLUG" --since "$start_sha" "$name" > "$RUNS/$name.result.txt" 2>&1 || true
+    [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] && sed -i "1i TIMEOUT after $tmo (exit $rc); partial work may be in $wt" "$RUNS/$name.result.txt"
+  fi
   rm -f "$RUNS/$name.pid"
 ) < /dev/null > /dev/null 2>&1 &
 echo $! > "$RUNS/$name.pid"

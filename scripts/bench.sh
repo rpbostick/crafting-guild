@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # Replay A/B of builder instructions: merged tasks run again from their base commit under one or more arms (where
 # builder.md and the builder lessons come from, and which agent and model build), several trials each, each run
-# graded on its tests, its done-when and a blind review (or none, --review none), with its cost beside them.
+# graded on its tests, its done-when (a plain run answers none, so its row keeps no done-when count) and a blind
+# review (or none, --review none), with its cost beside them.
 # Usage: bench.sh [--project slug] add <name>...
-#        bench.sh run <slug> --arm <label>=<git-ref|dir>[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E] --arm ... [--review none|claude]
-#                     [--trials N] [--parallel P] [--dry-run] [tasks...]
+#        bench.sh run <slug> --arm <label>=<git-ref|dir>[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E] --arm ... [--review none|claude|opencode]
+#                     [--plain] [--trials N] [--parallel P] [--dry-run] [tasks...]
 #        bench.sh report [--baseline <label>|recorded] [--runs DIR] <slug>...
+# --plain replays every run through dispatch --plain: no result schema, no checked claims and (unless --review says
+# otherwise) no review, so an arm measures the model with the harness's result contract and gate removed. The grants,
+# deny list, budget, wall-clock timeout, memory cap and evidence runner stay what every other arm gets.
+# --review names the judge: none, claude or opencode, passed to review.sh as --agent. It is identical for every arm of
+# a bench, and each run's log line and evidence/<run>/judge.txt name it.
 # --baseline recorded compares with the corpus tasks' first runs as recorded at the time, without replaying them.
 # --runs reads the bench from another runs/ directory (a linked worktree has none of its own).
 # Corpus: plans/<slug>/bench/<name>.md (the task as first dispatched) and corpus.tsv. Runs: runs/<slug>/bench/
@@ -198,7 +204,7 @@ start_run() {
   wait_for_merges
   run_flags
   wait_for_allowance "$(replay_model "${fl[@]}")" || return 1
-  "$WS/scripts/dispatch.sh" --project "$SLUG" "${fl[@]}" --budget "$budget" --base "$base" --instructions "$dir" "$run" "$WS/plans/$SLUG/bench/$task.md" >> "$log" 2>&1 \
+  "$WS/scripts/dispatch.sh" --project "$SLUG" "${fl[@]}" ${plain_flag:+"$plain_flag"} --budget "$budget" --base "$base" --instructions "$dir" "$run" "$WS/plans/$SLUG/bench/$task.md" >> "$log" 2>&1 \
     || { echo "bench: dispatch of $run failed; see runs/$SLUG/bench/logs/$run.log"; return 1; }
 }
 
@@ -235,7 +241,7 @@ drop_replay() {
 # One replay: dispatch under the opaque name, wait, fail it if it committed nothing, review (blind: the reviewer sees
 # the run name only), test the tip in the worktree, record, then remove the worktree and branch and keep the evidence.
 run_one() { # <task> <arm> <trial>
-  local task="$1" arm="$2" trial="$3" got run state wt log base budget mins dir tests rc ep wake review teeth="" limits=0 agent model stale_rc; local -a fl
+  local task="$1" arm="$2" trial="$3" got run state wt log base budget mins dir tests rc ep wake review teeth="" limits=0 agent model stale_rc; local -a fl review_args=()
   base=$(corpus_field "$task" base); budget=$(corpus_field "$task" budget); dir="$BENCH/arms/$arm"
   got=$(python3 "$PY" runs-get "$TSV" "$task" "$arm" "$trial"); run="${got%%$'\t'*}"; state="${got#*$'\t'}"
   [ "$state" = "done" ] && return 0
@@ -285,16 +291,23 @@ run_one() { # <task> <arm> <trial>
     # Teeth first: its verdict goes into the run's review record, and the review reads it when it is for this SHA.
     "$WS/bin/ws" --project "$SLUG" teeth "$run" >> "$log" 2>&1 || true
     teeth=$(teeth_of "$run")
-    "$WS/scripts/review.sh" --project "$SLUG" "$run" >> "$log" 2>&1
+    review_args=(); [ -n "$REVIEW" ] && review_args=(--agent "$REVIEW")
+    "$WS/scripts/review.sh" --project "$SLUG" ${review_args[@]+"${review_args[@]}"} "$run" >> "$log" 2>&1
   fi
   if "$WS/scripts/merge.sh" --project "$SLUG" --test-only "$run" >> "$log" 2>&1; then tests=pass; else tests=fail; fi
   python3 "$PY" runs-finish "$TSV" "$run" "$tests" "$RUNS/$run.result.txt" "$review" "$RUNS/$run.jsonl" "$WS/plans/$SLUG/bench/$task.md" "$teeth" || return 1
   keep_evidence
+  # Which judge graded the run, kept with its evidence so the judge can be named after the fact: the --review value,
+  # the reason a run went unreviewed, and the agent review.sh actually used (it prints that line into the log). A plain
+  # run with no --review was left unreviewed by --plain, not by --review none.
+  nosay="--review none"
+  if [ "$REVIEW" = none ] && [ -n "$plain_flag" ] && ! $review_flag; then nosay="--plain with no judge"; fi
+  { echo "judge: ${REVIEW:-default}"; [ "$REVIEW" = none ] && echo "review: none, by $nosay"; grep -m1 '^ws: review agent:' "$log" 2>/dev/null || true; } > "$BENCH/evidence/$run/judge.txt"
   # The replay's committed change, kept so it can be graded later (e.g. against the original builder's test files).
   git -C "$wt" diff --binary "$base" HEAD > "$BENCH/evidence/$run/replay.patch" 2>/dev/null
   drop_replay
-  if [ "$review" = - ]; then echo "bench: $run done: tests $tests, not reviewed (--review none)"
-  else echo "bench: $run done: tests $tests, review $(jq -r '.verdict // "none"' "$review" 2>/dev/null || echo none)"; fi
+  if [ "$review" = - ]; then echo "bench: $run done: tests $tests, not reviewed ($nosay), judge none"
+  else echo "bench: $run done: tests $tests, review $(jq -r '.verdict // "none"' "$review" 2>/dev/null || echo none) (judge ${REVIEW:-default})"; fi
 }
 
 # An arm's instructions as a directory dispatch --instructions reads. A git ref is written out from the workspace at
@@ -362,18 +375,37 @@ resolve_arm() { # <label=spec[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E]>
   [ -f "$BENCH/arms/$label/lessons/builder.md" ] || die "arm $label: no lessons/builder.md at $sha"
 }
 
+# A review on Claude needs the CLI signed in. An unsigned one produces no review, or one that names another agent, so
+# the bench refuses up front with what `claude auth status` says rather than spending a replay to find out.
+review_judge_claude() {
+  local st
+  command -v claude >/dev/null 2>&1 || die "--review claude needs the Claude CLI, which is not on PATH; use --review opencode or --review none"
+  st=$(timeout 15 claude auth status 2>/dev/null) || true
+  printf '%s' "$st" | jq -e '.loggedIn == true' >/dev/null 2>&1 \
+    || die "--review claude needs a signed-in Claude CLI, and \`claude auth status\` does not say loggedIn: true$(printf '%s' "$st" | head -c 200 | tr '\n' ' ' | sed 's/^/: /'); use --review opencode or --review none"
+}
+
 bench_run() {
-  local slug="${1:-}"; [ -n "$slug" ] && [ "${slug#-}" = "$slug" ] || die "usage: ws bench run <slug> --arm <label>=<git-ref|dir>[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E] --arm ... [--review none|claude] [--trials N] [--parallel P] [--dry-run] [tasks...]"
+  local slug="${1:-}"; [ -n "$slug" ] && [ "${slug#-}" = "$slug" ] || die "usage: ws bench run <slug> --arm <label>=<git-ref|dir>[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E] --arm ... [--review none|claude|opencode] [--plain] [--trials N] [--parallel P] [--dry-run] [tasks...]"
   shift
-  local trials=1 par=1 dry=false a t tr row total=0 already=0 failed=0 label; local -a arms=() tasks=() rows=()
-  REVIEW=claude
+  local trials=1 par=1 dry=false a t tr row total=0 already=0 failed=0 label plain_flag=""; local -a arms=() tasks=() rows=()
+  # No --review means the install's own judge: review.sh's WS_REVIEW_AGENT, or whatever it picks when that is empty.
+  # An empty REVIEW passes no --agent.
+  REVIEW="${WS_REVIEW_AGENT:-}"; review_flag=false
   while [ $# -gt 0 ]; do
-    case "$1" in --trials) trials="$2"; shift 2 ;; --parallel) par="$2"; shift 2 ;; --arm) arms+=("$2"); shift 2 ;; --review) [ $# -ge 2 ] || die "--review takes none or claude"; REVIEW="$2"; shift 2 ;; --dry-run) dry=true; shift ;; -*) die "unknown flag $1" ;; *) tasks+=("$1"); shift ;; esac
+    case "$1" in --trials) trials="$2"; shift 2 ;; --parallel) par="$2"; shift 2 ;; --arm) arms+=("$2"); shift 2 ;; --review) [ $# -ge 2 ] || die "--review takes none, claude or opencode"; REVIEW="$2"; review_flag=true; shift 2 ;; --plain) plain_flag=--plain; shift ;; --dry-run) dry=true; shift ;; -*) die "unknown flag $1" ;; *) tasks+=("$1"); shift ;; esac
   done
   case "$trials$par" in *[!0-9]*|'') die "--trials and --parallel take whole numbers" ;; esac
   [ "$trials" -ge 1 ] && [ "$par" -ge 1 ] || die "--trials and --parallel are at least 1"
-  # review.sh reviews through Claude only; another agent as reviewer is refused rather than quietly reviewed by Claude.
-  case "$REVIEW" in none|claude) ;; *) die "--review takes none or claude, not '$REVIEW' (review.sh has no other agent)" ;; esac
+  # review.sh takes claude or opencode as --agent, and nothing when the caller named no judge; no arm may be graded
+  # by a judge the bench cannot name.
+  case "$REVIEW" in none|claude|opencode|"") ;; *) die "--review takes none, claude or opencode, not '$REVIEW'" ;; esac
+  # A plain arm measures the model with the result contract and the gate removed, so it runs unreviewed unless the
+  # caller asked for a judge; the tests are still graded.
+  if [ -n "$plain_flag" ] && ! $review_flag; then REVIEW=none; fi
+  # A Claude judge the caller named needs the CLI signed in; an install whose own WS_REVIEW_AGENT is claude fails at
+  # review time as any review would, with review.sh's own message.
+  if $review_flag && [ "$REVIEW" = claude ]; then review_judge_claude; fi
   # One arm is enough to compare with the recorded first runs (report --baseline recorded).
   [ ${#arms[@]} -ge 1 ] || die "give at least one arm: --arm <label>=<git-ref|dir>[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E]"
   load_project "$slug"
@@ -392,11 +424,14 @@ bench_run() {
   if $dry; then
     echo "dry run: $total runs for $SLUG (${#tasks[@]} tasks x ${#labels[@]} arms x $trials trials); nothing is dispatched"
     echo "tests on each tip: ${BENCH_TEST_CMD:-${TEST_CMD:-none configured}}"
+    if [ -n "$plain_flag" ]; then
+      echo "plain: no result schema, no checked claims, no result check$( [ "$review_flag" = true ] && printf ' and review %s' "$REVIEW" ); grants, deny list, budget, timeout, memory cap and the evidence runner unchanged"
+    fi
     for row in "${rows[@]}"; do
       IFS=$'\t' read -r t label tr <<< "$row"
       got=$(python3 "$PY" runs-get "$TSV" "$t" "$label" "$tr")
       [ "${got#*$'\t'}" = "done" ] && { echo "done already: ${got%%$'\t'*} $t arm $label trial $tr"; continue; }
-      echo "would dispatch ${got:+${got%%$'\t'*}}${got:-bench-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')} task $t arm $label trial $tr base $(corpus_field "$t" base) budget \$$(corpus_field "$t" budget) timeout $(timeout_for "$t")m agent ${ARM_AGENT[$label]:-default} model ${ARM_MODEL[$label]:-default}${ARM_TEMP[$label]:+ temp ${ARM_TEMP[$label]}}${ARM_TOP_P[$label]:+ top_p ${ARM_TOP_P[$label]}}${ARM_EFFORT[$label]:+ effort ${ARM_EFFORT[$label]}} review $REVIEW"
+      echo "would dispatch ${got:+${got%%$'\t'*}}${got:-bench-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')} task $t arm $label trial $tr base $(corpus_field "$t" base) budget \$$(corpus_field "$t" budget) timeout $(timeout_for "$t")m agent ${ARM_AGENT[$label]:-default} model ${ARM_MODEL[$label]:-default}${ARM_TEMP[$label]:+ temp ${ARM_TEMP[$label]}}${ARM_TOP_P[$label]:+ top_p ${ARM_TOP_P[$label]}}${ARM_EFFORT[$label]:+ effort ${ARM_EFFORT[$label]}} review ${REVIEW:-default}${plain_flag:+ plain}"
     done
     return 0
   fi
@@ -470,6 +505,8 @@ bench_review_one() { # <run> <base> <arm> <task>
   git -C "$PROJECT_PATH" worktree remove --force "$wt" 2>/dev/null
   git -C "$PROJECT_PATH" branch -q -D "$(branch_of "$run")" 2>/dev/null
   python3 "$PY" review-set "$TSV" "$run" "$verdict" "$blocking" "$teeth" || return 1
+  # The judge this pass used, kept beside the patch as a live run's judge.txt is.
+  { echo "judge: ${REVIEW:-default}"; grep -m1 '^ws: review agent:' "$log" 2>/dev/null || true; } > "$BENCH/evidence/$run/judge.txt"
   echo "bench: $run reviewed: $verdict, $blocking blocking${teeth:+, teeth $teeth}" | tee -a "$log"
   return 0
 }
@@ -544,5 +581,5 @@ case "$sub" in
   run) bench_run "$@" ;;
   review) bench_review "$@" ;;
   report) bench_report "$@" ;;
-  *) die "usage: ws bench add <name>... | ws bench run <slug> --arm L=<ref|dir>[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E] --arm ... [--review none|claude] [--trials N] [--parallel P] [--dry-run] [tasks...] | ws bench review <slug> [--arm L] [--limit N] [--dry-run] [runs...] | ws bench report [--baseline L|recorded] [--runs DIR] <slug>..." ;;
+  *) die "usage: ws bench add <name>... | ws bench run <slug> --arm L=<ref|dir>[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E] --arm ... [--review none|claude|opencode] [--plain] [--trials N] [--parallel P] [--dry-run] [tasks...] | ws bench review <slug> [--arm L] [--limit N] [--dry-run] [runs...] | ws bench report [--baseline L|recorded] [--runs DIR] <slug>..." ;;
 esac

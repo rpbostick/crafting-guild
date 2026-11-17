@@ -704,7 +704,9 @@ waiting_lines() { # <slug> <runs-dir> [project-path] [project-branch]
   for f in "$runs"/*.result.txt; do
     [ -f "$f" ] || continue
     first=$(head -n1 "$f")
-    case "$first" in partial*|"NO RESULT"*) ;; *) continue ;; esac
+    # A plain run writes PARTIAL (plain) when the wall clock ended it; check-result writes lowercase partial and
+    # "NO RESULT" for a full-contract run. All three are unfinished work, not a result to act on.
+    case "$first" in partial*|PARTIAL*|"NO RESULT"*) ;; *) continue ;; esac
     n=$(basename "$f" .result.txt)
     pid_file_alive "$runs/$n.pid" && continue
     # A retried run's name carries a .YYYYMMDDTHHMMSSZ suffix; the step is the name the branch uses.
@@ -767,10 +769,23 @@ wake_session() {
   fi
   printf '%s\n' "$session"
 }
-# The server a wake goes to when no --url is given: WS_WAKE_URL when set, else the port ws oc recorded, else 4096.
+# The server a wake goes to when no --url is given: WS_WAKE_URL when set; on 2.x the shared background service's own
+# URL; else the port ws oc recorded, else 4096. The service's state file wins on 2.x because every project's `ws oc`
+# moves that one service and records only the port it asked for, so a sibling project's launch leaves this one's
+# oc.port behind while the service answers on the new port. A job armed with this default resolves it again at each
+# fire (scripts/wake.sh), since the service can move in between. A 1.x session starts its own server on the recorded
+# port and must not be redirected by a service.json left behind by a 2.x install.
 wake_url() {
-  local port=""
+  local port="" state="" file="" url=""
   if [ -n "${WS_WAKE_URL:-}" ]; then printf '%s\n' "$WS_WAKE_URL"; return; fi
+  if [ "$(opencode_line)" = 2 ]; then
+    state="${XDG_STATE_HOME:-$HOME/.local/state}"; file="$state/opencode/service.json"
+    if [ -r "$file" ]; then
+      # A missing jq, an unreadable file or a null/non-http .url all fall through to the recorded port silently.
+      url=$(jq -er '.url | select(type == "string") | select(startswith("http://"))' "$file" 2>/dev/null) || url=""
+    fi
+    if [ -n "$url" ]; then printf '%s\n' "$url"; return; fi
+  fi
   [ -f "$RUNS/oc.port" ] && port=$(head -n 1 "$RUNS/oc.port")
   if [ -n "$port" ]; then
     [[ $port =~ ^[0-9]+$ ]] || die "runs/$SLUG/oc.port holds no port: $port"
@@ -963,6 +978,39 @@ WS_MERGE_SUBJECT_RE='^Merge agent/([A-Za-z0-9._/-]+)(: .*)? \((reviewed at ([0-9
 WS_NO_LOOK_RE='^(.*); --no-look: (.*)\)$'
 # The final `result` event of a stream-json log, or nothing if the run has not ended.
 result_json() { grep '"type":"result"' "$1" 2>/dev/null | tail -1; }
+# The reset epoch a provider limit message names ("resets 3:50pm (America/Denver)"): the next such clock time after
+# the run stopped (the log's last write), so a result rebuilt once the reset has passed does not land a day late. A
+# weekly limit names its day ("resets Oct 19, 4am") and is never rolled. Empty when the message names no time.
+limit_reset_epoch() { # <message> <log>
+  local msg="$1" log="$2" when dated tz ep stopped
+  when=$(printf '%s' "$msg" | sed -nE 's/.*resets ([A-Z][a-z]{2} [0-9]{1,2}, )?([0-9]{1,2}(:[0-9]{2})? ?[ap]m).*/\1\2/p' | tr -d ,)
+  dated=$(printf '%s' "$when" | grep -c '^[A-Z]')
+  tz=$(printf '%s' "$msg" | sed -nE 's/.*resets [^(]*\(([^)]+)\).*/\1/p')
+  ep=""; [ -n "$when" ] && ep=$(TZ="${tz:-${WS_TZ:-}}" date -d "$when" +%s 2>/dev/null)
+  stopped=$(stat -c %Y "$log" 2>/dev/null || date +%s)
+  [ -n "$ep" ] && [ "$dated" = 0 ] && [ "$ep" -le "$stopped" ] && ep=$((ep + 86400))
+  printf '%s' "$ep"
+}
+# A finished run stopped by the provider's usage limit: the result line's api_error_status 429 (with the reset named
+# in its text), or, when <events> is 1, the retry or error an OpenCode run's event file records. Prints the LIMIT line
+# and its reset_epoch and returns 0; returns 1 when neither source names a limit. A recovered retry leaves a valid
+# result, so check-result passes 0 for <events> when the run has one to show.
+limit_report() { # <name> <events: 0|1>
+  local name="$1" events="$2" log ev res msg ep lim
+  log="$RUNS/$name.jsonl"
+  ev="${log%.jsonl}.events.jsonl"; [ "$ev" = "$log" ] && ev="$log.events.jsonl"
+  res=$(result_json "$log")
+  if [ -n "$res" ] && [ "$(printf '%s' "$res" | jq -r '.api_error_status // empty' 2>/dev/null)" = 429 ]; then
+    msg=$(printf '%s' "$res" | jq -r '.result // ""' 2>/dev/null)
+    ep=$(limit_reset_epoch "$msg" "$log")
+    echo "LIMIT: $msg"; echo "reset_epoch=${ep:-unknown}"; return 0
+  fi
+  [ "$events" = 1 ] && [ -f "$ev" ] || return 1
+  lim=$(python3 -I "$WS/scripts/opencode_run.py" limit "$ev" 2>/dev/null) || return 1
+  [ -n "$lim" ] || return 1
+  IFS=$'\t' read -r msg ep <<< "$lim"
+  echo "LIMIT: $msg"; echo "reset_epoch=${ep:-unknown}"
+}
 # How many Claude findings an OpenCode review names in the same file within five lines (the approximate rule a
 # shadow review's recall is measured by). <claude-json> is `[{"file":...,"line":...}]`; <opencode-review> a review file.
 review_match_count() {
