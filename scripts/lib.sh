@@ -826,6 +826,10 @@ resolve_slug() {
 load_project() {
   SLUG="$(resolve_slug "${1:-}")"
   PROJECT_PATH="" PROJECT_BRANCH="master" TEST_CMD="" TEETH_CMD="" PREVIEW_CMD="" POST_MERGE_CMD=""; EXTRA_TOOLS=(); CREDIT_PATHS=(); ATTRIBUTION_EXEMPT=(); RELEASE_PATHS=(); RELEASE_MAJOR_BRANCHES=""; SITE_SYNC=(); SITE_PROJECT="" SITE_URL="" SITE_ROOT=""; WORKTREE_ENV_FILE=""; WORKTREE_ENV=(); BENCH_TEST_CMD=""; COLD_START_CMD=""; TEST_GLOBS=(); unset MERGE_NPM_FLAGS
+  # Security scan scope (ws security-scan): semgrep targets, osv-scanner lockfiles, the requirements-format lock
+  # pip-audit reads, the frontend directory npm audit runs in, and extra excluded paths. Empty or unset means the tool
+  # has nothing to scan.
+  SECURITY_PATHS=(); SECURITY_LOCKFILES=(); SECURITY_UV_LOCK=""; SECURITY_FRONTEND=""; SECURITY_EXCLUDE=()
   # shellcheck disable=SC1090
   . "$WS/projects/$SLUG.conf"
   [ -d "$PROJECT_PATH/.git" ] || [ -f "$PROJECT_PATH/.git" ] || die "project path $PROJECT_PATH is not a git repo"

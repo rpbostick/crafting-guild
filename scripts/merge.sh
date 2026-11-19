@@ -254,7 +254,7 @@ fi
 # or a committed credential file blocks it, so a finding cannot be argued past a reviewer; risky shell spellings
 # are printed for the merge log and do not block. Deliberate: only the branch's diff is scanned, so an old secret
 # already on the main branch does not block every merge, and no network call is made.
-x=0; scan=$("$WS/scripts/security-scan.sh" --repo "$PROJECT_PATH" --base "$PROJECT_BRANCH" --head "$tip" 2>&1) || x=$?
+x=0; scan=$("$WS/scripts/security-diff.sh" --repo "$PROJECT_PATH" --base "$PROJECT_BRANCH" --head "$tip" 2>&1) || x=$?
 [ -z "$scan" ] || printf '%s\n' "$scan" >&2
 [ "$x" = 0 ] || die "security scan blocked the merge (above); fix it on the branch, commit, and review again"
 has_remote=false

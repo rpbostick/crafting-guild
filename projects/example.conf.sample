@@ -33,6 +33,16 @@ PREVIEW_CMD="npx serve -l {port} dist"
 # ws orchestrator-record: config globs (space separated) it counts as docs and config, not code, beside *.md,
 # docs/*, .gitignore and .editorconfig.
 # RECORD_CONFIG_PATHS="config/*.yml scripts/*.cfg"
+# ws security-scan: the scope of each scanner. Paths semgrep reads, the lockfiles osv-scanner reads, the
+# hash-pinned requirements-format lock pip-audit reads (from `uv export --format requirements-txt`; a uv.lock is
+# TOML and is refused), the frontend directory npm audit runs in, and paths no scanner reports (beside the built-in
+# .git, .worktrees, .venv, *venv, node_modules, __pycache__, .pytest_cache, dist and coverage).
+# SECURITY_PATHS=("src" "scripts")
+# SECURITY_LOCKFILES=("requirements.txt")
+# SECURITY_UV_LOCK="requirements.lock"
+# SECURITY_FRONTEND="frontend"
+# SECURITY_EXCLUDE=("data" "*.lock.tmp")
+# SECURITY_SCAN_OFFLINE=1 skips semgrep and npm audit with a reason and ends the run INCOMPLETE.
 # ws release: only these paths go public; `source=dest` publishes a file under another name.
 # RELEASE_PATHS=("src" "package.json" "README.md" "LICENSE" "CHANGELOG.public.md=CHANGELOG.md")
 # ws site, in the project that publishes: the site project and what goes where (see scripts/site.sh).

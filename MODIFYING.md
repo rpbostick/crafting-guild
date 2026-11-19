@@ -289,11 +289,64 @@ scripts/merge.sh        pinned-SHA merge, test gate, push, post-merge chore, cle
                         re-checkable from their text, which is why `ws evidence prune` only removes the bulk beside
                         that text, and the result, review, teeth and merge-test logs sit in runs/<slug>/ itself,
                         outside evidence/.
-scripts/security-scan.sh  the deterministic scan of a branch's added lines: a private-key header, an AWS, GitHub,
+scripts/security-diff.sh  the deterministic scan of a branch's added lines: a private-key header, an AWS, GitHub,
                         OpenAI or Slack token, or a committed .env/credential file prints BLOCK and exits 1; a
                         curl or wget piped to a shell, a variable rm -rf, or sudo in scripts/, bin/ or a *.sh file
                         prints FLAG and does not block. merge.sh runs it before the merge commit; selftest.sh
-                        covers it (`--security-scan` runs those cases alone).
+                        covers it (`--security-diff` runs those cases alone).
+scripts/security-scan.sh  `ws security-scan`: the scanners a project's conf names, one line per tool in a fixed order
+                        (semgrep, osv-scanner, pip-audit, then with --all syft, trivy, gitleaks, npm-audit,
+                        scorecard), and one acceptance file per project. Tools are looked up in ~/security-tools/bin,
+                        ~/security-tools/venv/bin, then PATH. It runs the handover's commands and reads each tool's
+                        JSON; gitleaks writes its report to `--report-path` rather than stdout, and npm audit runs
+                        `--package-lock-only` so it audits what a clean build would install instead of the installed
+                        tree. For the --quick dependency scanners the only inputs are SECURITY_LOCKFILES and
+                        SECURITY_UV_LOCK; semgrep reads only SECURITY_PATHS; --all adds whole-checkout scans (syft
+                        `dir:.`, trivy `fs .`, gitleaks `--source .`, npm audit in SECURITY_FRONTEND) filtered by the
+                        same path exclusions. SECURITY_UV_LOCK takes a hash-pinned requirements-format lock (e.g.
+                        from `uv export --format requirements-txt`), which is what `pip-audit -r` parses: a TOML file
+                        such as uv.lock is refused with that format named. SECURITY_SCAN_OFFLINE=1 skips the two
+                        tools whose data comes from the network (semgrep's rules, npm audit's registry) and says so.
+                        Exclusions are applied to every tool's findings by path (the built-in set plus
+                        SECURITY_EXCLUDE) rather than through per-tool flags, so one list covers all of them and no
+                        tool's command changes with the conf. A tool that reports several advisories on one package
+                        (npm audit's via array) gives each advisory its own rule, `<package>:<advisory id>`, so they
+                        stay separate findings.
+                        The run ends in one of three states, printed as the last line and carried as `state` in the
+                        JSON: `RESULT: PASS <n> passed <m> accepted` (exit 0: n tools finished, every finding
+                        accepted or none), `RESULT: FAIL <n> actionable` (exit 1: n findings no acceptance covers)
+                        and `RESULT: INCOMPLETE <reason count> <first reason>` (exit 2: the scan did not fully run).
+                        INCOMPLETE covers a missing tool, a report that will not parse or is empty, a stale
+                        acceptance and an offline run; `reasons:` lists each with a [MISSING], [ERROR], [STALE] or
+                        [OFFLINE] marker. Findings are counted and printed in every state, so a tool that reported
+                        findings and an error in the same JSON contributes both.
+                        plans/<slug>/security-baseline.tsv holds one `tool<TAB>rule<TAB>path<TAB>reason` row per
+                        accepted finding, sorted; the path is repo-relative with a leading `./` and is the identity
+                        (no line number, no hash), so a move or a delete must be accepted again. A row with no
+                        reason, a path without `./`, a path outside the repository or a duplicate row is refused
+                        when the file is read, naming the row, and so is an acceptance whose path no longer names a
+                        file in the tree: that row prints `[STALE] <tool> <rule> <path>: the file is gone` and the
+                        run is INCOMPLETE. --update-baseline rewrites the rows of the tools this run scanned and
+                        says how many rows it added and removed; it keeps the existing reason of a row it rewrites,
+                        writes `unreviewed: --update-baseline` for a new one, refuses a finding whose path is not a
+                        file in the tree, and refuses the whole write unless every requested tool reached ok or
+                        not-scanned, since a rewrite from this run alone would drop the acceptances of a tool that
+                        did not run. A tool the run did not request, and a requested tool that reached not-scanned
+                        with nothing to scan, keeps its rows unchanged with their reasons, because this run judged
+                        none of them. A run with no such file accepts nothing. The report is
+                        runs/<slug>/security/last.json and last.txt (tool, findings, acceptances, reasons, RESULT);
+                        `--json` prints the same object on stdout alone. The SBOM syft writes goes to
+                        runs/<slug>/security/sbom-<date>.json, never into git.
+scripts/security-check.sh  the stand-in suite for `ws security-scan`: fake semgrep, osv-scanner and pip-audit first
+                        on PATH and a throwaway project conf, covering the acceptance key (tool, rule, ./path) with
+                        its reason, a stale one, a row with no reason, a row in the old fingerprint shape, a
+                        basename path, a second Dockerfile, a missing tool (and none installed at all), an unparsable
+                        or empty report, the clean PASS, a tool's own error beside its findings (semgrep's errors[],
+                        npm audit's ENOLOCK member), an offline run, gitleaks' --report-path, a refused
+                        --update-baseline, an update that keeps the rows of the tools it did not recompute, a TOML
+                        lock, --json purity and two advisories on one package (two accepted rows, then a third
+                        read as new, and a package-keyed row accepting neither).
+                        selftest.sh runs it (`--security-check` runs it alone).
 scripts/merge-gates-check.sh  the --no-review and --no-look reasons, the look refusal and the look records on a throwaway project; selftest.sh runs it.
 scripts/look.sh         `ws look <name> "<what they said>"`: appends epoch, time, tip, source and note to
                         runs/<slug>/<name>.look. It records only; merge.sh and orchestrator-record.sh read it.

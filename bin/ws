@@ -184,6 +184,13 @@ ws claude [--budget USD] [--schema file] [--dir path] [--allow tool] [--raw] [--
                                 room left, and starts no job
 ws email-audit [--project slug | --repo path]... [--all] [--range R]   find personal addresses in git identity,
                                 commit metadata, reflogs and tracked files; exits 1 on a finding
+ws security-scan [--project slug] [--quick|--all] [--json] [--update-baseline]
+                                the scanners the project's conf names, one line per tool, against a committed
+                                acceptance file; --quick (default) runs semgrep, osv-scanner and pip-audit, --all
+                                adds syft, trivy, gitleaks, npm audit and scorecard; exit 0 PASS, 1 FAIL a finding
+                                no acceptance covers, 2 INCOMPLETE (a tool missing or unreadable, a stale
+                                acceptance, an offline run); --update-baseline rewrites
+                                plans/<slug>/security-baseline.tsv; the report is runs/<slug>/security/last.{json,txt}
 ws opencode-perms [--dry-run] [--config <file>]   write the orchestrator's OpenCode config (orchestrator.json,
                                 loaded with OPENCODE_CONFIG; refuses the global opencode.json): registered project
                                 paths allowed outside this folder, destructive shell commands ask first,
@@ -376,6 +383,7 @@ case "$cmd" in
   doctor) "$WS/scripts/doctor.sh" ${proj:+--project "$proj"} "$@" ;;
   claude) "$WS/scripts/claude.sh" ${proj:+--project "$proj"} "$@" ;;
   email-audit) "$WS/scripts/email-audit.sh" ${proj:+--project "$proj"} "$@" ;;
+  security-scan) "$WS/scripts/security-scan.sh" ${proj:+--project "$proj"} "$@" ;;
   opencode-perms) "$WS/scripts/opencode-perms.sh" "$@" ;;
   tutor)
     # The tutor tab: a Claude session in the course repo (WS_TUTOR_PROJECT). Its own .claude/settings.json lets it

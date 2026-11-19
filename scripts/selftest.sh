@@ -882,12 +882,12 @@ result_format_cases() { # <root> <scratch>
   result_repair_cases "$1" "$2/repair" || rc=1
   return "$rc"
 }
-# The deterministic security scan: a seeded token, a private-key header and a committed .env block; a curl|sh line,
-# a variable rm -rf and sudo in a builder script flag without blocking; a clean diff passes; a secret left on the
-# branch outside the scanned range is not reported. The merge gate is exercised on a throwaway project too. <root>
-# is the workspace; <scratch> is a fresh directory the caller removes. Prints one line per case and returns 1 when
-# any fails.
-security_scan_cases() { # <root> <scratch>
+# The deterministic scan of a branch's added lines for the merge gate: a seeded token, a private-key header and a
+# committed .env block; a curl|sh line, a variable rm -rf and sudo in a builder script flag without blocking; a clean
+# diff passes; a secret left on the branch outside the scanned range is not reported. The merge gate is exercised on a
+# throwaway project too. <root> is the workspace; <scratch> is a fresh directory the caller removes. Prints one line
+# per case and returns 1 when any fails.
+security_diff_cases() { # <root> <scratch>
   local root="$1" t="$2" repo="$2/repo" gate="$2/gate" base tip out x tok keyh slugx gtip gpre ctip
   local -a fails=()
   mkdir -p "$repo"
@@ -898,7 +898,7 @@ security_scan_cases() { # <root> <scratch>
   base=$(git -C "$repo" rev-parse HEAD)
   sc_commit() { git -C "$repo" add -A; git -C "$repo" -c user.name=t -c user.email=t@t commit -qm "$1"; }
   sc_tip() { tip=$(git -C "$repo" rev-parse HEAD); }
-  sc_scan() { x=0; out=$(bash "$root/scripts/security-scan.sh" --repo "$repo" --base "$1" --head "$2" 2>&1) || x=$?; }
+  sc_scan() { x=0; out=$(bash "$root/scripts/security-diff.sh" --repo "$repo" --base "$1" --head "$2" 2>&1) || x=$?; }
   printf 'hello\n' > "$repo/b.txt"; sc_commit clean; sc_tip
   sc_scan "$base" "$tip"; base=$tip
   { [ "$x" = 0 ] && [ -z "$out" ]; } \
@@ -1041,10 +1041,10 @@ if [ "${1:-}" = --evidence-archive ] || [ "${1:-}" = --evidence-archive-before ]
   evidence_archive_cases "$root" "$d/case"
   exit $?
 fi
-# Run only the security-scan cases against the worktree's own scripts.
-if [ "${1:-}" = --security-scan ]; then
+# Run only the merge-gate diff scan cases against the worktree's own scripts.
+if [ "${1:-}" = --security-diff ]; then
   d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
-  security_scan_cases "$WS" "$d"
+  security_diff_cases "$WS" "$d"
   exit $?
 fi
 # The evidence archive cases: the table's text/bulk split, prune's dry run, the prune itself, and an archive newer
@@ -1170,6 +1170,8 @@ if [ "${1:-}" = --doctor-browser ]; then exec bash "$WS/scripts/doctor-browser-s
 if [ "${1:-}" = --doctor-clients ]; then exec bash "$WS/scripts/doctor-clients-check.sh"; fi
 # Run only the background-command cases, so a change there is checked without the whole suite.
 if [ "${1:-}" = --bg-check ]; then exec bash "$WS/scripts/bg-check.sh"; fi
+# Run only the security-scan stand-in cases, so a change there is checked without the whole suite.
+if [ "${1:-}" = --security-check ]; then exec bash "$WS/scripts/security-check.sh"; fi
 # Run only the background-research cases, so a change there is checked without the whole suite.
 if [ "${1:-}" = --ask-check ]; then exec bash "$WS/scripts/ask-check.sh"; fi
 # Run only the link-check cases, so a change there is checked without the whole suite.
@@ -2789,6 +2791,7 @@ par_start chain-watch bash "$WS/scripts/chain-watch-check.sh"
 par_start bg bash "$WS/scripts/bg-check.sh"
 par_start ask bash "$WS/scripts/ask-check.sh"
 par_start link-check bash "$WS/scripts/link-check-check.sh"
+par_start security bash "$WS/scripts/security-check.sh"
 par_start chain-resume bash "$WS/scripts/chain-resume-check.sh"
 par_start chain-kill bash "$WS/scripts/chain-kill-check.sh"
 par_start orchestrator-record bash "$WS/scripts/orchestrator-record-check.sh"
@@ -3125,9 +3128,9 @@ cs=$(PATH="$T/pmbin:$PATH" "$WS/scripts/cold-start.sh" "$slug3" 2>&1)
   && echo "merge post-merge failure records, notifies and shows in cold start ok" \
   || { echo "merge post-merge failure FAILED:"; echo "exit $x"; echo "status: $st"; cat "$T/notify.log" 2>/dev/null; grep -i 'post-merge' <<< "$cs"; exit 1; }
 rm -rf "$M"  # later checks commit everything under $T; a nested repo there would be swept in
-# security scan: the merge gate blocks a committed secret or credential file, flags risky shell spellings without
-# blocking, and reads only the changed lines.
-d=$(mktemp -d); security_scan_cases "$WS" "$d" || { rm -rf "$d"; exit 1; }; rm -rf "$d"
+# merge-gate diff scan: the merge gate blocks a committed secret or credential file, flags risky shell spellings
+# without blocking, and reads only the changed lines.
+d=$(mktemp -d); security_diff_cases "$WS" "$d" || { rm -rf "$d"; exit 1; }; rm -rf "$d"
 d=$(mktemp -d); evidence_archive_cases "$WS" "$d" || { rm -rf "$d"; exit 1; }; rm -rf "$d"
 # bench: WS_BENCH_HOURS gates when a replay may start, across midnight too.
 hrs=$(sed -n '/^in_bench_hours()/,/^}/p' "$WS/scripts/bench.sh")

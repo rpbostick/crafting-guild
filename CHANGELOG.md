@@ -2,6 +2,11 @@
 
 Versions of Crafting Guild. `ws version` prints the current one.
 
+## 2.9.5
+
+- **A security scan every project can run.** `ws security-scan` reads dependencies from lockfiles rather than installed trees, applies one exclusion set per layout (`.worktrees`, virtualenvs, `node_modules`, app data), and reports three outcomes: `PASS`, `FAIL` with the findings nobody accepted, and `INCOMPLETE` when a tool is missing, a report is unreadable or an acceptance is stale. Acceptances are keyed on tool, rule and repository-relative path with their reason on the same line, so a moved file cannot inherit one; `--quick` is about twenty seconds, `--all` adds the slow scanners.
+- **Windows: a porting guide.** `docs/windows.md` sets out what the harness needs from the operating system, why WSL 2 runs it unchanged, what a native Windows port would have to add, and what to verify first.
+
 ## 2.9.4
 
 - **Teeth sees a suite that is one script.** The gate that proves a branch's tests can fail took its test file from the first `bash <path>` word in `TEST_CMD`, so a workspace whose whole suite is `scripts/selftest.sh` was answered "n/a, the branch changes no test file" on exactly the branches it should bite. It now derives the suite from the command's final segment, answers n/a promptly when there is no test command at all (an empty or separator-only command used to spin forever), and names the failure earlier.
