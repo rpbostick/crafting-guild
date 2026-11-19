@@ -972,11 +972,191 @@ security_scan_cases() { # <root> <scratch>
   rm -rf "$root/runs/$slugx" "$root/plans/$slugx"
   [ ${#fails[@]} -eq 0 ]
 }
+# The merge's evidence archive: a branch's .ws-evidence/ holding a log, a file over WS_EVIDENCE_MAX_MB, a dependency
+# file and an archive keeps the log and names the other three in skipped.tsv with their reasons; with
+# --keep-evidence-all it keeps all four. <root> is the workspace; <scratch> is a fresh directory the caller removes.
+evidence_archive_cases() { # <root> <scratch>
+  local root="$1" repo="$2/repo" out x tip evd fails=0
+  local slug="evidence-archive-$(basename "$2" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  printf 'base\n' > "$repo/a.txt"
+  git -C "$repo" add a.txt
+  git -C "$repo" -c user.name=t -c user.email=t@t commit -qm base
+  printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$repo" > "$root/projects/$slug.conf"
+  mkdir -p "$root/runs/$slug" "$root/plans/$slug"
+  # One branch and worktree per case, seeded the same way: a log, one file over the cap, a dependency file and an
+  # archive.
+  ea_branch() { # <name> <file it adds>: creates agent/<name> with its worktree and evidence, prints the tip
+    git -C "$repo" checkout -q -b "agent/$1" main
+    printf '%s\n' "$1" > "$repo/$2"
+    git -C "$repo" add "$2"
+    git -C "$repo" -c user.name=t -c user.email=t@t commit -qm "$1"
+    tip=$(git -C "$repo" rev-parse HEAD)
+    git -C "$repo" checkout -q main
+    mkdir -p "$repo/.worktrees"
+    git -C "$repo" worktree add -q "$repo/.worktrees/$1" "agent/$1"
+    mkdir -p "$repo/.worktrees/$1/.ws-evidence/node_modules"
+    printf 'probe passed\nexit 0\n' > "$repo/.worktrees/$1/.ws-evidence/after-test.log"
+    truncate -s 30M "$repo/.worktrees/$1/.ws-evidence/corpus.dat"
+    printf 'module.exports = 1;\n' > "$repo/.worktrees/$1/.ws-evidence/node_modules/x.js"
+    printf 'PK\n' > "$repo/.worktrees/$1/.ws-evidence/pack.whl"
+    printf '%s\n' "$tip"
+  }
+  ea_row() { awk -F'\t' -v p="$2" -v r="$3" '$1 == p && $2 ~ /^[0-9]+$/ && $3 == r { ok = 1 } END { exit !ok }' "$1" 2>/dev/null; }
+  tip=$(ea_branch evarc e.txt) || { rm -f "$root/projects/$slug.conf"; echo "evidence archive setup FAILED"; return 1; }
+  x=0; out=$(bash "$root/scripts/merge.sh" --project "$slug" --no-review "selftest merge" evarc "$tip" 2>&1) || x=$?
+  evd="$root/runs/$slug/evidence/evarc"
+  { [ "$x" = 0 ] && [ -f "$evd/after-test.log" ] && [ ! -e "$evd/corpus.dat" ] && [ ! -e "$evd/node_modules" ] \
+    && [ ! -e "$evd/pack.whl" ] && ea_row "$evd/skipped.tsv" corpus.dat over-cap \
+    && ea_row "$evd/skipped.tsv" node_modules/x.js bulk-dir && ea_row "$evd/skipped.tsv" pack.whl extension \
+    && grep -qF 'commit it' "$evd/skipped.tsv" && grep -qF 'evidence: kept 1 files, skipped 3' <<< "$out"; } \
+    && { grep -F 'evidence: kept' <<< "$out"; echo "merge evidence archive keeps the log and names 3 skipped paths ok"; } \
+    || { echo "merge evidence archive FAILED (exit $x): $out"; cat "$evd/skipped.tsv" 2>/dev/null || true; fails=1; }
+  tip=$(ea_branch evall f.txt) || { rm -f "$root/projects/$slug.conf"; echo "evidence archive setup FAILED"; return 1; }
+  x=0; out=$(bash "$root/scripts/merge.sh" --project "$slug" --no-review "selftest merge" --keep-evidence-all evall "$tip" 2>&1) || x=$?
+  evd="$root/runs/$slug/evidence/evall"
+  { [ "$x" = 0 ] && [ -f "$evd/after-test.log" ] && [ -f "$evd/corpus.dat" ] && [ -f "$evd/node_modules/x.js" ] \
+    && [ -f "$evd/pack.whl" ] && grep -qF 'skipped 0' <<< "$out"; } \
+    && { grep -F 'evidence: kept' <<< "$out"; echo "merge --keep-evidence-all keeps the archived bulk ok"; } \
+    || { echo "merge --keep-evidence-all FAILED (exit $x): $out"; ls -R "$evd" 2>/dev/null || true; fails=1; }
+  rm -f "$root/projects/$slug.conf"
+  rm -rf "$root/runs/$slug" "$root/plans/$slug"
+  [ "$fails" = 0 ]
+}
+# Run only the evidence-archive cases, so a change there is checked without the whole suite. The -before form runs
+# them against another revision's merge.sh, so the cases can be shown failing on the code before the change.
+if [ "${1:-}" = --evidence-archive ] || [ "${1:-}" = --evidence-archive-before ]; then
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  root="$WS"
+  if [ "${1:-}" = --evidence-archive-before ]; then
+    ref="${2:?usage: selftest.sh --evidence-archive-before <git-ref>}"
+    root="$d/ws"
+    mkdir -p "$root"
+    cp -a "$WS/bin" "$WS/scripts" "$WS/schema" "$root/"
+    cp "$WS/config.sh" "$root/config.sh"
+    git -C "$WS" show "$ref:scripts/merge.sh" > "$root/scripts/merge.sh" || { echo "no scripts/merge.sh at $ref"; exit 1; }
+    mkdir -p "$root/projects"
+  fi
+  evidence_archive_cases "$root" "$d/case"
+  exit $?
+fi
 # Run only the security-scan cases against the worktree's own scripts.
 if [ "${1:-}" = --security-scan ]; then
   d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
   security_scan_cases "$WS" "$d"
   exit $?
+fi
+# The evidence archive cases: the table's text/bulk split, prune's dry run, the prune itself, and an archive newer
+# than the window. The tree is written here, since the suite runs no merge; WS_EVIDENCE_MAX_MB=1 puts the size rule
+# inside it, and a text log over the cap proves a text file is never bulk. The project, its runs/ and plans/ dirs
+# and the conf are this case's own and are removed again.
+evidence_cases() { # <ws root> <temp dir>
+  local wsroot="$1" work="$2" slug proj ev now old new x out before p gone kept after fail=0
+  # A run of these cases that died mid-way can leave its stand-in project behind: the suite holds one selftest lock,
+  # so an evcase-* tree at the start is a leftover and goes.
+  rm -f "$wsroot"/projects/evcase-*.conf
+  rm -rf "$wsroot"/runs/evcase-* "$wsroot"/plans/evcase-*
+  slug="evcase-$(basename "$work" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-')"
+  proj="$work/proj"; mkdir -p "$proj"; git -C "$proj" init -q -b main
+  printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD=""\n' "$proj" > "$wsroot/projects/$slug.conf"
+  ev="$wsroot/runs/$slug/evidence"; mkdir -p "$ev"
+  now=$(date +%s); old=$((now - 40 * 86400)); new=$((now - 86400))
+  ev_archive() { # <name> <epoch>
+    local d="$ev/$1"
+    mkdir -p "$d"
+    printf 'merged: %s\nepoch: %s\nsha: 0123456789abcdef0123456789abcdef01234567\nbranch: agent/%s\n' \
+      "$(date -d "@$2" '+%Y-%m-%d %H:%M:%S %z')" "$2" "$1" > "$d/merged.txt"
+  }
+  ev_tree() { find "$ev" -print | sort; }
+  # An archive with no merged.txt, so its age comes from its own mtime; the split it shows is exact: 2 MB of .log is
+  # text even over the 1 MB cap, and 3 MB of .dat is bulk.
+  mkdir -p "$ev/split"
+  head -c 2097152 /dev/zero > "$ev/split/two.log"
+  head -c 3145728 /dev/zero > "$ev/split/three.dat"
+  touch -d "40 days ago" "$ev/split"
+  ev_archive old-big "$old"
+  printf 'after tests: 12 passed\n' > "$ev/old-big/after-tests.log"
+  printf '{"status":"done"}\n' > "$ev/old-big/result.json"
+  printf '# review\n' > "$ev/old-big/review.md"
+  printf 'step\tverdict\n' > "$ev/old-big/runs.tsv"
+  printf 'checks\n' > "$ev/old-big/checks.txt"
+  head -c 1572864 /dev/zero > "$ev/old-big/big.log"
+  head -c 1572864 /dev/zero > "$ev/old-big/blob.dat"
+  mkdir -p "$ev/old-big/.venv/lib" "$ev/old-big/node_modules/pkg" "$ev/old-big/__pycache__"
+  printf 'python\n' > "$ev/old-big/.venv/lib/site.py"
+  printf 'js\n' > "$ev/old-big/node_modules/pkg/index.js"
+  printf 'pyc\n' > "$ev/old-big/__pycache__/mod.pyc"
+  printf 'weights\n' > "$ev/old-big/checkpoint.pt"
+  printf 'weights\n' > "$ev/old-big/weights.bin"
+  ev_archive new-one "$new"
+  printf 'log\n' > "$ev/new-one/new.log"
+  mkdir -p "$ev/new-one/.venv"; printf 'marker\n' > "$ev/new-one/.venv/marker"
+  printf 'weights\n' > "$ev/new-one/model.onnx"
+  before=$(ev_tree)
+  # 1. The table names every archive with its age, size, text and bulk; the numbers are the tree's own, the size of
+  # what is text against the rest, and the mtime-only archive is marked.
+  x=0; out=$(WS_EVIDENCE_MAX_MB=1 "$wsroot/bin/ws" --project "$slug" evidence 2>&1) || x=$?
+  { [ "$x" = 0 ] \
+    && grep -qE '^archive +age +size +text +bulk$' <<< "$out" \
+    && grep -qE '^split +40d\* +5\.0MB +2\.0MB +3\.0MB$' <<< "$out" \
+    && grep -qE '^old-big +40d +3\.0MB +1\.5MB +1\.5MB$' <<< "$out" \
+    && grep -qE '^new-one +1d +[1-9][0-9]*B +[1-9][0-9]*B +[1-9][0-9]*B$' <<< "$out" \
+    && grep -qE '^total \(3 archives\) +8\.0MB +3\.5MB +4\.5MB$' <<< "$out" \
+    && grep -q "mtime: the archive has no merged.txt" <<< "$out" \
+    && [ "$(ev_tree)" = "$before" ]; } \
+    && echo "ws evidence lists the archives with their sizes and the text/bulk split ok" \
+    || { echo "ws evidence table FAILED (exit $x): $out"; fail=1; }
+  # 2. --dry-run names the bulk it would delete and leaves the tree unchanged; the header repeats the window as it
+  # was given, not its length in seconds.
+  x=0; out=$(WS_EVIDENCE_MAX_MB=1 "$wsroot/bin/ws" --project "$slug" evidence prune --older-than 30d --dry-run 2>&1) || x=$?
+  { [ "$x" = 0 ] && grep -q 'dry run' <<< "$out" \
+    && grep -qE '^ws evidence prune: bulk from archives older than 30d in runs/.*/evidence/$' <<< "$out" \
+    && grep -qE '^split +3\.0MB +1 entry would be freed \(three\.dat\)' <<< "$out" \
+    && grep -qE '^old-big +1\.5MB +6 entries would be freed \(' <<< "$out" \
+    && grep -q '\.venv' <<< "$out" && grep -q 'node_modules' <<< "$out" && grep -q '__pycache__' <<< "$out" \
+    && grep -q 'blob\.dat' <<< "$out" && grep -q 'checkpoint\.pt' <<< "$out" && grep -q 'weights\.bin' <<< "$out" \
+    && ! grep -q 'two\.log' <<< "$out" && ! grep -q 'big\.log' <<< "$out" \
+    && ! grep -qE '^new-one.*would be freed' <<< "$out" \
+    && grep -q 'would be freed from 2 of 2 old archives; 1 newer than the window; nothing deleted' <<< "$out" \
+    && [ "$(ev_tree)" = "$before" ]; } \
+    && echo "ws evidence prune --dry-run names the bulk and deletes nothing ok" \
+    || { echo "ws evidence prune dry run FAILED (exit $x): $out"; fail=1; }
+  # 3. The prune deletes that bulk and keeps every text file, including a log over the cap, and merged.txt; the table
+  # then reads the archive as text only.
+  x=0; out=$(WS_EVIDENCE_MAX_MB=1 "$wsroot/bin/ws" --project "$slug" evidence prune --older-than 30d 2>&1) || x=$?
+  gone=""
+  for p in split/three.dat old-big/.venv old-big/node_modules old-big/__pycache__ old-big/checkpoint.pt \
+    old-big/weights.bin old-big/blob.dat; do
+    [ -e "$ev/$p" ] && gone="$gone $p"
+  done
+  kept=""
+  for p in split/two.log old-big/after-tests.log old-big/result.json old-big/review.md old-big/runs.tsv \
+    old-big/checks.txt old-big/merged.txt old-big/big.log; do
+    [ -e "$ev/$p" ] || kept="$kept $p"
+  done
+  after=$(WS_EVIDENCE_MAX_MB=1 "$wsroot/bin/ws" --project "$slug" evidence 2>&1) || true
+  { [ "$x" = 0 ] && [ -z "$gone" ] && [ -z "$kept" ] \
+    && grep -qE '^split +40d\* +2\.0MB +2\.0MB +0B$' <<< "$after" \
+    && grep -q '4\.5MB freed from 2 of 2 old archives; 1 newer than the window' <<< "$out"; } \
+    && echo "ws evidence prune deletes the bulk and keeps the text ok" \
+    || { echo "ws evidence prune FAILED (exit $x); bulk left:${gone:- none}; text gone:${kept:- none}: $out  table: $after"; fail=1; }
+  # 4. An archive newer than the window keeps its bulk.
+  { [ -f "$ev/new-one/.venv/marker" ] && [ -f "$ev/new-one/model.onnx" ] && [ -f "$ev/new-one/new.log" ] \
+    && [ -f "$ev/new-one/merged.txt" ] && grep -qE '^new-one +- +newer than the window' <<< "$out"; } \
+    && echo "ws evidence prune leaves an archive newer than the window alone ok" \
+    || { echo "ws evidence prune newer archive FAILED: $out"; fail=1; }
+  "$wsroot/bin/ws" help | grep -qE '^ws evidence( |$)' && echo "ws help lists evidence ok" \
+    || { echo "ws help evidence FAILED"; fail=1; }
+  rm -f "$wsroot/projects/$slug.conf"
+  rm -rf "$wsroot/runs/$slug" "$wsroot/plans/$slug"
+  return "$fail"
+}
+# Run only the evidence-archive cases.
+if [ "${1:-}" = --evidence ]; then
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  x=0; evidence_cases "$WS" "$d" || x=$?
+  exit "$x"
 fi
 # Run only the result-format cases: normalize()'s coerced shapes and the repair marker.
 if [ "${1:-}" = --result-format ]; then
@@ -1461,13 +1641,13 @@ if [ "${1:-}" = --verify ]; then
   exit $?
 fi
 # The test-quality cases in their own scratch workspace: a good test passes, each defect class is flagged, a file
-# named as the test command is not production, a pytest-style failing run is recognised, and the review prompt's
-# test-quality guard fails when its section is removed. <source-root> holds scripts/, config.sh, agents/, lessons/
-# and checklist.md; <scratch> is a fresh directory. Prints one ok line per case and returns 1 when any fails, so a
-# before run records all of them.
+# named as the test command is not production, a chained command names only its final segment's script, a
+# pytest-style failing run is recognised, and the review prompt's test-quality guard fails when its section is
+# removed. <source-root> holds scripts/, config.sh, agents/, lessons/ and checklist.md; <scratch> is a fresh
+# directory. Prints one ok line per case and returns 1 when any fails, so a before run records all of them.
 test_quality_cases() { # <source-root> <scratch>
   local src="$1" t="$2" w="$2/ws" p="$2/proj" slugx out x fails=0 goodbase defbase docsbase
-  local conf wt wa wb
+  local conf wt wa wb wch
   mkdir -p "$w/scripts" "$w/projects" "$w/plans" "$w/runs" "$w/agents" "$w/lessons" "$t"
   cp -a "$src/scripts/." "$w/scripts/"
   cp "$src/config.sh" "$w/config.sh"
@@ -1590,6 +1770,28 @@ TQWOWN
   { [ "$(grep -c '^FLAG' <<< "$out")" = 0 ] && grep -q '^ok ' <<< "$out"; } \
     && echo "test-quality: the test command's own script is not production ok" \
     || { echo "test-quality changed test-command script FAILED:"; echo "$out"; fails=$((fails + 1)); }
+  # Only the command's final segment names the suite, as teeth reads it: in `bash build.sh && bash scripts/selftest.sh`
+  # build.sh is production, so a branch that changes both it and the suite is judged on two test files, not three.
+  wch="$p/.worktrees/tqchain"
+  git -C "$p" worktree add -q -b agent/tqchain "$wch" main
+  mkdir -p "$wch/scripts" "$wch/tests" "$wch/.ws-evidence"
+  printf '#!/bin/sh\nbuild_widget() { echo built; }\n' > "$wch/build.sh"
+  printf '#!/bin/sh\nrender_widget() { echo hi; }\necho "build_widget is covered in tests/feature.test.mjs"\n' > "$wch/scripts/selftest.sh"
+  cat > "$wch/tests/feature.test.mjs" <<'TQWCHAIN'
+import { test, expect } from "vitest";
+import { build_widget } from "../build.mjs";
+test("build_widget builds", () => {
+  expect(build_widget()).toBe("built");
+});
+TQWCHAIN
+  printf 'start\tlabel\texit\tcode\tcommand\n' > "$wch/.ws-evidence/runs.tsv"
+  printf '1\tchain-before\t1\t1\tnpx vitest tests/feature.test.mjs\n' >> "$wch/.ws-evidence/runs.tsv"
+  tq_commit "$wch" "a build script and the suite, behind a chained test command"
+  printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="bash build.sh && bash scripts/selftest.sh"\n' "$p" > "$conf"
+  out=$(tq_run "$wch" "$(git -C "$p" rev-parse main)" tqchain)
+  { [ "$(grep -c '^FLAG' <<< "$out")" = 0 ] && grep -q '^ok  *rule 2: 2 added or changed test file(s)' <<< "$out"; } \
+    && echo "test-quality takes the suite from the command's final segment ok" \
+    || { echo "FAIL test-quality chained test command:"; echo "$out"; fails=$((fails + 1)); }
   # A whole-suite runner names no file; its failing run is still failing-before evidence.
   wb="$p/.worktrees/tqpytest"
   git -C "$p" worktree add -q -b agent/tqpytest "$wb" main
@@ -2307,6 +2509,10 @@ arcout=$("$WS/bin/ws" --project "$slug" archive-inflight "plans/$slug/archive-ex
 # ws help names the command.
 "$WS/bin/ws" help | grep -q 'ws archive-inflight' && echo "ws help lists archive-inflight ok" \
   || { echo "ws help archive-inflight FAILED"; exit 1; }
+# ws evidence: the archives of runs/<slug>/evidence/ with the text/bulk split, and prune removing bulk only from
+# the archives older than its window. The four cases build their own stand-in project and tree, since the suite
+# runs no merge; see evidence_cases.
+EV=$(mktemp -d); evidence_cases "$WS" "$EV" || { rm -rf "$EV"; exit 1; }; rm -rf "$EV"
 # ws help runs nothing and prints nothing to stderr: the usage text is a heredoc, so a backtick in it runs a command
 # on every help.
 helpbin="$T/helpbin"; mkdir -p "$helpbin"
@@ -2922,6 +3128,7 @@ rm -rf "$M"  # later checks commit everything under $T; a nested repo there woul
 # security scan: the merge gate blocks a committed secret or credential file, flags risky shell spellings without
 # blocking, and reads only the changed lines.
 d=$(mktemp -d); security_scan_cases "$WS" "$d" || { rm -rf "$d"; exit 1; }; rm -rf "$d"
+d=$(mktemp -d); evidence_archive_cases "$WS" "$d" || { rm -rf "$d"; exit 1; }; rm -rf "$d"
 # bench: WS_BENCH_HOURS gates when a replay may start, across midnight too.
 hrs=$(sed -n '/^in_bench_hours()/,/^}/p' "$WS/scripts/bench.sh")
 bash -c "$hrs"'
@@ -3437,6 +3644,8 @@ printf '%s\n' 99999999 > "$T/pid-dead.pid"
   || { echo "pid file dead FAILED: $(pid_state "$T/pid-dead.pid")"; exit 1; }
 # check-result: a "done" with a done-when item not met fails; an observed item needs its evidence on disk.
 mkdir -p "$T/.worktrees/demo/.ws-evidence"; echo ok > "$T/.worktrees/demo/.ws-evidence/t.log"
+# The stand-in log carries a runs.tsv row, as a ws-run log does; the cases further down cover a missing row.
+printf '2026-11-17T10:00:00\tt\t0\t2\techo ok\n' >> "$T/.worktrees/demo/.ws-evidence/runs.tsv"
 cr() { printf '{"type":"result","total_cost_usd":0.1,"duration_ms":60000,"usage":{},"permission_denials":[],"structured_output":%s}\n' "$1" > "$WS/runs/$slug/demo.jsonl"; "$WS/scripts/check-result.sh" --project "$slug" demo 2>&1; }
 base='"summary":"s","files_changed":[],"commits":[],"tests":null,"denied":[],"unknowns":["on a phone"],"open_questions":[],"edge_cases":{"platform":"n/a: no browser feature","time":"n/a: no clock","stored_data":"n/a: no stored shape","state_resets":"n/a: no user input"}'
 base_noec='"summary":"s","files_changed":[],"commits":[],"tests":null,"denied":[],"unknowns":["on a phone"],"open_questions":[]'
@@ -3541,6 +3750,62 @@ printf '# light task\n\n**Track: light.**\nFix a typo.\n' > "$T/light-ui.md"
 printf 'task=%s\n' "$T/light-ui.md" > "$WS/runs/$slug/demo.task.txt"
 out=$(cr "{\"status\":\"done\",$base_noec,\"done_when\":[{\"item\":\"a\",\"status\":\"met\",\"basis\":\"inferred\",\"evidence\":\"reads right\"}]}") && x=0 || x=1
 [ "$x" = 0 ] && grep -q 'note  light-track result has no edge_cases answer' <<< "$out" && echo "check-result light track warns on missing edge_cases ok" || { echo "check-result light track edge_cases FAILED"; echo "$out"; exit 1; }
+# Evidence runner: a tests.log_path or done-when evidence .log under .ws-evidence/ that no row of runs.tsv names was
+# written by hand, so nothing shows the command ran or how it ended. A row clears it; the light track warns and
+# stays green, the full track fails on the test log, only a *.log is a run log, and a tree with no runs.tsv at all
+# reads as the same thing (a run that never used the runner, not an old branch) rather than going quiet.
+printf '# light task\n\n**Track: light.**\nFix a typo.\n' > "$T/cr-light.md"
+printf '# full task\n\n**Track: full**\n\nChange the button.\n' > "$T/cr-full.md"
+printf 'not really a png, just a render marker\n' > "$T/.worktrees/demo/.ws-evidence/cr-shot.png"
+crt() { printf 'task=%s\n' "$T/cr-$1.md" > "$WS/runs/$slug/demo.task.txt"; }
+crow() { cr "{\"status\":\"done\",\"summary\":\"s\",\"files_changed\":[],\"commits\":[],\"denied\":[],\"unknowns\":[],\"open_questions\":[],\"edge_cases\":{\"platform\":\"n/a: no browser feature\",\"time\":\"n/a: no clock\",\"stored_data\":\"n/a: no stored shape\",\"state_resets\":\"n/a: no user input\"},\"tests\":{\"command\":\"bash scripts/selftest.sh\",\"passed\":1,\"failed\":0,\"log_path\":\"$1\"},\"done_when\":[{\"item\":\"a\",\"status\":\"met\",\"basis\":\"observed\",\"evidence\":\"$2\"}]}"; }
+printf 'time\tlabel\texit\tseconds\tcommand\n2026-11-17T10:00:00\tt\t0\t2\tbash scripts/selftest.sh\n' > "$T/.worktrees/demo/.ws-evidence/runs.tsv"
+crt light
+out=$(crow ".ws-evidence/t.log" "tests/tutor/test_web.py") && x=0 || x=1
+[ "$x" = 0 ] && ! grep -q 'has no row' <<< "$out" && echo "check-result accepts a test log with a runs.tsv row ok" || { echo "check-result runs.tsv row FAILED"; echo "$out"; exit 1; }
+printf 'time\tlabel\texit\tseconds\tcommand\n2026-11-17T10:00:00\tother\t0\t2\ttrue\n' > "$T/.worktrees/demo/.ws-evidence/runs.tsv"
+crt light
+out=$(crow ".ws-evidence/t.log" "tests/tutor/test_web.py") && x=0 || x=1
+{ [ "$x" = 0 ] && [ "$(grep -c 'has no row' <<< "$out")" = 1 ] \
+  && grep -q 'note  .ws-evidence/t.log has no row in .ws-evidence/runs.tsv' <<< "$out" \
+  && grep -q 'bin/ws-run <label> <command>' <<< "$out"; } \
+  && echo "check-result light track warns on a test log with no runs.tsv row ok" || { echo "check-result light track runs.tsv row FAILED (exit $x)"; echo "$out"; exit 1; }
+crt full
+out=$(crow ".ws-evidence/t.log" "tests/tutor/test_web.py") && x=0 || x=1
+{ [ "$x" = 1 ] && grep -q 'FAIL  tests log .ws-evidence/t.log has no row in .ws-evidence/runs.tsv' <<< "$out" \
+  && grep -q 'bin/ws-run <label> <command>' <<< "$out"; } \
+  && echo "check-result full track fails on a test log with no runs.tsv row ok" || { echo "check-result full track runs.tsv row FAILED (exit $x)"; echo "$out"; exit 1; }
+crt full
+out=$(crow ".ws-evidence/cr-shot.png" "tests/tutor/test_web.py") && x=0 || x=1
+[ "$x" = 0 ] && ! grep -q 'has no row' <<< "$out" && echo "check-result leaves a render alone ok" || { echo "check-result render log FAILED (exit $x)"; echo "$out"; exit 1; }
+crt light
+printf 'time\tlabel\texit\tseconds\tcommand\n2026-11-17T10:00:00\tt\t0\t2\tbash scripts/selftest.sh\n' > "$T/.worktrees/demo/.ws-evidence/runs.tsv"
+printf 'hand-written\n' > "$T/.worktrees/demo/.ws-evidence/nolog.log"
+out=$(crow ".ws-evidence/t.log" ".ws-evidence/nolog.log") && x=0 || x=1
+[ "$x" = 0 ] && grep -q 'note  done-when met (observed): a: .ws-evidence/nolog.log has no row in .ws-evidence/runs.tsv' <<< "$out" \
+  && echo "check-result warns on done-when evidence with no runs.tsv row ok" || { echo "check-result done-when row FAILED (exit $x)"; echo "$out"; exit 1; }
+rm -f "$T/.worktrees/demo/.ws-evidence/nolog.log"
+rm -f "$T/.worktrees/demo/.ws-evidence/runs.tsv"
+# Without a runs.tsv at all the run never used the evidence runner: the same rule holds, since a branch from before
+# the runner is rare and a run that skipped it is not. The full-track case prints the failure line it matched, so the
+# suite's log carries the message itself and not only a pass.
+crt full
+out=$(crow ".ws-evidence/t.log" "tests/tutor/test_web.py") && x=0 || x=1
+{ [ "$x" = 1 ] && grep -q 'FAIL  tests log .ws-evidence/t.log: .ws-evidence/runs.tsv is missing' <<< "$out" \
+  && grep -q 'bin/ws-run <label> <command>' <<< "$out"; } \
+  && { grep -m1 'FAIL  tests log' <<< "$out"; echo "check-result full track fails with no runs.tsv at all ok"; } \
+  || { echo "check-result full track no runs.tsv FAILED (exit $x)"; echo "$out"; exit 1; }
+crt light
+out=$(crow ".ws-evidence/t.log" "tests/tutor/test_web.py") && x=0 || x=1
+{ [ "$x" = 0 ] && grep -q 'note  tests log .ws-evidence/t.log: .ws-evidence/runs.tsv is missing' <<< "$out" \
+  && grep -q 'bin/ws-run <label> <command>' <<< "$out"; } \
+  && echo "check-result light track warns with no runs.tsv at all ok" || { echo "check-result light track no runs.tsv FAILED (exit $x)"; echo "$out"; exit 1; }
+printf 'hand-written\n' > "$T/.worktrees/demo/.ws-evidence/nots.log"
+out=$(crow ".ws-evidence/t.log" ".ws-evidence/nots.log") && x=0 || x=1
+{ [ "$x" = 0 ] && grep -q 'note  done-when met (observed): a: .ws-evidence/nots.log: .ws-evidence/runs.tsv is missing' <<< "$out"; } \
+  && echo "check-result notes done-when evidence with no runs.tsv at all ok" || { echo "check-result done-when no runs.tsv FAILED (exit $x)"; echo "$out"; exit 1; }
+rm -f "$T/.worktrees/demo/.ws-evidence/nots.log"
+rm -f "$T/.worktrees/demo/.ws-evidence/cr-shot.png" "$T/cr-full.md" "$T/cr-light.md"
 # review: the prompt carries the task's done-when and the builder's report of it.
 printf '# t\n\n## Done when\nThe widget renders.\n\n## Commands\nnone\n' > "$T/dw.md"; printf 'task=%s\n' "$T/dw.md" > "$WS/runs/$slug/demo.task.txt"
 cr "{\"status\":\"partial\",$base,\"done_when\":[{\"item\":\"The widget renders.\",\"status\":\"partial\",\"basis\":\"inferred\",\"evidence\":\"no browser here\"}]}" >/dev/null || true
@@ -3761,6 +4026,82 @@ rm -f "$T/jest.config.js"
 out=$( export outside; worktree_root() { echo "$outside"; }; export -f worktree_root; docr ) && x=0 || x=1
 [ "$x" = 1 ] && grep -q 'worktree_root must be inside the project' <<< "$out" \
   && echo "doctor fails a worktree root outside the project ok" || { echo "doctor outside worktree root FAILED:"; echo "$out"; exit 1; }
+# doctor and cold start: the disk floor. A stand-in df first on PATH gives the free space, so these cases hold on any
+# machine. Under WS_DISK_FLOOR_GB doctor warns and still passes (a warning is not a failure) and cold start prints the
+# same line; at or above it neither prints a disk line; a df that answers nothing, fails or gives a non-numeric
+# Available column is an error and fails the run, never a silent pass.
+mkdir -p "$T/dfbin"
+cat > "$T/dfbin/df" <<'DF'
+#!/bin/sh
+# A stand-in df -Pk: DF_MODE=fail exits nonzero, empty prints no record, bad prints a record whose Available column is
+# not a number; otherwise one POSIX record per argument with DF_FREE_KB kilobytes free on /.
+case "${DF_MODE:-ok}" in
+  fail) exit 1 ;;
+  empty) exit 0 ;;
+esac
+printf 'Filesystem     1024-blocks      Used Available Capacity Mounted on\n'
+n=0
+for a in "$@"; do
+  case "$a" in -*) continue ;; esac
+  n=$((n + 1))
+  if [ "${DF_MODE:-ok}" = bad ]; then
+    printf '/dev/standin 1000000 500000 lots 50%% /\n'
+  else
+    printf '/dev/standin 1000000 500000 %s 50%% /\n' "${DF_FREE_KB:-4687500}"
+  fi
+done
+[ "$n" -gt 0 ] || exit 1
+DF
+chmod +x "$T/dfbin/df"
+dfrun() { PATH="$T/dfbin:$T/dvbin:$PATH" "$WS/scripts/doctor.sh" --project "$slug" 2>&1; }
+# 4,687,500 KiB is 4.8 GB decimal, under the 10 GB floor: the doctor warns, names the free space and the floor, and passes.
+out=$(DF_FREE_KB=4687500 WS_DISK_FLOOR_GB=10 dfrun) && x=0 || x=$?
+[ "$x" = 0 ] && grep -q '^warn  disk: 4.8 GB free on / (floor 10 GB)' <<< "$out" \
+  && echo "doctor warns under the disk floor and still passes ok" \
+  || { echo "doctor disk floor warning FAILED (exit $x):"; echo "$out"; exit 1; }
+# 20 GiB is above the floor: a healthy number prints no line, from doctor or from cold start.
+out=$(DF_FREE_KB=20971520 WS_DISK_FLOOR_GB=10 dfrun) && x=0 || x=$?
+[ "$x" = 0 ] && ! grep -q 'disk:' <<< "$out" \
+  && echo "doctor says nothing above the disk floor ok" \
+  || { echo "doctor quiet above the disk floor FAILED (exit $x):"; echo "$out"; exit 1; }
+# The floor is a setting, not a fixed 10: 10,724,036 KiB (11 GB) sits above a 10 GB floor and below a 20 GB one.
+out=$(DF_FREE_KB=10724036 WS_DISK_FLOOR_GB=20 dfrun) && x=0 || x=$?
+[ "$x" = 0 ] && grep -q '^warn  disk: 11 GB free on / (floor 20 GB)' <<< "$out" \
+  && echo "doctor reads the floor from the environment ok" \
+  || { echo "doctor floor from the environment FAILED (exit $x):"; echo "$out"; exit 1; }
+csd() { PATH="$T/dfbin:$T/dvbin:$PATH" "$WS/scripts/cold-start.sh" "$slug" 2>&1; }
+cs=$(DF_FREE_KB=4687500 WS_DISK_FLOOR_GB=10 csd) && x=0 || x=$?
+[ "$x" = 0 ] && grep -q '^warn  disk: 4.8 GB free on / (floor 10 GB)' <<< "$cs" \
+  && echo "cold start warns under the disk floor ok" \
+  || { echo "cold-start disk floor warning FAILED (exit $x):"; echo "$cs"; exit 1; }
+cs=$(DF_FREE_KB=20971520 WS_DISK_FLOOR_GB=10 csd) && x=0 || x=$?
+[ "$x" = 0 ] && ! grep -q 'disk:' <<< "$cs" \
+  && echo "cold start says nothing above the disk floor ok" \
+  || { echo "cold-start quiet above the disk floor FAILED (exit $x):"; echo "$cs"; exit 1; }
+for dm in empty fail bad; do
+  out=$(DF_MODE=$dm WS_DISK_FLOOR_GB=10 dfrun) && x=0 || x=$?
+  [ "$x" = 1 ] && grep -q '^error  disk: ' <<< "$out" \
+    && echo "doctor fails an unreadable df ($dm) ok" \
+    || { echo "doctor df $dm FAILED (exit $x):"; echo "$out"; exit 1; }
+done
+# A floor setting that is not a whole number (or is empty) is an error too, never a silent 10 GB.
+for fl in ten ''; do
+  out=$(WS_DISK_FLOOR_GB=$fl dfrun) && x=0 || x=$?
+  [ "$x" = 1 ] && grep -q '^error  disk: WS_DISK_FLOOR_GB' <<< "$out" \
+    && echo "doctor fails a bad disk floor ('$fl') ok" \
+    || { echo "doctor disk floor '$fl' FAILED (exit $x):"; echo "$out"; exit 1; }
+done
+# A leading zero is decimal, not octal: 010 is a 10 GB floor and 08 is 8 GB, and the line names the floor as 10, not
+# as 010. Read as octal, 010 is an 8 GB floor printed as "floor 010 GB", and 08 stops the report with a bare
+# "value too great for base" that names no setting.
+out=$(DF_FREE_KB=4687500 WS_DISK_FLOOR_GB=08 dfrun) && x=0 || x=$?
+[ "$x" = 0 ] && grep -q '^warn  disk: 4.8 GB free on / (floor 8 GB)' <<< "$out" \
+  && echo "doctor reads 08 as an 8 GB disk floor ok" \
+  || { echo "doctor 08 disk floor FAILED (exit $x):"; echo "$out"; exit 1; }
+out=$(DF_FREE_KB=4687500 WS_DISK_FLOOR_GB=010 dfrun) && x=0 || x=$?
+[ "$x" = 0 ] && grep -q '^warn  disk: 4.8 GB free on / (floor 10 GB)' <<< "$out" \
+  && echo "doctor reads a zero-padded disk floor as decimal ok" \
+  || { echo "doctor zero-padded disk floor FAILED (exit $x):"; echo "$out"; exit 1; }
 # ws claude: the delegated job gets the schema, budget, read-only tools and the project dir; --raw prints the
 # text and the cost; a usage limit exits 3; a reply with no structured output exits 1.
 mkdir -p "$T/ccbin"; cat > "$T/ccbin/claude" <<'CC'
@@ -5191,6 +5532,23 @@ private_release_paths() { ( RELEASE_PATHS=(); . "$1"; for p in "${RELEASE_PATHS[
 printf 'RELEASE_PATHS=("README.md" "lessons/builder.local.md=lessons/builder.md")\n' > "$T/private.conf"
 bad=""; for f in "$WS"/projects/*.conf; do [ -f "$f" ] || continue; bad+=$(private_release_paths "$f"); done
 [ -n "$(private_release_paths "$T/private.conf")" ] && [ -z "$bad" ] && echo "no private file in RELEASE_PATHS ok" || { echo "private file in RELEASE_PATHS: $bad"; exit 1; }
+# A published builder sheet pastes lessons/opencode-<line>.md into the prompt (lib.sh's lessons_for, which skips the
+# file silently when it is absent), so a project that publishes lessons/builder.md must publish every line's lesson
+# beside it. The fixture, written over the conf above, proves the check catches a missing one.
+line_lessons_missing() { # <conf>
+  ( RELEASE_PATHS=(); . "$1"
+    printf '%s\n' "${RELEASE_PATHS[@]}" | grep -qx 'lessons/builder.md' || return 0
+    for l in "$WS"/lessons/opencode-*.md; do
+      [ -f "$l" ] || continue
+      rel="lessons/${l##*/}"
+      printf '%s\n' "${RELEASE_PATHS[@]}" | grep -qx "$rel" || echo "$1: $rel"
+    done )
+}
+printf 'RELEASE_PATHS=("README.md" "lessons/builder.md")\n' > "$T/private.conf"
+bad=""; for f in "$WS"/projects/*.conf; do [ -f "$f" ] || continue; bad+=$(line_lessons_missing "$f"); done
+{ [ -n "$(line_lessons_missing "$T/private.conf")" ] && [ -z "$bad" ]; } \
+  && echo "a project publishing the builder sheet publishes its line lessons ok" \
+  || { echo "OpenCode line lessons missing from RELEASE_PATHS: $bad"; exit 1; }
 # The release cases commit $T with `git add -A`, so scratch a case leaves there is swept into the demo project; a
 # copied private lesson once made the release audit refuse the release. This fails, naming each unexpected path,
 # when a case leaves a new one. The allowlist is what the suite leaves today; a new fixture in the release block
@@ -5246,6 +5604,7 @@ deny-guard.grants
 deny-guard.test.mjs
 deny-named
 deny-without-python
+dfbin/df
 done.md
 dvbin/claude
 dvbin/gh
@@ -5631,8 +5990,40 @@ result_format_cases "$WS" "$T/result-format" || { echo "result format FAILED"; e
 # final text) with the final text set by OC_STUB, and records each call, so no check can reach a real model.
 # Every check runs and the section fails at its end.
 of=0; ofail() { echo "$1 FAILED:"; printf '%s\n' "${2:-}" | sed -n 1,25p; of=1; }
-# A process is stopped when it is gone or only a zombie; a live sleep or wrapper is not.
-stopped() { local stat; stat=$(ps -o stat= -p "$1" 2>/dev/null); [ -z "$stat" ] || [ "${stat:0:1}" = Z ]; }
+# A process is stopped when it is gone or only a zombie; a live sleep or wrapper is not. The check polls instead of
+# reading one ps sample: under CPU load a SIGKILLed child can still read as dying when the kill returns, so a single
+# sample reported a process alive while the kill path itself was right, and that refused a merge gate. The state is
+# retried every 0.1s for up to 10s before the process counts as surviving.
+stopped() {
+  local pid=$1 deadline stat
+  deadline=$(( $(date +%s%N) / 1000000 + 10000 ))
+  while :; do
+    stat=$(ps -o stat= -p "$pid" 2>/dev/null)
+    { [ -z "$stat" ] || [ "${stat:0:1}" = Z ]; } && return 0
+    [ "$(( $(date +%s%N) / 1000000 ))" -ge "$deadline" ] && return 1
+    sleep 0.1
+  done
+}
+# The poll exists for that single-sample failure, so it is checked on its own: a process that exits on its own 1s
+# after the check is accepted, and a process still alive after the 10s bound is refused. The second one is left to
+# exit on its own rather than signalled.
+sleep 1 &
+slowpid=$!
+t0=$(date +%s%N)
+x=0; stopped "$slowpid" || x=$?
+slowms=$(( ( $(date +%s%N) - t0 ) / 1000000 ))
+wait "$slowpid" 2>/dev/null || true
+[ "$x" = 0 ] && [ "$slowms" -ge 800 ] \
+  && echo "the stopped check accepts a process that exits 1s after it is checked ok" \
+  || ofail "stopped poll accepts a late exit (${slowms}ms, exit $x)"
+sleep 60 &
+livepid=$!
+t0=$(date +%s%N)
+x=0; stopped "$livepid" || x=$?
+livems=$(( ( $(date +%s%N) - t0 ) / 1000000 ))
+[ "$x" = 1 ] && [ "$livems" -ge 9900 ] && [ "$livems" -lt 20000 ] \
+  && echo "the stopped check refuses a process alive past its 10s bound ok" \
+  || ofail "stopped poll bound (${livems}ms, exit $x)"
 mkdir -p "$T/ocbin"; cat > "$T/ocbin/opencode" <<'STUB'
 #!/bin/bash
 # The subcommand and flags are read from argv, never from the prompt: a prompt that quotes a command name
@@ -7401,6 +7792,151 @@ TTcommit "rename calc.sh and test that one of its names exists"
 tcheck teeth-rename '^teeth: toothless$' 1 'reverted: calc.sh calc2.sh' && echo "teeth rename ok" || { echo "teeth rename FAILED"; exit 1; }
 # A branch that does not exist is a setup failure: the result file is written and the exit is 2, not 1 (toothless).
 tcheck teeth-nobranch '^teeth: error no branch agent/teeth-nobranch$' 2 && echo "teeth setup failure ok" || { echo "teeth setup failure FAILED"; exit 1; }
+# teeth: a suite that is one script is the test file. With no TEST_GLOBS and a TEST_CMD of `bash run-tests.sh`, a
+# branch that adds a case inside run-tests.sh is judged at all: teeth keeps the suite, reverts the production file
+# the added case checks, and the case reports its failure, so the verdict is ok with the suite among the test files.
+# The suite is not executable on this branch, so the derived path comes from the command's words, not its mode. A
+# case's failure line starts with FAIL, the marker teeth reads as a reported failing test rather than a crash.
+TTbranch agent/teeth-suite
+printf '#!/bin/sh\necho suite-feature\n' > "$TT/suitefeature.sh"
+cat > "$TT/run-tests.sh" <<'TEETH_SUITE'
+#!/bin/bash
+set -e
+[ -f ./suitefeature.sh ] || { echo "FAIL test_suite: suitefeature.sh missing"; exit 1; }
+echo "ok test_suite"
+shopt -s nullglob
+for t in tests/test_*.sh; do . "$t"; done
+echo "all tests passed"
+TEETH_SUITE
+chmod -x "$TT/run-tests.sh"
+TTcommit "a feature whose case sits in the suite script"
+x=0; "$WS/bin/ws" --project "$TTslug" teeth teeth-suite >/dev/null 2>&1 || x=$?
+[ "$x" = 0 ] && grep -qx 'teeth: ok' "$WS/runs/$TTslug/teeth-suite.teeth.txt" \
+  && grep -qF 'test files: run-tests.sh' "$WS/runs/$TTslug/teeth-suite.teeth.txt" \
+  && grep -qF 'reverted: suitefeature.sh' "$WS/runs/$TTslug/teeth-suite.teeth.txt" \
+  && echo "teeth derives the suite from TEST_CMD ok" \
+  || { echo "FAIL teeth derived suite (exit $x)"; cat "$WS/runs/$TTslug/teeth-suite.teeth.txt" 2>/dev/null; exit 1; }
+sed -n '1,3p' "$WS/runs/$TTslug/teeth-suite.teeth.txt" | sed 's/^/   derived suite: /'
+# A conf that sets TEST_GLOBS keeps exactly those: with only tests/* named, run-tests.sh is production again and the
+# branch changes no test file, so teeth answers n/a without a worktree.
+cp "$WS/projects/$TTslug.conf" "$TT/conf.before-suite"
+printf "TEST_GLOBS=('tests/*')\n" >> "$WS/projects/$TTslug.conf"
+x=0; "$WS/bin/ws" --project "$TTslug" teeth teeth-suite >/dev/null 2>&1 || x=$?
+[ "$x" = 0 ] && grep -qx 'teeth: n/a the branch changes no test file' "$WS/runs/$TTslug/teeth-suite.teeth.txt" \
+  && [ ! -d "$TT/.worktrees/teeth-suite.teeth" ] \
+  && echo "teeth keeps only the conf's TEST_GLOBS ok" \
+  || { echo "FAIL teeth conf TEST_GLOBS (exit $x)"; cat "$WS/runs/$TTslug/teeth-suite.teeth.txt" 2>/dev/null; exit 1; }
+cp "$TT/conf.before-suite" "$WS/projects/$TTslug.conf"
+# A conf that names the suite itself keeps it, whether or not the file is executable (it is not on this branch).
+printf "TEST_GLOBS=('run-tests.sh')\n" >> "$WS/projects/$TTslug.conf"
+x=0; "$WS/bin/ws" --project "$TTslug" teeth teeth-suite >/dev/null 2>&1 || x=$?
+[ "$x" = 0 ] && grep -qx 'teeth: ok' "$WS/runs/$TTslug/teeth-suite.teeth.txt" \
+  && grep -qF 'test files: run-tests.sh' "$WS/runs/$TTslug/teeth-suite.teeth.txt" \
+  && echo "teeth keeps a suite the conf names ok" \
+  || { echo "FAIL teeth conf suite (exit $x)"; cat "$WS/runs/$TTslug/teeth-suite.teeth.txt" 2>/dev/null; exit 1; }
+cp "$TT/conf.before-suite" "$WS/projects/$TTslug.conf"
+rm -f "$TT/conf.before-suite"
+# teeth: only the command's final segment names the suite. A chained command's earlier scripts are setup — an install
+# or a build — so `bash setup.sh && bash build.sh && bash run-tests.sh` names run-tests.sh: a case the branch adds
+# inside the suite is judged, and setup.sh and build.sh stay production. Reading the first script word instead would
+# revert build.sh, leave the suite as production, and answer such a branch "changes only test files". Each of the
+# three checks below records its own failure, so one run against a broken derivation names all of them. The conf's
+# original TEST_CMD is kept outside the stand-in repo: a commit there would sweep a backup beside it into the branch.
+tchained=0
+chainbak=$(mktemp -d)
+cp "$WS/projects/$TTslug.conf" "$chainbak/conf"
+git -C "$TT" checkout -q main
+printf '#!/bin/sh\n: > setup-ran\n' > "$TT/setup.sh"
+printf '#!/bin/sh\n: > build-ran\n' > "$TT/build.sh"
+chmod +x "$TT/setup.sh" "$TT/build.sh"
+TTcommit "setup and build scripts ahead of the suite"
+TTbranch agent/teeth-chained
+printf '#!/bin/sh\necho chained-feature\n' > "$TT/chainedfeature.sh"
+cat > "$TT/run-tests.sh" <<'TEETH_CHAINED'
+#!/bin/bash
+set -e
+[ -f ./chainedfeature.sh ] || { echo "FAIL test_chained: chainedfeature.sh missing"; exit 1; }
+echo "ok test_chained"
+shopt -s nullglob
+for t in tests/test_*.sh; do . "$t"; done
+echo "all tests passed"
+TEETH_CHAINED
+TTcommit "a feature whose case sits in the suite behind setup and build scripts"
+printf 'TEST_CMD="bash setup.sh && bash build.sh && bash run-tests.sh"\n' >> "$WS/projects/$TTslug.conf"
+x=0; "$WS/bin/ws" --project "$TTslug" teeth teeth-chained >/dev/null 2>&1 || x=$?
+cp "$chainbak/conf" "$WS/projects/$TTslug.conf"
+if [ "$x" = 0 ] && grep -qx 'teeth: ok' "$WS/runs/$TTslug/teeth-chained.teeth.txt" \
+  && grep -qF 'test files: run-tests.sh' "$WS/runs/$TTslug/teeth-chained.teeth.txt" \
+  && grep -qF 'reverted: chainedfeature.sh' "$WS/runs/$TTslug/teeth-chained.teeth.txt"; then
+  echo "teeth derives the suite from the command's final segment ok"
+  sed -n '1,3p' "$WS/runs/$TTslug/teeth-chained.teeth.txt" | sed 's/^/   chained suite: /'
+else
+  echo "FAIL teeth chained suite (exit $x)"; cat "$WS/runs/$TTslug/teeth-chained.teeth.txt" 2>/dev/null; tchained=1
+fi
+# A branch that changes only the chain's first script changes no test file: setup.sh is setup, not the suite. Taking
+# the first script word would call it the suite and answer "changes only test files".
+TTbranch agent/teeth-firstscript
+printf '#!/bin/sh\n: > setup-ran\necho setup\n' > "$TT/setup.sh"
+TTcommit "setup prints one more line"
+printf 'TEST_CMD="bash setup.sh && bash build.sh && bash run-tests.sh"\n' >> "$WS/projects/$TTslug.conf"
+x=0; "$WS/bin/ws" --project "$TTslug" teeth teeth-firstscript >/dev/null 2>&1 || x=$?
+cp "$chainbak/conf" "$WS/projects/$TTslug.conf"
+if [ "$x" = 0 ] && grep -qx 'teeth: n/a the branch changes no test file' "$WS/runs/$TTslug/teeth-firstscript.teeth.txt"; then
+  echo "teeth calls a chained command's first script production ok"
+else
+  echo "FAIL teeth chained first script (exit $x)"; cat "$WS/runs/$TTslug/teeth-firstscript.teeth.txt" 2>/dev/null; tchained=1
+fi
+# A command whose final segment starts a runner names no suite, so the chain's build script stays production: a branch
+# that changes only build.sh changes no test file. Reading the whole command for a script word would take build.sh as
+# the suite and answer the same branch "changes only test files".
+TTbranch agent/teeth-runner
+printf '#!/bin/sh\n: > build-ran\necho built\n' > "$TT/build.sh"
+TTcommit "build prints one more line"
+printf 'TEST_CMD="bash setup.sh && bash build.sh && node --test"\n' >> "$WS/projects/$TTslug.conf"
+x=0; "$WS/bin/ws" --project "$TTslug" teeth teeth-runner >/dev/null 2>&1 || x=$?
+cp "$chainbak/conf" "$WS/projects/$TTslug.conf"
+if [ "$x" = 0 ] && grep -qx 'teeth: n/a the branch changes no test file' "$WS/runs/$TTslug/teeth-runner.teeth.txt"; then
+  echo "teeth takes no suite from a chained command before a runner ok"
+else
+  echo "FAIL teeth chained runner (exit $x)"; cat "$WS/runs/$TTslug/teeth-runner.teeth.txt" 2>/dev/null; tchained=1
+fi
+rm -rf "$chainbak"
+[ "$tchained" = 0 ] || exit 1
+# teeth: a command line with no runnable segment — an empty TEST_CMD, or nothing but separators — answers n/a
+# straight away. The suite is derived from the command before the empty check, and an empty line gave that
+# derivation nothing to trim; a project with TEST_CMD="" and a branch that changes a test file hung there instead
+# of answering. The branch is teeth-ok, whose tests/test_calc.sh matches the default test globs. Each run is
+# bounded by timeout so a regression fails this check instead of hanging the suite.
+ecbak=$(mktemp -d); cp "$WS/projects/$TTslug.conf" "$ecbak/conf"
+tecempty() { # <TEST_CMD value> <label>: teeth answers the n/a line for it within 10 s
+  local x=0
+  printf 'TEST_CMD="%s"\n' "$1" >> "$WS/projects/$TTslug.conf"
+  rm -f "$WS/runs/$TTslug/teeth-ok.teeth.txt"
+  timeout 10 "$WS/bin/ws" --project "$TTslug" teeth teeth-ok >/dev/null 2>&1 || x=$?
+  cp "$ecbak/conf" "$WS/projects/$TTslug.conf"
+  if [ "$x" = 0 ] && grep -qxF "teeth: n/a no TEETH_CMD or TEST_CMD in projects/$TTslug.conf" "$WS/runs/$TTslug/teeth-ok.teeth.txt"; then
+    echo "teeth answers n/a for $2 ok"
+  else
+    echo "FAIL teeth empty-command case, $2 (exit $x)"; sed -n '1,2p' "$WS/runs/$TTslug/teeth-ok.teeth.txt" 2>/dev/null || true; tecfail=1
+  fi
+}
+tecfail=0
+tecempty "" "an empty TEST_CMD"
+tecempty "&&" "a TEST_CMD of only separators"
+# teeth skips the suite derivation for a line with no runnable segment, so nothing above reaches the helper with an
+# empty line: these three bounded calls hold the helper's own guard. If the endless trim returns, the call is killed
+# and the check fails here instead of hanging the suite. The expected output keeps the space the helper leaves after
+# cutting a separator: it trims the line's tail only, and a real command's segment is unchanged by this fix.
+segx=0
+segout=$(timeout 5 bash -c '. "$1/scripts/lib.sh"; printf "[%s][%s][%s]\n" "$(command_last_segment "")" "$(command_last_segment "&& ; | ")" "$(command_last_segment "npm ci && bash suite.sh; ")"' _ "$WS" 2>/dev/null) || segx=$?
+if [ "$segx" = 0 ] && [ "$segout" = "[][][ bash suite.sh]" ]; then
+  echo "final-segment helper ends on an empty line and keeps a real command's segment ok"
+else
+  echo "FAIL final-segment helper (exit $segx): $segout"; tecfail=1
+fi
+rm -rf "$ecbak"
+[ "$tecfail" = 0 ] || exit 1
+git -C "$TT" checkout -q main
 # teeth: a TEST_CMD that installs dependencies drops the linked node_modules, so the install works on the scratch tree.
 mkdir -p "$TT/node_modules/main" "$TT/web/node_modules/main"
 printf 'main\n' > "$TT/node_modules/main/marker"; printf 'main\n' > "$TT/web/node_modules/main/marker"

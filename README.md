@@ -2,37 +2,37 @@
 
 Crafting Guild Agentic Workspace: build software with a small team of coding agents from one folder, on projects that live in other folders.
 
-You open one orchestrator session here (Claude Code, or OpenCode with `ws oc <slug>`) and point it at a project. That session is the orchestrator: it plans, dispatches headless builders into git worktrees of the project, checks what they claim, reviews each branch once, and merges with the project's tests as the gate. Plans live in files that survive context compaction, and a twenty-second cold start runs at every session start and after every compaction, so a resumed session never guesses.
+You open one orchestrator session here (Claude Code, or OpenCode with `ws oc <slug>`) and point it at a project. That session is the orchestrator: it plans, dispatches headless builders into git worktrees of the project, checks what they claim, reviews each branch once, and merges with the project's tests as the gate. Plans live in files that survive context compaction, and a cold start that takes seconds runs at every session start and after every compaction, so a resumed session never guesses.
 
-No daemon, no database, no service to run: about 13,500 lines of shell and JavaScript across `bin/` and `scripts/`, eight Python helpers of about 2,900 lines, and a few pages of prose, with a self-test that runs the loop against throwaway repositories. An OpenCode orchestrator may load an optional browser MCP; nothing else needs a server.
+No daemon, database or service to run: about 23,800 lines of shell and JavaScript across `bin/` and `scripts/`, twelve Python helpers of about 4,600 lines, and a few pages of prose, with a self-test that runs the loop against throwaway repositories. An OpenCode orchestrator may load an optional browser MCP, and an OpenCode 2.x client keeps its own background service ([Requirements](#requirements)); the units the tool installs itself are the optional ones `ws autostart` turns on, a `ws-chain-watch-<slug>.timer` armed while a chain runs, and a `ws-wake-<slug>-<id>.timer` that `ws wake --every` repeats until its `--until` date or until it is cancelled.
 
 ## Why use it
 
-Plain Claude Code is a capable agent; Crafting Guild adds the layer above it for building a whole app:
+A coding agent on its own is capable; Crafting Guild adds the layer above it for building a whole app:
 
 - **A fresh context per step:** each task runs in its own builder and worktree, so the orchestrator never fills up and compacts.
 - **A gate before main:** one review per branch, then a merge at the reviewed commit with your tests run on the merged tree; red undoes it.
 - **Claims checked, limits per run:** commits and test logs are checked against the branch, then `ws teeth` proves the branch's new tests fail without its change, `ws precheck` and `ws evidence-claims` hand the reviewer the mechanical findings and the done-when claims with no evidence behind them, and the review summary repeats every evidence-claim flag, so no flag is dropped silently; `ws review` does not review a branch whose tests still pass without its change; every builder has a budget, a timeout and a memory cap.
 - **Work that outlives the session:** queued steps run detached and resume after a restart, and what they did can be checked afterwards: `ws merge` runs `ws verify` on the merge it is making before the push, and `ws verify` re-reads every older merge's review, test run and reasons, while `ws orchestrator-record` totals what was committed, where a chain stopped and what was looked at.
 
-It costs immediacy (a change is minutes, not seconds) and it is shell for one person at a terminal. Use plain Claude Code for quick fixes and line-by-line review, the Agent SDK for services and products. [COMPARISON.md](COMPARISON.md) has the evidence and a table against Claude Code in a terminal, in VS Code, and the Agent SDK.
+It costs immediacy (a change is minutes, not seconds) and it is shell for one person at a terminal. Use a plain agent session, Claude Code or OpenCode, for quick fixes and line-by-line review, and the Agent SDK for services and products. [COMPARISON.md](COMPARISON.md) has the evidence and a table against Claude Code in a terminal, in VS Code, and the Agent SDK.
 
 ## How a new session picks up where the last one stopped
 
-Nothing is kept in the model. A `SessionStart` hook runs a cold start at every session start and after every compaction. In about twenty seconds it prints the project's git state, the builder worktrees and runs, any running chain and previews, the last results, and the plan's **In flight right now** block, which the orchestrator rewrites at every dispatch, merge and decision. Plans, task files and lessons are files in git; results are files under `runs/`. [CONTINUITY.md](CONTINUITY.md) lists every file involved, what cold start prints, and how to keep it working.
+Nothing is kept in the model. A `SessionStart` hook runs a cold start at every session start and after every compaction. In a few seconds it prints the project's git state, the builder worktrees and runs, any running chain and previews, the last results, and the plan's **In flight right now** block, which the orchestrator rewrites at every dispatch, merge and decision. Plans, task files and lessons are files in git; results are files under `runs/`. [CONTINUITY.md](CONTINUITY.md) lists every file involved, what cold start prints, and how to keep it working.
 
 ## Requirements
 
 - Linux or macOS with bash 4+, git with a commit identity (`user.name` and `user.email` set), `jq`, GNU `timeout` and `python3`
-- **[OpenCode](https://opencode.ai) 1.19.1 or later, on its 1.x or 2.x line, with a credential, and/or [Claude Code](https://code.claude.com) CLI 2.1.257 or later, signed in.** The Claude CLI is optional: with no `claude` on PATH, set `WS_AGENT=opencode`, leave `WS_REVIEW_AGENT` empty, and `ws doctor` passes with every review routed to OpenCode. With both installed, the changed files decide (documentation on OpenCode, anything else on Claude); a claude-only install passes as is. Set `WS_REVIEW_AGENT` only to force a client.
+- **[OpenCode](https://opencode.ai) 1.19.1 or later, on its 1.x or 2.x line, with a credential, and/or [Claude Code](https://code.claude.com) CLI 2.1.257 or later, signed in.** Either client runs builders, reviews and the orchestrator, and one is enough: `ws doctor` requires the client every configured role uses, and passes with no `claude` on PATH when `WS_AGENT=opencode` and `WS_REVIEW_AGENT` is empty. With both installed, a review picks OpenCode for a documentation-only branch and Claude for anything else; set either variable only to force a client.
 - **The two OpenCode lines sit side by side.** `WS_OPENCODE_LINE` reads the major from the installed client (or takes `1` or `2` from `config.sh`). The builder and the reviewer take that line's lessons and flags; the builder also loads that line's plugins, and a review does only on 2.x, because a 1.x review passes `--pure`. `ws oc` takes that line's plugin set and, on 2.x, its lesson. `ws ask` takes that line's flags and a read-only config, with no lesson and its plugins only on 2.x. Moving a line, and what to prove before switching, is in [docs/version-upgrade.md](docs/version-upgrade.md). A 2.x client keeps one background service per user, so run one 2.x orchestrator session at a time: on 2.x, `ws oc` writes the session's config, sets the service's port and restarts it.
-- Builders (`WS_AGENT`) default to Claude Code in the public config, so the tool still serves Claude users; an OpenCode-only install sets `WS_AGENT=opencode` and needs no Claude CLI. With `WS_REVIEW_AGENT` empty reviews use the only installed client, or choose from the branch's changed files when both are: documentation on OpenCode, anything else on Claude. Set `WS_REVIEW_AGENT` to force a reviewer, and `WS_REVIEW_SHADOW=opencode` adds an OpenCode shadow review. The orchestrator follows the command: `ws <slug>` starts Claude Code, `ws oc <slug>` starts OpenCode.
+- Builders (`WS_AGENT`) and reviews (`WS_REVIEW_AGENT`) each name a client. The public config leaves `WS_AGENT=claude`; `WS_AGENT=opencode` runs builders through `opencode run` and needs no Claude CLI, with `WS_OPENCODE_MODEL` choosing the model. With `WS_REVIEW_AGENT` empty, reviews use the only installed client, or choose from the branch's changed files when both are: documentation on OpenCode, anything else on Claude. `WS_REVIEW_SHADOW=opencode` adds an OpenCode shadow review. The orchestrator follows the command: `ws <slug>` starts Claude Code, `ws oc <slug>` starts OpenCode.
 - Optional: systemd user scopes (Linux), so builders and previews run under a memory cap (`WS_BUILDER_MEM`, `WS_SERVE_MEM`) and a chain survives the session that started it
 - Optional: `gh`, for `ws release` to attach a build to a GitHub release; `rsync`, for `ws site`
 
 ## Install
 
-You need git with `user.name` and `user.email` set (`git config --global user.name <name>` and `git config --global user.email <id>+<login>@users.noreply.github.com`), bash 4+, `jq`, `python3`, and either OpenCode (`opencode --version`) or Claude Code (`claude --version`) installed; the public defaults put builders on Claude Code, so an OpenCode-only install also sets `WS_AGENT=opencode`. [Requirements](#requirements) has the full list.
+You need git with `user.name` and `user.email` set (`git config --global user.name <name>` and `git config --global user.email <id>+<login>@users.noreply.github.com`), bash 4+, `jq`, `python3`, and one client: OpenCode (`opencode --version`) or Claude Code (`claude --version`). The public config runs builders on Claude Code; an OpenCode-only install sets `WS_AGENT=opencode` as below. [Requirements](#requirements) has the full list.
 
 ```bash
 git clone <this repository's URL> ~/crafting-guild
@@ -42,9 +42,20 @@ bash ~/crafting-guild/scripts/selftest.sh              # checks the scripts agai
 ws doctor                                              # checks this machine; says what to fix
 ```
 
+### Run builders on OpenCode
+
+With only OpenCode installed, put this in `~/crafting-guild/config.local.sh` (optional, sourced after `config.sh`):
+
+```bash
+WS_AGENT="opencode"                                 # builders run through `opencode run`
+WS_OPENCODE_MODEL="opencode-go/deepseek-v4.1-flash" # provider/model; --model overrides it
+```
+
+`WS_REVIEW_AGENT` stays empty, so reviews run on the only installed client. The model must be listed in `WS_OPENCODE_MODEL_NAMES` with the name its privacy page uses, or the launcher refuses the run: before anything starts, `scripts/zdr-check.sh` reads that page for a 0-day retention row.
+
 ### Check a setup: `ws doctor`
 
-`ws doctor` reads, never writes. It also runs on its own: cold start prints its failures and warnings at every session start, and `ws chain` refuses to start while a required check fails. It checks three things and prints `ok`, `warn` or `FAIL`, with a `fix:` line under each problem. It exits 1 only when something required fails, so a script can run it first.
+`ws doctor` changes nothing in the workspace: it reads, and `--parity` works in a throwaway directory. It also runs on its own: cold start prints its failures and warnings at every session start, and `ws chain` refuses to start while a required check fails. It checks three things and prints `ok`, `warn` or `FAIL`, with a `fix:` line under each problem. It exits 1 only when something required fails, so a script can run it first.
 
 | Checks | Required | Optional (a `warn` says what you lose without it) |
 |---|---|---|
@@ -88,7 +99,7 @@ agent:  writes plans/my-app/hats.md: three steps, each a task file
 agent:  ws dispatch hats-1 plans/my-app/hats-1.md      (a builder in .worktrees/hats-1, $10 cap)
 agent:  ws wait hats-1                                  (in the background; you can keep talking)
         ...
-agent:  result: done, 2 commits, 41 tests passed, log present, no denied calls
+agent:  result: done, 2 commits, tests passed, log present, no denied calls
 agent:  ws serve hats-1 -> http://127.0.0.1:8801/  "have a look"
 you:    looks right, merge
 agent:  ws review hats-1  -> merge, no blocking findings, 2 suggestions carried forward
@@ -105,11 +116,11 @@ agent:  ws merge hats-1 3f2a9c1  -> tests passed, pushed, worktree removed
 
 Builders never push and never touch the main checkout.
 
-Builders can also run on [OpenCode](https://github.com/anomalyco/opencode) (MIT) instead of Claude Code: `ws dispatch --agent opencode` (or `WS_AGENT="opencode"` in `config.sh`) runs `opencode run` with a `provider/model` ID, by default `WS_OPENCODE_MODEL`. Only zero-retention models run: before anything starts, `scripts/zdr-check.sh` reads the model's Go or Zen privacy page and refuses a model that is used for training, keeps data, or whose retention agreement has lapsed. The same grants become OpenCode permissions (nothing left at "ask"), the budget is enforced from each step's cost, and the run ends with the same checked result, so wait, chain, review and merge work as they do for Claude.
+Builders run on either client. `ws dispatch --agent opencode` (or `WS_AGENT="opencode"` in `config.sh`) runs `opencode run` with a `provider/model` ID, by default `WS_OPENCODE_MODEL` (`opencode-go/deepseek-v4.1-flash`). Only zero-retention models run: before anything starts, `scripts/zdr-check.sh` reads the model's Go or Zen privacy page and refuses a model whose row is not 0 days' retention, whose training cell (where the page still carries one) says anything but "Not used", or whose dated retention agreement has lapsed; a model missing from `WS_OPENCODE_MODEL_NAMES` is refused as unreadable. The same grants become OpenCode permissions (nothing left at "ask"), the budget is enforced from each step's cost, and the run ends with the same checked result, so wait, chain, review and merge work as they do for Claude.
 
 Reviews use the only installed client, or choose OpenCode for a docs-only branch and Claude otherwise when both are installed. On an OpenCode-only install every review runs on OpenCode; set `WS_REVIEW_PASSES=2` there for two independent OpenCode passes whose blocking findings are unioned (`ws review --passes 2` does the same for one branch). `ws review --agent opencode` (or `WS_REVIEW_AGENT="opencode"` in `config.sh`) forces the reviewer on OpenCode and gives it a read-only permission config — reads, `git diff/log/show/status`, `cat` and `ls`, nothing that writes or reaches the network — checks its JSON against the same schema, and writes the same review files merge reads. `ws review-compare <name>...` runs that review beside the Claude review on record for each branch and prints the two verdicts, their blocking counts, and how many Claude findings OpenCode names within five lines; it never merges.
 
-The orchestrator itself runs under OpenCode too: `ws oc <slug>` starts it in this folder, pinned to the project and with the session's own config; on 2.x it also sets the one shared background service's port and restarts it, so one 2.x session runs at a time (see [Requirements](#requirements)). OpenCode reads `AGENTS.md`, and `opencode.json` loads the private preferences and the orchestrator lessons by reference, with session sharing disabled. Type `/cold-start` first: it prints the same session-start context Claude Code's hook injects. `bin/ws wait` and `bin/ws chain` run in the foreground with an explicit shell timeout rather than as background tasks; `docs/opencode-orchestrator.md` maps the rest and names the OpenCode page behind each choice.
+The orchestrator runs on either client: `ws oc <slug>` starts OpenCode in this folder, pinned to the project and with the session's own config; on 2.x it also sets the one shared background service's port and restarts it, so one 2.x session runs at a time (see [Requirements](#requirements)). OpenCode reads `AGENTS.md`, and `opencode.json` loads the private preferences and the orchestrator lessons by reference, with session sharing disabled. Type `/cold-start` first: it prints the same session-start context Claude Code's hook injects. `bin/ws wait` and `bin/ws chain` run in the foreground with an explicit shell timeout rather than as background tasks; `docs/opencode-orchestrator.md` maps the rest and names the OpenCode page behind each choice.
 
 ## Commands
 
@@ -128,7 +139,7 @@ The orchestrator itself runs under OpenCode too: `ws oc <slug>` starts it in thi
 | `ws review [--agent claude\|opencode] <name>`, `ws precheck <name>` | run `ws teeth` and then review the branch (prints the verdict and the SHA to merge); the mechanical checks alone |
 | `ws evidence-claims <name>` | the done-when evidence claims a script can check (the evidence-claim input to `ws review`) |
 | `ws review-compare <name>...` | run an OpenCode review beside the recorded Claude one: verdicts, blocking counts, matched findings; never merges |
-| `ws merge [--no-review "<reason>"] [--no-look "<reason>"] <name> <sha>` | merge a reviewed branch, run the tests, verify the merge's record, push on green, clean up |
+| `ws merge [--no-review "<reason>"] [--no-look "<reason>"] [--keep-evidence-all] <name> <sha>` | merge a reviewed branch, run the tests, verify the merge's record, push on green, clean up; the builder's `.ws-evidence/` is archived without reproducible bulk or any file over `WS_EVIDENCE_MAX_MB` (`skipped.tsv` names each, `--keep-evidence-all` copies everything) |
 | `ws chain <queue>`, `ws chain-wait` | run a queue of steps unattended; wait on a running chain (exit 5 when a running status has no live chain) |
 | `ws wake <session> "<message>" [--at <time>\|--when-chain-stops\|--every <OnCalendar> [--until YYYY-MM-DD]]` | send one message into an idle OpenCode session |
 | `ws audit [days]` | what builders keep doing by hand, from the run logs |

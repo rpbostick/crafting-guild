@@ -37,9 +37,15 @@ printf '%s\n' "$@" >> "$STANDIN_LOG/systemd-run.args"
 while [ $# -gt 0 ] && [[ $1 == -* ]]; do shift; done
 "$@" || true
 EOF
+# Each invocation appends one record: its arguments as tab-separated fields, with a tab inside an argument turned
+# into a space. A case reads the record whose first field is the wake's `run`, never whichever invocation came last:
+# `ws wake` asks `opencode --version` before it runs the wake, and under load that version call finished after the
+# run call and overwrote it when the stand-in wrote one shared record.
 cat > "$bin/opencode" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' "$@" > "$STANDIN_LOG/opencode.args"
+record=""
+for a in "$@"; do record+="${a//$'\t'/ }"$'\t'; done
+printf '%s\n' "$record" >> "$STANDIN_LOG/opencode.args"
 echo '{"type":"step_start","sessionID":"ses_bgtest"}'
 EOF
 chmod +x "$bin/systemd-run" "$bin/opencode"
@@ -108,15 +114,30 @@ x=$?
 ws bg stop dupe >/dev/null 2>&1 || true
 case_end "ws bg refuses a name that is already running"
 
+# The wake's own invocation: the record whose first argument is `run`, not whichever call landed last. A `--version`
+# call is never the wake, so asking the stand-in for its version before or after the run must not hide it. The record
+# is one line of tab-separated arguments; a line, not a whole file, so a stand-in that writes one argument per line
+# still yields nothing here.
+opencode_run() { awk -F'\t' '$1 == "run" { print; exit }' "$log/opencode.args" 2>/dev/null; }
+wake_ran() { [ -n "$(opencode_run)" ]; }
+wake_sent() { # <session> <message>: the session id and the message both reached the run call
+  local rec
+  rec=$(opencode_run)
+  [ -n "$rec" ] || return 1
+  [ -n "$(printf '%s\t' "$rec" | grep -oF -- "$1")" ] && [ -n "$(printf '%s\t' "$rec" | grep -oF -- "$2")" ]
+}
+
 # --wake sends the exit code and log path through the existing wake path.
 case_start
 rm -f "$log/opencode.args"
 out=$(ws bg run waker --wake ses_bgtest -- bash -c 'exit 7' 2>&1)
 ws bg wait waker --timeout 10 >/dev/null 2>&1 || true
-for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$log/opencode.args" ] && break; sleep 0.5; done
-[ -s "$log/opencode.args" ] || fail "no wake reached the stand-in opencode"
-grep -qx -- 'ses_bgtest' "$log/opencode.args" || fail "wake session: $(cat "$log/opencode.args")"
-grep -qF "bg waker exited 7; log runs/$slug/bg/waker.log" "$log/opencode.args" || fail "wake message: $(cat "$log/opencode.args")"
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do wake_ran && break; sleep 0.5; done
+wake_ran || fail "no wake reached the stand-in opencode"
+wake_sent ses_bgtest "bg waker exited 7; log runs/$slug/bg/waker.log" || fail "wake call: $(cat "$log/opencode.args")"
+# A version call after the wake is the ordering the case must survive: the run record stays readable.
+opencode --version >/dev/null 2>&1
+wake_sent ses_bgtest "bg waker exited 7; log runs/$slug/bg/waker.log" || fail "wake call after a late --version: $(cat "$log/opencode.args")"
 case_end "ws bg --wake sends the exit code and log path"
 
 # A relative command path is resolved against the caller's directory, not runs/<slug>/ where the command runs: the
@@ -130,8 +151,10 @@ for form in relative absolute; do
   x=$?
   [ "$x" = 0 ] || fail "$form bin/ws version from the workspace root exited $x: $(cat "$runs/bg/path-$form.log" 2>/dev/null)"
   grep -q '^Crafting Guild v' "$runs/bg/path-$form.log" 2>/dev/null || fail "$form log: $(cat "$runs/bg/path-$form.log" 2>/dev/null)"
-  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$log/opencode.args" ] && break; sleep 0.5; done
-  grep -qF "bg path-$form exited 0;" "$log/opencode.args" 2>/dev/null || fail "$form wake: $(cat "$log/opencode.args" 2>/dev/null)"
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do wake_ran && break; sleep 0.5; done
+  wake_sent ses_bgtest "bg path-$form exited 0;" || fail "$form wake: $(cat "$log/opencode.args" 2>/dev/null)"
+  opencode --version >/dev/null 2>&1
+  wake_sent ses_bgtest "bg path-$form exited 0;" || fail "$form wake after a late --version: $(cat "$log/opencode.args" 2>/dev/null)"
   case_end "ws bg run -- bin/ws as a $form path from the workspace root exits 0 and wakes"
 done
 
@@ -201,6 +224,37 @@ for _ in $(seq 1 50); do [ -s "$runs/bg/later.matches" ] && break; sleep 0.2; do
 grep -qxF "bg later matched '^ready2\$': ready2" "$runs/bg/later.matches" || fail "message: $(cat "$runs/bg/later.matches")"
 ws bg stop later >/dev/null 2>&1 || true
 case_end "ws bg watch adds a watcher to a running command"
+
+# The ordering rule the wake cases rest on: a `--version` call after the wake must not hide the run call. The old
+# stand-in wrote its whole file per call, so the call that landed last was the only one a case could read: a late
+# `--version` replaced the run record, and the old line check (`grep -qx -- 'ses_bgtest'`) then found nothing. The
+# stand-in now appends one record per call, and the reader takes the record whose first field is `run`.
+case_start
+# The old stand-in: one record per call, overwritten, in the branch's record format. Its file after the wake and a
+# later --version holds only the version, so the old line check finds nothing on a delivered wake.
+old="$repo/old"; mkdir -p "$old"
+cat > "$old/opencode" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\t' "$@" > "$STANDIN_LOG/opencode.args"
+printf '\n' >> "$STANDIN_LOG/opencode.args"
+STUB
+chmod +x "$old/opencode"
+wake() { "$1" run --attach http://127.0.0.1:1 --session ses_bgtest --format json -- "bg waker exited 7; log runs/x/bg/waker.log" >/dev/null 2>&1; }
+legacy_reads_run() { grep -qx -- 'ses_bgtest' "$log/opencode.args" 2>/dev/null; }
+rm -f "$log/opencode.args"
+wake "$old/opencode"; "$old/opencode" --version >/dev/null 2>&1
+old_file=$(cat "$log/opencode.args" 2>/dev/null)
+[ -n "$old_file" ] || fail "the old stand-in wrote nothing, so the case proves nothing"
+legacy_reads_run && fail "the one-write stand-in kept the session line after a late --version, so the case proves nothing"
+# The old wake case's own report on this file, then the reader this branch's case uses.
+echo "the old wake case on a one-write stand-in after a late --version: bg check FAILED: wake session: $old_file"
+wake_sent ses_bgtest "bg waker exited 7; log runs/x/bg/waker.log" && fail "a one-write stand-in kept the run record after a late --version: $old_file"
+# The branch's stand-in, then a --version call after the wake: both records are in the file and the run is readable.
+rm -f "$log/opencode.args"
+wake "$bin/opencode"; "$bin/opencode" --version >/dev/null 2>&1
+legacy_reads_run && fail "the branch's stand-in still leaves one record per call, so a late --version can still replace it"
+wake_sent ses_bgtest "bg waker exited 7; log runs/x/bg/waker.log" || fail "the run record is not readable after a late --version: $(cat "$log/opencode.args")"
+case_end "a --version call after the wake cannot hide the run call"
 
 # No watcher process survives the cases.
 case_start

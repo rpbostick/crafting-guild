@@ -9,7 +9,7 @@ The model remembers nothing between sessions. Everything it needs is in files an
 | `CLAUDE.md` | How the orchestrator works: the loop, the rules, where things are | You, rarely | By Claude Code, at every session start |
 | `CLAUDE.local.md` | Your own preferences: how to ask you, previews, budgets | You | By Claude Code, after `CLAUDE.md` |
 | `.claude/settings.json` | A `SessionStart` hook that runs `scripts/cold-start.sh --brief` | The tool | On startup, resume, compaction and `/clear` |
-| `.opencode/plugins-1x/cold-start.js`, `.opencode/plugins-2x/cold-start-2x.js`, `.opencode/commands/cold-start.md` | The same brief for an OpenCode orchestrator: the plugin appends it once per session and again at compaction, and `/cold-start` refreshes it mid-session. `ws oc` gives the installed line only its own directory's plugins | The tool | By OpenCode (see `docs/opencode-orchestrator.md`) |
+| `.opencode/plugins-1x/cold-start.js`, `.opencode/plugins-2x/cold-start-2x.js`, `.opencode/commands/cold-start.md`, `AGENTS.md` | The same brief for an OpenCode orchestrator (`AGENTS.md` is its version of `CLAUDE.md`): the plugin appends the cold start once per session and again at compaction, and `/cold-start` refreshes it mid-session. `ws oc` gives the installed line only its own directory's plugins | The tool | By OpenCode (see `docs/opencode-orchestrator.md`) |
 | `state/current`, `WS_PROJECT` | Which project this session acts on (`ws <slug>` pins it) | `ws <slug>` | By cold start and every `ws` command |
 | `projects/<slug>.conf` | The project's path, branch, test command, grants, preview | `ws init`, then you | By every `ws` command |
 | `plans/<slug>/<plan>.md` | The plan, topped by an **In flight right now** block: what is running, what just finished, what is next, decisions made | The orchestrator, at every dispatch, merge and decision | Printed by cold start |
@@ -24,14 +24,14 @@ The model remembers nothing between sessions. Everything it needs is in files an
 
 ## What cold start prints
 
-In about twenty seconds, without running any tests:
+In a few seconds, without running any tests:
 
 1. **The project** and how it was selected, and a `CONFLICT` line if another session moved the selection.
 2. **Git:** the checked-out branch, uncommitted files, recent commits, ahead or behind origin, and merges in the last week.
 3. **Worktrees and runs:** each builder worktree with its commit and uncommitted counts, any builder still running, the chain's status, preview servers with their ports, and the last few results.
 4. **In flight:** the **In flight right now** block of every plan for the project.
 5. **Lessons:** which file to read before dispatching, any file over its line cap, and whether the automation audit is due.
-6. **Setup:** the failures and warnings from `ws doctor` (tools, Claude Code version, the hook, the project's conf), or that every check passes.
+6. **Setup:** the failures and warnings from `ws doctor` (tools, the client each configured role uses, the hook, the project's conf), or that every check passes.
 
 ## The hourly brief
 

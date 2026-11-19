@@ -2,6 +2,8 @@
 # Prove a branch's new tests can fail. Check the branch tip out in a scratch worktree, put every non-test file the
 # branch changed back to its merge-base version (removing files the branch added), keep the branch's test files and
 # run the project's tests. Tests that fail without the production change bite; tests that pass without it do not.
+# A project whose whole suite is one script counts that script as a test file: a suite that is one script is still
+# the suite, so adding cases to it is a test change teeth can judge.
 # Usage: teeth.sh [--project slug] <name>
 # Writes runs/<slug>/<name>.teeth.txt (verdict, sha, files, last 40 log lines) and runs/<slug>/logs/<name>.teeth.log.
 # Exit: 0 ok, 1 toothless, 0 n/a, 2 error (a run that crashed before reporting a test failure).
@@ -44,12 +46,53 @@ base=$(git -C "$PROJECT_PATH" merge-base "$PROJECT_BRANCH" "$br" 2>/dev/null) ||
 [ -n "$base" ] || finish 2 "teeth: error no merge base for $br against $PROJECT_BRANCH" "" ""
 
 # A test file is one matching TEST_GLOBS from the project's conf; the default covers the common layouts and names.
+# A suite that is one script is still the suite: with no TEST_GLOBS, the script the test command's final segment
+# names (`bash suite.sh`, `sh suite.sh`, or a tracked executable script as its own word) is a test file too, so a
+# branch that only adds cases to it is judged instead of answered "changes no test file". Only that segment counts: a
+# chained command's earlier scripts are setup (an install, a build), so `npm ci && bash build.sh && node --test` names
+# node --test and keeps build.sh production; reading the first script word there would answer a branch that changes
+# build.sh "changes only test files", and would hide the suite. TEST_GLOBS in the conf wins: a project that sets them
+# keeps exactly those, and naming the suite there works whatever its executable bit. test-quality.sh takes the suite
+# from the same segment.
+tip_mode() { # <path>: its mode in the branch tip's tree, empty when the tip does not track it
+  local entry
+  entry=$(git -C "$PROJECT_PATH" ls-tree "$tip" -- "$1" 2>/dev/null) || return 0
+  printf '%s\n' "${entry%% *}"
+}
+test_cmd_suite() { # <test command>: the script its final segment names, empty when that starts a runner instead
+  local -a words=()
+  local i word next
+  read -ra words <<< "$(command_last_segment "$1")"
+  for ((i = 0; i < ${#words[@]}; i++)); do
+    word="${words[i]}"
+    case "$word" in
+      bash|sh)
+        next="${words[i+1]:-}"
+        case "$next" in
+          ''|-*) ;;
+          *) if [ -n "$(tip_mode "${next#./}")" ]; then printf '%s\n' "${next#./}"; return 0; fi ;;
+        esac ;;
+      ''|-*) ;;
+      *) if [ "$(tip_mode "${word#./}")" = 100755 ]; then printf '%s\n' "${word#./}"; return 0; fi ;;
+    esac
+  done
+  return 0
+}
+# The command teeth runs, and whether it has a runnable final segment: a blank line, or one of separators and blanks
+# alone (`""`, `"&&"`), has none, so it names no suite and is nothing to run.
+cmd="${TEETH_CMD:-$TEST_CMD}"
+runnable="${cmd//[[:space:];|&]/}"
+suite=""
 if [ ${#TEST_GLOBS[@]} -eq 0 ]; then
   TEST_GLOBS=('*.test.*' '*.spec.*' 'test/*' 'tests/*' '*/test/*' '*/tests/*' '__tests__/*' '*/__tests__/*'
     'test_*.py' '*_test.py' '*_test.go')
+  # The derivation is skipped for a line with no runnable segment: an empty TEST_CMD names no suite, and the run
+  # answers n/a below without handing the line to it.
+  if [ -n "$runnable" ]; then suite=$(test_cmd_suite "$TEST_CMD"); fi
 fi
 is_test() { # <path>
   local f="$1" g
+  if [ -n "$suite" ] && [ "$f" = "$suite" ]; then return 0; fi
   for g in "${TEST_GLOBS[@]}"; do
     # shellcheck disable=SC2053  # TEST_GLOBS are globs on purpose
     [[ "$f" == $g ]] && return 0
@@ -75,8 +118,7 @@ fi
 if [ ${#code[@]} -eq 0 ]; then
   finish 0 "teeth: n/a the branch changes only test files" "$testline" ""
 fi
-cmd="${TEETH_CMD:-$TEST_CMD}"
-if [ -z "$cmd" ]; then
+if [ -z "$runnable" ]; then
   finish 0 "teeth: n/a no TEETH_CMD or TEST_CMD in projects/$SLUG.conf" "$testline" ""
 fi
 

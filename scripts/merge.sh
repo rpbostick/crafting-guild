@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Merge a reviewed branch into the main branch, run the tests, verify the merge's own record, push on green, clean up.
-# Usage: merge.sh [--project slug] [--no-review "<reason>"] [--no-look "<reason>"] <name> <reviewed-sha>
+# Usage: merge.sh [--project slug] [--no-review "<reason>"] [--no-look "<reason>"] [--keep-evidence-all] <name> <reviewed-sha>
 #        merge.sh [--project slug] --test-only <name>
 # --test-only runs the project's tests (BENCH_TEST_CMD, else TEST_CMD) on the branch tip in its worktree and stops:
 # no lock, no merge, nothing in the main checkout. Log: .ws-evidence/test-only.log in the worktree. ws bench uses it.
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
-slug="" need_review=true test_only=false no_review_reason="" need_look=true no_look_reason=""
+slug="" need_review=true test_only=false no_review_reason="" need_look=true no_look_reason="" keep_evidence_all=false
 # Where a --no-look reason starts in the merge subject; orchestrator-record.sh splits the subject on it.
 no_look_mark='; --no-look: '
-while [ $# -gt 0 ]; do case "$1" in --project) slug="$2"; shift 2 ;; --no-review) need_review=false; no_review_reason="${2:-}"; [ $# -lt 2 ] || shift; shift ;; --no-look) need_look=false; no_look_reason="${2:-}"; [ $# -lt 2 ] || shift; shift ;; --test-only) test_only=true; shift ;; *) break ;; esac; done
+while [ $# -gt 0 ]; do case "$1" in --project) slug="$2"; shift 2 ;; --no-review) need_review=false; no_review_reason="${2:-}"; [ $# -lt 2 ] || shift; shift ;; --no-look) need_look=false; no_look_reason="${2:-}"; [ $# -lt 2 ] || shift; shift ;; --keep-evidence-all) keep_evidence_all=true; shift ;; --test-only) test_only=true; shift ;; *) break ;; esac; done
 # Prints an override's reason on one line. An override with no reason is a silent one. The argument count catches the
 # form with the reason left out, `--no-review <name> <sha>`, whose name would otherwise be taken as the reason.
 override_reason() { # <flag> <reason> <positional arguments left>
@@ -27,6 +27,7 @@ fi
 name="${1:?usage: merge.sh [flags] <name> <reviewed-sha>}"
 load_project "$slug"; wt="$(worktree_dir "$name")"; br="$(branch_of "$name")"
 [[ "$WS_MERGE_TEST_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "WS_MERGE_TEST_TIMEOUT is '$WS_MERGE_TEST_TIMEOUT'; it must be a whole number of seconds"
+[[ "${WS_EVIDENCE_MAX_MB:-25}" =~ ^[0-9]+$ ]] || die "WS_EVIDENCE_MAX_MB is '$WS_EVIDENCE_MAX_MB'; it must be a whole number of megabytes"
 # Runs a test command in a directory under WS_MERGE_TEST_TIMEOUT, output to a log; returns its exit status.
 # A runner that finishes its tests but never exits (an open timer or promise) would otherwise hold the merge lock
 # forever. timeout(1), not run in the foreground, puts itself and the command in their own process group and
@@ -44,6 +45,75 @@ show_timeout_log() {
   tail -n 20 "$1"
   if tail -n 20 "$1" | grep -qE 'did not exit|^Tests: |[0-9]+ (passed|passing|failed)'; then
     echo "ws: the log's last lines show the tests finished and the runner did not exit; run it with --detectOpenHandles (Jest) or the runner's equivalent to find what stays open." >&2
+  fi
+}
+# Whether a relative path inside .ws-evidence holds a directory of reproducible bulk: dependencies, virtualenvs,
+# caches and downloaded model weights. Matched case-insensitively on any directory in the path.
+evidence_bulk_dir() { # <relative path>
+  local rest="${1%/*}" comp
+  [ "$rest" != "$1" ] || return 1
+  while :; do
+    comp="${rest%%/*}"
+    case "${comp,,}" in node_modules|.venv|*venv|__pycache__|.pytest_cache|hf-cache) return 0 ;; esac
+    [ "$comp" = "$rest" ] && return 1
+    rest="${rest#*/}"
+  done
+}
+# Whether a relative path is an archive or a model weight file, which a rebuild reproduces.
+evidence_bulk_ext() { # <relative path>
+  case "${1,,}" in *.whl|*.tar.gz|*.tgz|*.zip|*.onnx|*.safetensors|*.bin|*.pt|*.gguf) return 0 ;; esac
+  return 1
+}
+# Bytes as the short size the evidence summary line prints.
+human_bytes() { # <bytes>
+  awk -v b="$1" 'BEGIN { if (b >= 1073741824) printf "%.1f GB", b / 1073741824; else if (b >= 1048576) printf "%.0f MB", b / 1048576; else if (b >= 1024) printf "%.0f KB", b / 1024; else printf "%d B", b }'
+}
+# Copies a builder's .ws-evidence/ into runs/<slug>/evidence/<name>/ so the merge keeps the text trail a result cites:
+# logs, renders and tables. Reproducible bulk is skipped by default, because a corpus, a virtualenv or model weights
+# copied on every merge grew the archive to gigabytes: dependency, cache and weight folders, archive and weight file
+# types, and any single file over WS_EVIDENCE_MAX_MB. The kept files are copied as they were. skipped.tsv in the
+# destination names every skipped path with its size and reason and a summary line counts them; a wanted artifact
+# survives because the task asks the builder to commit it. --keep-evidence-all copies everything, for the rare case
+# where the bulk is the evidence.
+archive_evidence() { # <evidence dir> <destination> <keep all: true|false>
+  local src="$1" dest="$2" keep_all="$3" f size rel reason
+  local cap=$(( ${WS_EVIDENCE_MAX_MB:-25} * 1048576 )) kept=0 skipped=0 skipped_bytes=0
+  local -a rows=()
+  mkdir -p "$dest"
+  while IFS= read -r -d '' size; do
+    IFS= read -r -d '' f || break
+    rel="${f#"$src"/}"
+    reason=""
+    if evidence_bulk_dir "$rel"; then reason=bulk-dir
+    elif evidence_bulk_ext "$rel"; then reason=extension
+    elif [ "$size" -gt "$cap" ]; then reason=over-cap
+    fi
+    if [ -n "$reason" ] && ! $keep_all; then
+      rows+=("$(printf '%s\t%s\t%s' "$rel" "$size" "$reason")")
+      skipped=$((skipped + 1)); skipped_bytes=$((skipped_bytes + size))
+      continue
+    fi
+    mkdir -p "$dest/$(dirname "$rel")"
+    if ! cp -d -p -- "$f" "$dest/$rel"; then
+      echo "ws: could not copy evidence file $rel to ${dest#"$WS"/}; the worktree keeps it until that is removed" >&2
+      continue
+    fi
+    kept=$((kept + 1))
+  done < <(find "$src" -mindepth 1 \( -type f -o -type l \) -printf '%s\0%p\0')
+  if [ ${#rows[@]} -gt 0 ]; then
+    {
+      printf '# Evidence the merge did not copy: reproducible bulk (dependency and cache folders, archives and model\n'
+      printf '# weights) and any single file over WS_EVIDENCE_MAX_MB=%s. A wanted artifact survives because the task\n' "${WS_EVIDENCE_MAX_MB:-25}"
+      printf '# asks the builder to commit it.\npath\tsize\treason\n'
+      printf '%s\n' "${rows[@]}"
+    } > "$dest/skipped.tsv"
+  fi
+  if $keep_all; then
+    echo "evidence: kept $kept files, skipped 0 (--keep-evidence-all copied everything)"
+  elif [ "$skipped" -gt 0 ]; then
+    echo "evidence: kept $kept files, skipped $skipped ($(human_bytes "$skipped_bytes"), see skipped.tsv)"
+  else
+    echo "evidence: kept $kept files, skipped 0"
   fi
 }
 # Starts the project's POST_MERGE_CMD detached after a completed merge, under the preview memory cap. It runs
@@ -274,9 +344,21 @@ fi
 if ! $push_failed; then rm -f "$RUNS/merge.unfinished"; fi
 $push_failed || start_post_merge
 if [ -d "$wt/.ws-evidence" ] && [ -n "$(ls -A "$wt/.ws-evidence" 2>/dev/null)" ]; then
-  rm -rf "$RUNS/evidence/$name"; mkdir -p "$RUNS/evidence"; mv "$wt/.ws-evidence" "$RUNS/evidence/$name" && echo "evidence kept at runs/$SLUG/evidence/$name/"
+  rm -rf "$RUNS/evidence/$name"; mkdir -p "$RUNS/evidence"
+  archive_evidence "$wt/.ws-evidence" "$RUNS/evidence/$name" "$keep_evidence_all"
+  echo "evidence kept at runs/$SLUG/evidence/$name/"
 fi
 [ -d "$wt" ] && keep_ignored_outputs "$wt" "$RUNS/evidence/$name/ignored"
+# The archive's own record, written after the copy and the ignored-file copy so it describes the finished archive:
+# `ws evidence` reads the merge time from here rather than the directory's mtime, which every later write moves.
+if [ -d "$RUNS/evidence/$name" ]; then
+  {
+    printf 'merged: %s\n' "$(date '+%Y-%m-%d %H:%M:%S %z')"
+    printf 'epoch: %s\n' "$(date +%s)"
+    printf 'sha: %s\n' "$merged_full"
+    printf 'branch: %s\n' "$br"
+  } > "$RUNS/evidence/$name/merged.txt" || note "could not write runs/$SLUG/evidence/$name/merged.txt"
+fi
 [ -d "$wt" ] && git -C "$PROJECT_PATH" worktree remove --force "$wt" 2>/dev/null && echo "worktree removed (other untracked files discarded)"
 git -C "$PROJECT_PATH" branch -d "$br" -q 2>/dev/null && echo "branch $br deleted"
 echo "merged $br as $merged"

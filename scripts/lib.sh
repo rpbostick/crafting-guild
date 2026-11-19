@@ -4,7 +4,7 @@ WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # The settings config.sh lets the environment override (written there as ${VAR-default}): a value set in the
 # environment wins over config.sh and config.local.sh alike, so a test can run with the bench hours off or on
 # the agent it expects.
-ws_env=$(declare -p WS_BENCH_HOURS WS_BENCH_OUTSIDE WS_MERGE_TEST_TIMEOUT WS_AGENT WS_REVIEW_AGENT WS_REVIEW_PASSES WS_REVIEW_SHADOW WS_ASK_MODEL WS_ASK_BUDGET WS_ASK_PROMPTS WS_WAITING_RE WS_ORCHESTRATOR_OPENCODE WS_MEMORY_DIR WS_MEMORY_CAP WS_ALLOWANCE_LIMITS WS_ALLOWANCE_HOLD WS_ALLOWANCE_STARTS WS_ALLOWANCE_DB WS_CLAUDE_DAY_CAP 2>/dev/null | sed 's/^declare -[a-z-]*/declare -gx/' || true)
+ws_env=$(declare -p WS_BENCH_HOURS WS_BENCH_OUTSIDE WS_MERGE_TEST_TIMEOUT WS_AGENT WS_REVIEW_AGENT WS_REVIEW_PASSES WS_REVIEW_SHADOW WS_ASK_MODEL WS_ASK_BUDGET WS_ASK_PROMPTS WS_WAITING_RE WS_ORCHESTRATOR_OPENCODE WS_MEMORY_DIR WS_MEMORY_CAP WS_ALLOWANCE_LIMITS WS_ALLOWANCE_HOLD WS_ALLOWANCE_STARTS WS_ALLOWANCE_DB WS_CLAUDE_DAY_CAP WS_DISK_FLOOR_GB 2>/dev/null | sed 's/^declare -[a-z-]*/declare -gx/' || true)
 # The model-name list is an array: a scalar assignment to it would replace only its first entry, so the environment's
 # value is captured whole and replaces the array after both config files (a measurement sets its own arms this way).
 env_model_names=$(declare -p WS_OPENCODE_MODEL_NAMES 2>/dev/null || true)
@@ -16,6 +16,26 @@ env_model_names=$(declare -p WS_OPENCODE_MODEL_NAMES 2>/dev/null || true)
 # A plan or queue path as given: relative to the current directory when it exists there, else to the
 # workspace (plans/<slug>/... is written workspace-relative), so a command run from another folder finds it.
 ws_path() { if [ -e "$1" ]; then echo "$1"; elif [ -e "$WS/$1" ]; then echo "$WS/$1"; else echo "$1"; fi; }
+# The final segment of a command line, split on &&, ||, ; and |: the part that still runs when the earlier parts set
+# it up. A test command's earlier segments are an install or a build, so only this one names the suite.
+command_last_segment() { # <command line>
+  local rest="$1" before last
+  # An empty line, or one of blanks and separators alone (`&&`), has no segment. Returning here also keeps the trim
+  # below terminating: on an empty string `${rest%?}` removes nothing, so the trim would spin forever.
+  case "${rest//[[:space:];|&]/}" in '') return 0 ;; esac
+  # A trailing separator (`bash suite.sh;`) would leave an empty final segment: trim separators and space first.
+  while :; do
+    last="${rest: -1}"
+    case "$last" in ''|' '|$'\t'|';'|'|'|'&') rest="${rest%?}" ;; *) break ;; esac
+  done
+  # Strip up to the last separator of each kind, repeating: one strip can expose an earlier kind before it.
+  while :; do
+    before="$rest"
+    rest="${rest##*&&}"; rest="${rest##*||}"; rest="${rest##*;}"; rest="${rest##*|}"
+    [ "$rest" = "$before" ] && break
+  done
+  printf '%s\n' "$rest"
+}
 [ -n "$ws_env" ] && eval "$ws_env"; unset ws_env
 if [ -n "$env_model_names" ]; then
   unset WS_OPENCODE_MODEL_NAMES
@@ -519,6 +539,59 @@ bg_elapsed() { # <epoch-seconds>
   [ "$d" -lt 0 ] && d=0
   if [ "$d" -lt 3600 ]; then echo "$((d / 60)) min"
   else echo "$((d / 3600)) h $(( (d % 3600) / 60 )) min"; fi
+}
+# Free kilobytes on each filesystem holding <dir>..., one `<mount-point> <free-kb>` line per distinct filesystem from
+# a single `df -Pk` call (the workspace and a project usually share one, and it is named once). Returns 1 when df
+# fails, answers no record, or a record's Available column is not a number: the caller reports that instead of
+# passing it silently, which is how a full disk survived unnoticed until a download died.
+disk_free_kb() { # <dir>...
+  local out line avail mount seen=" " n=0
+  out=$(df -Pk "$@" 2>/dev/null) || return 1
+  # A busy filesystem's spacing is whatever df prints, so the fields are read as columns rather than by pattern:
+  # Available is the fourth, the mount point the sixth, and the rest of the line stays with the last name.
+  while IFS= read -r line; do
+    read -r _ _ _ avail _ mount _ <<< "$line"
+    case "$avail" in ''|*[!0-9]*) return 1 ;; esac
+    [ -n "$mount" ] || return 1
+    n=$((n + 1))
+    case "$seen" in *" $mount "*) continue ;; esac
+    seen="$seen$mount "
+    printf '%s %s\n' "$mount" "$avail"
+  done < <(printf '%s\n' "$out" | sed -n '2,$p')
+  [ "$n" -gt 0 ] || return 1
+}
+# The disk-space line for <dir>...: a `warn` line for each filesystem under WS_DISK_FLOOR_GB, naming the free space,
+# its mount point, the floor and where the space goes in this workspace. Prints nothing while every filesystem keeps
+# the floor free, and returns 1 after an `error` line when df could not be read or the floor setting is not a number.
+disk_space_report() { # <dir>...
+  local floor="${WS_DISK_FLOOR_GB-10}" free="" out="" mount avail bytes floor_bytes gb10 rc=0
+  case "$floor" in
+    '') printf 'error  disk: WS_DISK_FLOOR_GB is empty; set it to a whole number of GB\n'; return 1 ;;
+    *[!0-9]*) printf 'error  disk: WS_DISK_FLOOR_GB=%s is not a whole number of GB\n' "$floor"; return 1 ;;
+  esac
+  # A leading zero is octal to bash arithmetic: 010 would read as an 8 GB floor, and 08 fails the multiplication
+  # below, leaving the run with a bare "value too great for base" instead of an 8 GB floor. The checked digits are
+  # read as decimal.
+  floor=$((10#$floor))
+  [ "$floor" -gt 0 ] || { printf 'error  disk: WS_DISK_FLOOR_GB=%s is not a positive number of GB\n' "$floor"; return 1; }
+  if ! out=$(disk_free_kb "$@"); then
+    printf 'error  disk: df -Pk gave no readable free-space figure for %s\n' "$*"
+    return 1
+  fi
+  floor_bytes=$((floor * 1000000000))
+  while read -r mount avail; do
+    [ -n "$mount" ] || continue
+    bytes=$((avail * 1024))
+    [ "$bytes" -ge "$floor_bytes" ] && continue
+    # Decimal gigabytes, rounded to the nearest tenth and printed whole when it lands on one: 4687500 KiB reads
+    # "4.8 GB" and 10724036 KiB reads "11 GB".
+    gb10=$(( (avail * 10240 + 500000000) / 1000000000 ))
+    if [ $((gb10 % 10)) -eq 0 ]; then free="$((gb10 / 10)) GB"; else free="$((gb10 / 10)).$((gb10 % 10)) GB"; fi
+    printf 'warn  disk: %s free on %s (floor %s GB); runs/*/evidence and ~/.cache (pip, models) hold the space\n' \
+      "$free" "$mount" "$floor"
+    rc=2
+  done <<< "$out"
+  return "$rc"
 }
 # Whether a plan has an In flight block, in either form: the bare heading, or one with a date in parentheses.
 has_inflight() { grep -qE '^\*\*In flight right now\*\*|^\*\*In flight right now \(' "$1"; }

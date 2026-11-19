@@ -667,7 +667,7 @@ links_note=""
 if [ -f "$PROJECT_PATH/.worktree-links" ]; then
   lk=$(grep -v -E '^(#|$)' "$PROJECT_PATH/.worktree-links" | sed 's/.*/`&`/' | paste -sd, - | sed 's/,/, /g')
   [ -n "$lk" ] && links_note="
-Linked paths: $lk are links into the main checkout. Read them; writing through them is denied (they resolve outside the worktree). Save files that must outlive this run under \`.ws-evidence/\` (kept at merge) and say in the result where they should go."
+Linked paths: $lk are links into the main checkout. Read them; writing through them is denied (they resolve outside the worktree). Save files that must outlive this run under \`.ws-evidence/\` (kept at merge, except reproducible bulk and any file over WS_EVIDENCE_MAX_MB — commit or move an artifact that must survive) and say in the result where they should go."
 fi
 # The same refused entries dispatch printed, just above the task: a builder that tries one loses a turn and gets
 # nothing back. Each line names the shape that would run instead.

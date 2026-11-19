@@ -24,11 +24,13 @@ if [ ${#TEST_GLOBS[@]} -eq 0 ]; then
     'test_*.py' '*_test.py' '*_test.go')
 fi
 globs=(); for g in "${TEST_GLOBS[@]}"; do globs+=(--test-glob "$g"); done
-# The test command's own script is a test file even when its name does not match a glob (scripts/selftest.sh).
+# The test command's own script is a test file even when its name does not match a glob (scripts/selftest.sh). Only
+# the command's final segment counts, as teeth reads it: `npm ci && bash build.sh && node --test` names build.sh as
+# production, not as the suite.
 extra=()
 for cmd in "$TEST_CMD" "${TEETH_CMD:-}"; do
   [ -n "$cmd" ] || continue
-  read -r -a words <<< "$cmd"
+  read -r -a words <<< "$(command_last_segment "$cmd")"
   for w in "${words[@]}"; do
     case "$w" in ./*) w="${w#./}" ;; esac
     case "$w" in

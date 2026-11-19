@@ -46,6 +46,10 @@ cur=$(head -n1 "$WS/state/current" 2>/dev/null || true)
 others=$(find "$WS/projects" -maxdepth 1 -name '*.conf' -printf '%f\n' 2>/dev/null | sort | sed 's/\.conf$//' | grep -vx "$SLUG" | paste -sd' ')
 [ -n "$others" ] && echo "other registered projects: $others (use ws --project <slug> to act on one)"
 echo "workspace: $WS (plans in plans/$SLUG, runs in runs/$SLUG, lessons in lessons/)"
+# Free space, from one df call over the workspace and the project checkout, silent while both keep the floor free: a
+# model pull or a suite that fills the disk otherwise shows up first as its own failure. It warns; it never stops the brief.
+disk_line=$(disk_space_report "$WS" "$PROJECT_PATH")
+[ -n "$disk_line" ] && printf '%s\n' "$disk_line"
 echo
 echo "--- $SLUG git ---"
 cur=$(git -C "$PROJECT_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null)

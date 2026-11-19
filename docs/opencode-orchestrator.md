@@ -31,7 +31,7 @@ Sources were read on 2026-10-22. Every statement about OpenCode below names the 
 
 ### Tools
 
-- OpenCode's built-in shell tool executes commands in the project environment; its permission key is `bash`, not the tool's name ([docs/tools](https://opencode.ai/docs/tools/)). `scripts/opencode_run.py` writes the shell rules under `bash` for that reason.
+- OpenCode's built-in shell tool executes commands in the project environment. On 1.x its permission key is `bash`, not the tool's name, and `scripts/opencode_run.py` writes the shell rules under `bash` for that reason ([docs/tools](https://opencode.ai/docs/tools/)); on 2.x the tool and the action are `shell`, and the same function writes an ordered `permissions` array ([opencode-2x.md](opencode-2x.md)).
 - The `question` tool asks the user during execution; each question has a header, text and a list of options, and the user can pick an option or type a custom answer; with several questions the user can move between them before submitting ([docs/tools](https://opencode.ai/docs/tools/)).
 - The v2 copy of the tools page states that the shell tool has a two-minute default foreground timeout, that `timeout` is set in milliseconds when that is not suitable, and that `background: true` returns immediately and notifies the session when the call finishes; a background call has no timeout unless one is set ([v2/docs/tools](https://opencode.ai/v2/docs/tools)). The v1 tools page documents the shell tool without giving a timeout ([docs/tools](https://opencode.ai/docs/tools/)).
 - The CLI page lists `OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS`, the default timeout for bash commands in milliseconds ([docs/cli](https://opencode.ai/docs/cli/)).

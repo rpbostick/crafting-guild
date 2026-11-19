@@ -21,6 +21,7 @@ WS_LIGHT_TIMEOUT="45m"          # cap for a task marked 'Track: light'
 WS_BUILDER_MEM="4G"             # memory cap for a builder and everything it runs (systemd MemoryMax); empty = no cap
 WS_RUN_KILL_GRACE="${WS_RUN_KILL_GRACE:-15}"  # seconds a finished builder run's leftover processes get after SIGTERM before SIGKILL
 WS_SERVE_MEM="3G"               # memory cap for a `ws serve` preview and everything it starts; empty = no cap
+WS_DISK_FLOOR_GB="${WS_DISK_FLOOR_GB-10}"  # free GB on the filesystem holding the workspace, or the selected project's checkout, under which ws doctor warns and cold start prints the same line; a warning, not a failure
 WS_OC_PORT="${WS_OC_PORT:-4096}"                     # ws oc starts the session's server on the first free port from here up (runs/<slug>/oc.port)
 WS_WAKE_URL="${WS_WAKE_URL:-}"                        # the server ws wake sends to: --url, else this when set, else on 2.x the shared service's own url (scripts/lib.sh wake_url), else http://127.0.0.1:<runs/<slug>/oc.port>, else http://127.0.0.1:4096
 WS_WAKE_TIMEOUT="${WS_WAKE_TIMEOUT:-900}"             # seconds ws wake waits for the session's first event before it records a failure
@@ -35,6 +36,9 @@ WS_BENCH_AUTOSTART="${WS_BENCH_AUTOSTART-0}"   # ws autostart: 1 resumes the ben
 WS_BENCH_AUTOSTART_CMD="${WS_BENCH_AUTOSTART_CMD-}"   # the bench command file ws-bench.service runs (relative to the workspace or absolute)
 WS_BROWSER_CMD="firefox --new-tab"   # ws serve prints "open it: <this> <url>"; empty = print nothing
 WS_SUITE_WARN_S="300"           # ws merge warns when the project's suite takes longer than this many seconds
+# `ws evidence prune` deletes a non-text file over this size in an archive too; a log, .txt, .tsv, .json or .md is
+# never bulk whatever its size.
+WS_EVIDENCE_MAX_MB="${WS_EVIDENCE_MAX_MB-25}"  # MB: ws merge skips any single file larger in a builder's .ws-evidence/, besides dependency, cache and model-weight folders and archive types (--keep-evidence-all copies them; a task that needs a render commits it)
 WS_SELFTEST_LOCK_WAIT="${WS_SELFTEST_LOCK_WAIT:-900}"  # seconds a second `bash scripts/selftest.sh`, in the main checkout or a worktree, waits for the one running before it exits 3
 WS_CHAIN_FIX_ROUNDS="1"          # ws chain: automatic fix rounds per step before it stops for the orchestrator
 # A usage limit's reset can be days away. A wait longer than WS_LIMIT_PROBE_AFTER seconds wakes every

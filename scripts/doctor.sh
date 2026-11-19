@@ -417,6 +417,15 @@ else
   esac
   [ -n "$PREVIEW_CMD" ] && ok "preview command set" || echo "note  no PREVIEW_CMD: ws serve is off for $SLUG"
 fi
+# Free space on the filesystem(s) holding the workspace and the selected project's checkout, from one df call: silent
+# while both keep WS_DISK_FLOOR_GB free, a warning (not a failure) under it, and a failure when df answers nothing
+# readable. A warning rather than a FAIL because a disk filling up is not a broken setup; a silent pass is what let
+# a full root filesystem surface as a killed model pull.
+disk_paths=("$WS")
+[ -n "${PROJECT_PATH:-}" ] && disk_paths+=("$PROJECT_PATH")
+disk_line=$(disk_space_report "${disk_paths[@]}") && disk_rc=0 || disk_rc=$?
+[ -n "$disk_line" ] && printf '%s\n' "$disk_line"
+[ "$disk_rc" -eq 1 ] && fails=$((fails+1))
 
 echo
 [ "$fails" -eq 0 ] && echo "doctor: everything required is in place" || echo "doctor: $fails required check(s) failed"

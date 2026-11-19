@@ -22,6 +22,30 @@ if [ -z "$res" ]; then
   echo "NO RESULT: no result event in $log (still running, killed, or crashed). Last line:"; tail -c 300 "$log" 2>/dev/null; exit 2
 fi
 problems=0; flag() { echo "FAIL  $*"; problems=$((problems+1)); }; ok() { echo "ok    $*"; }
+# A log no row of .ws-evidence/runs.tsv names was written by hand: it ends with whatever the builder typed, so a
+# result can cite "tests passed" with nothing showing the command ran or how it ended. Only a .ws-evidence/*.log is
+# a run log: the runner writes <label>.log and nothing else, so a rendered page, a screenshot or a note the result
+# cites can carry no row. A tree with no runs.tsv at all reads the same way: the run never used the runner (a
+# branch from before the runner is rare, a run that skipped it is not), so it gets the missing-row message too.
+evidence_log() {  # evidence_log <cited path>: the worktree-relative .ws-evidence/ log it names, when it exists
+  local p="$1"
+  case "$p" in *.log) ;; *) return 1 ;; esac
+  case "$p" in .ws-evidence/*.log) if [ -f "$wt/$p" ]; then printf '%s\n' "$p"; return 0; fi; return 1 ;; esac
+  [ -f "$wt/.ws-evidence/$p" ] || return 1
+  printf '.ws-evidence/%s\n' "$p"
+}
+row_state() {  # row_state <worktree-relative .ws-evidence path>: row, no_row, or no_tsv when runs.tsv is absent
+  local tsv="$wt/.ws-evidence/runs.tsv"
+  [ -f "$tsv" ] || { echo no_tsv; return 0; }
+  # The runner writes .ws-evidence/<label>.log and a row holding that label, so the label is the log's base name.
+  if awk -F'\t' -v f="$1" 'NR > 1 && $2 != "" && ".ws-evidence/" $2 ".log" == f { found = 1 } END { exit found ? 0 : 1 }' "$tsv"; then
+    echo row
+  else
+    echo no_row
+  fi
+}
+row_note() { printf '%s has no row in .ws-evidence/runs.tsv: run the command through bin/ws-run <label> <command> so the log records its exit code' "$1"; }
+tsv_note() { printf '%s: .ws-evidence/runs.tsv is missing, so nothing shows the command ran: run it through bin/ws-run <label> <command>' "$1"; }
 cost=$(printf '%s' "$res" | jq -r '.total_cost_usd // "?"'); dur=$(printf '%s' "$res" | jq -r '(.duration_ms // 0) / 60000 | floor')
 tok=$(printf '%s' "$res" | jq -r '.usage // {} | "out=\(.output_tokens // 0) cache_read=\(.cache_read_input_tokens // 0)"')
 claude_version=$(sed -n 's/^claude_version=//p' "$RUNS/$name.task.txt" 2>/dev/null | tail -1)
@@ -63,6 +87,18 @@ if [ "$(printf '%s' "$so" | jq -r '.tests == null')" = "false" ]; then
     [ -z "$missing" ] && lp="$(printf '%s' "$lp" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | awk 'NF' | head -1) (and the rest of the list)"
   fi
   if [ -n "$lp" ] && { [ -f "$wt/$lp" ] || [ -f "$wt/${lp%% *}" ]; }; then ok "tests $t, log at $lp"; else flag "tests claimed ($t) but no log at ${lp:-<none>}"; fi
+  # The test log is what the evidence runner exists for, so the full track does not check out without a row; the
+  # light track warns instead of failing. A missing runs.tsv is the same finding said the same way.
+  if [ -n "$lp" ]; then
+    for one in $(printf '%s' "$lp" | tr ',' '\n' | sed 's/^ *//;s/ *$//;s/[`)]*$//' | awk 'NF'); do
+      rel=$(evidence_log "$one") || continue
+      case "$(row_state "$rel")" in
+        row) ;;
+        no_tsv) if task_is_light "$name"; then echo "note  tests log $(tsv_note "$rel")"; else flag "tests log $(tsv_note "$rel")"; fi ;;
+        *) if task_is_light "$name"; then echo "note  $(row_note "$rel")"; else flag "tests log $(row_note "$rel")"; fi ;;
+      esac
+    done
+  fi
 else echo "note  no tests run"; fi
 # Done-when, item by item: a "done" with an item not met is a false claim; an observed item must cite
 # evidence that exists; an item met on inference alone is shown so the review can judge it.
@@ -96,6 +132,14 @@ if [ "$(printf '%s' "$so" | jq 'has("done_when")')" = true ]; then
     fi
     if [[ "$path" == */* || "$path" == *.log || "$path" == *.png || "$path" == *.txt ]] && [[ "$path" != http* ]] && [ ! -e "$wt/$path" ] && [ ! -e "$wt/.ws-evidence/$path" ] && ! git -C "$wt" cat-file -e "${path}^{commit}" 2>/dev/null; then
       flag "$line: evidence $path is not in the worktree"
+    elif rel=$(evidence_log "$path"); then
+      # The same runner rule as the test log: a hand-written evidence file carries no recorded exit code, and a
+      # missing runs.tsv means no command was recorded at all.
+      case "$(row_state "$rel")" in
+        row) ok "$line" ;;
+        no_tsv) echo "note  $line: $(tsv_note "$rel")" ;;
+        *) echo "note  $line: $(row_note "$rel")" ;;
+      esac
     else ok "$line"; fi
   done < <(printf '%s' "$so" | jq -r '.done_when[] | [.status, .basis, (.item | gsub("[\t\n]"; " ")), (.evidence | gsub("[\t\n]"; " "))] | @tsv')
   nu=$(printf '%s' "$so" | jq '.unknowns | length'); [ "$nu" -gt 0 ] && echo "note  unknowns: $(printf '%s' "$so" | jq -c '.unknowns')"

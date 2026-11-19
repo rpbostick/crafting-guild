@@ -18,7 +18,7 @@ ws oc <slug> [args]             open an OpenCode orchestrator session, pinned to
 ws init <path> [--tests CMD] [--branch B] [--yes] [--dry-run] [--force]   register a project (and retire v1
                                 hooks if found); --dry-run shows the conf first, --force replaces an existing one after a backup
 ws list                         registered projects
-ws status [slug]                cold-start: ground truth in twenty seconds
+ws status [slug]                cold-start: ground truth in seconds
 ws brief [--write] [--since <file>]   one status page across every registered project: what waits on you, what is
                                 running, each plan's in-flight block, open branches, recent work; --write saves
                                 reports/brief.md and ends with what changed since the previous one
@@ -81,10 +81,16 @@ ws verify [--project slug] [--since YYYY-MM-DD] [--passes N] [--merge SHA] [--js
                                 the record
 ws teeth <name>                 check the branch tip without its non-test changes: ok (its tests fail), toothless
                                 (they pass), n/a or error; runs/<slug>/<name>.teeth.txt, chain runs it before review
-ws merge [--no-review "<reason>"] [--no-look "<reason>"] <name> <sha>   merge a reviewed branch, test, verify its record,
-                                push, clean up; a failed test or verify undoes the merge; a reason goes in the merge
-                                subject; a visible branch with no look at its tip is refused
-                                until ws look records one or --no-look overrides it; a gated chain step passes
+ws merge [--no-review "<reason>"] [--no-look "<reason>"] [--keep-evidence-all] <name> <sha>   merge a reviewed branch, test,
+                                verify its record, push, clean up; a failed test or verify undoes the merge; a reason goes
+                                in the merge subject; a visible branch with no look at its tip is refused
+                                until ws look records one or --no-look overrides it; a gated chain step passes.
+                                The builder's .ws-evidence/ is archived to runs/<slug>/evidence/<name>/ without
+                                reproducible bulk: node_modules, .venv, *venv, __pycache__, .pytest_cache and hf-cache
+                                folders, .whl/.tar.gz/.tgz/.zip/.onnx/.safetensors/.bin/.pt/.gguf files (all
+                                case-insensitive), and any file over WS_EVIDENCE_MAX_MB (config.sh). skipped.tsv
+                                names each skipped path with its size and reason; --keep-evidence-all copies
+                                everything
 ws look <name> "<what they said>"   record that the operator saw the branch at its tip (runs/<slug>/<name>.look)
 ws hold <name> "<note>"         record the operator's fault note on a step: the merge refuses the held SHA until a
                                 commit after it and a newer merge review pass it; ws hold <name> prints it,
@@ -94,6 +100,12 @@ ws archive-inflight [--dry-run] [<plan.md>...]   keep the first In flight block 
                                 project's plans/<slug>/*.md except in-flight-history.md and task-*.md
 ws stop-note <step> handled|re-explained "<note>"   record how the newest unnoted chain stop at a step went: handled
                                 without the operator explaining it, or re-explained by them (runs/<slug>/stop-notes.tsv)
+ws evidence [--project slug]    the archives under runs/<slug>/evidence/: name, age, size, and how much of it is
+                                text (logs, .txt, .tsv, .json, .md) against bulk; writes nothing
+ws evidence prune [--older-than 30d] [--dry-run]   delete bulk from archives older than the window: virtualenvs,
+                                dependency trees, caches, model files and any non-text file over
+                                WS_EVIDENCE_MAX_MB; a log, result, review, teeth verdict or merged.txt never goes.
+                                --dry-run prints the same lines and deletes nothing
 ws chain <queue-file>           run a queue of steps: dispatch, wait, review (one automatic fix round), merge, next;
                                 stops on a failure, a gate or a judgment call (run it under run_in_background)
 ws chain-wait                   wait on the project's running chain (from any session) and print where it stopped;
@@ -216,7 +228,8 @@ case "$cmd" in
       echo "# Optional: the command ws teeth runs with the branch's non-test changes reverted; empty = TEST_CMD."
       echo "# TEETH_CMD=\"\""
       echo "# Files teeth treats as tests (shell globs on the path). The default covers *.test.*, *.spec.*, test/,"
-      echo "# tests/, __tests__/, test_*.py, *_test.py and *_test.go; uncomment to add a project's own layout."
+      echo "# tests/, __tests__/, test_*.py, *_test.py, *_test.go and the shell script the final segment runs;"
+      echo "# uncomment to add a project's own layout."
       echo "# TEST_GLOBS=('*.test.*' '*.spec.*' 'test/*' 'tests/*' '*/test/*' '*/tests/*' '__tests__/*' '*/__tests__/*' 'test_*.py' '*_test.py' '*_test.go')"
       echo "# Extra Bash grants for builders (Claude Code permission rules). Builders already get git add/commit/rm/mv,"
       echo "# ls/cat/grep/head/tail/wc/diff/mkdir/chmod/expr/date, bash -n, git grep and the test command. Add what your tests and tools need."
@@ -338,6 +351,7 @@ case "$cmd" in
   merge) "$WS/scripts/merge.sh" ${proj:+--project "$proj"} "$@" ;;
   hold) "$WS/scripts/hold.sh" ${proj:+--project "$proj"} "$@" ;;
   archive-inflight) "$WS/scripts/archive-inflight.sh" ${proj:+--project "$proj"} "$@" ;;
+  evidence) "$WS/scripts/evidence.sh" ${proj:+--project "$proj"} "$@" ;;
   look) "$WS/scripts/look.sh" ${proj:+--project "$proj"} "$@" ;;
   stop-note) "$WS/scripts/stop-note.sh" ${proj:+--project "$proj"} "$@" ;;
   wake) "$WS/scripts/wake.sh" ${proj:+--project "$proj"} "$@" ;;
