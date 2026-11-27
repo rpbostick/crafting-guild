@@ -4,7 +4,7 @@ WS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # The settings config.sh lets the environment override (written there as ${VAR-default}): a value set in the
 # environment wins over config.sh and config.local.sh alike, so a test can run with the bench hours off or on
 # the agent it expects.
-ws_env=$(declare -p WS_BENCH_HOURS WS_BENCH_OUTSIDE WS_MERGE_TEST_TIMEOUT WS_AGENT WS_REVIEW_AGENT WS_REVIEW_PASSES WS_REVIEW_SHADOW WS_ASK_MODEL WS_ASK_BUDGET WS_ASK_PROMPTS WS_WAITING_RE WS_ORCHESTRATOR_OPENCODE WS_MEMORY_DIR WS_MEMORY_CAP WS_ALLOWANCE_LIMITS WS_ALLOWANCE_HOLD WS_ALLOWANCE_STARTS WS_ALLOWANCE_DB WS_CLAUDE_DAY_CAP WS_DISK_FLOOR_GB 2>/dev/null | sed 's/^declare -[a-z-]*/declare -gx/' || true)
+ws_env=$(declare -p WS_BENCH_HOURS WS_BENCH_OUTSIDE WS_MERGE_TEST_TIMEOUT WS_AGENT WS_REVIEW_AGENT WS_REVIEW_PASSES WS_REVIEW_SHADOW WS_ASK_MODEL WS_ASK_BUDGET WS_ASK_PROMPTS WS_WAITING_RE WS_ORCHESTRATOR_OPENCODE WS_MEMORY_DIR WS_MEMORY_CAP WS_ALLOWANCE_LIMITS WS_ALLOWANCE_PRICES WS_ALLOWANCE_HOLD WS_ALLOWANCE_STARTS WS_ALLOWANCE_DB WS_CLAUDE_DAY_CAP WS_DISK_FLOOR_GB 2>/dev/null | sed 's/^declare -[a-z-]*/declare -gx/' || true)
 # The model-name list is an array: a scalar assignment to it would replace only its first entry, so the environment's
 # value is captured whole and replaces the array after both config files (a measurement sets its own arms this way).
 env_model_names=$(declare -p WS_OPENCODE_MODEL_NAMES 2>/dev/null || true)
@@ -241,7 +241,7 @@ browser_mcp_json() { # [output-dir]
 }
 allowance_py() { # <report|check|past> [flags]
   local sub="$1"; shift
-  python3 -I "$WS/scripts/allowance.py" "$sub" --db "$WS_ALLOWANCE_DB" --hold "$WS_ALLOWANCE_HOLD" --limits "$WS_ALLOWANCE_LIMITS" --starts "$WS_ALLOWANCE_STARTS" "$@"
+  python3 -I "$WS/scripts/allowance.py" "$sub" --db "$WS_ALLOWANCE_DB" --hold "$WS_ALLOWANCE_HOLD" --limits "$WS_ALLOWANCE_LIMITS" --prices "$WS_ALLOWANCE_PRICES" --starts "$WS_ALLOWANCE_STARTS" "$@"
 }
 # Whether held work may spend <model>. 0: it may (a model outside Go, the meter off, or under the hold; a model the
 # meter cannot measure is noted and goes on, since a provider limit still stops it). 1: the shared pool is past the
@@ -518,6 +518,28 @@ chain_dead_line() { # <runs-dir>
     printf 'chain: DEAD (status said %s; re-run ws chain <queue>)\n' "$st"
   fi
 }
+# A chain line whose stop already has a note in stop-notes.tsv must not keep asking for that note: ws stop-note answers
+# "every stop at <step> already has a note", so the instruction cannot be obeyed. The stop time is the three fields
+# after "stopped " and the step is the word before the first ": "; only a row with that same stop time and step
+# matches, since two stops at one step are two stops. An absent or unreadable file, or a line that does not start with
+# "stopped ", leaves the line as it is.
+chain_status_display() { # <runs-dir> <status text>
+  local runs="$1" st="$2" stop_time rest step when row_step row_class row_stop
+  case "$st" in "stopped "*) ;; *) printf '%s\n' "$st"; return 0 ;; esac
+  rest="${st#stopped }"
+  stop_time="${rest%% *}"; rest="${rest#* }"
+  stop_time="$stop_time ${rest%% *}"; rest="${rest#* }"
+  stop_time="$stop_time ${rest%% *}"; rest="${rest#* }"
+  step="${rest%%: *}"
+  case "$st" in *"; before the next run, note this stop:"*) ;; *) printf '%s\n' "$st"; return 0 ;; esac
+  [ -r "$runs/stop-notes.tsv" ] || { printf '%s\n' "$st"; return 0; }
+  while IFS=$'\t' read -r when row_step _ row_class _ row_stop; do
+    [ "$row_step" = "$step" ] && [ "$row_stop" = "$stop_time" ] || continue
+    printf '%s (noted %s as %s)\n' "${st%%; before the next run, note this stop:*}" "$when" "$row_class"
+    return 0
+  done < "$runs/stop-notes.tsv"
+  printf '%s\n' "$st"
+}
 # Registered project slugs, sorted.
 project_slugs() { find "$WS/projects" -maxdepth 1 -name '*.conf' -printf '%f\n' 2>/dev/null | sed 's/\.conf$//' | sort; }
 # One variable from a project conf without loading the project: no resolve_slug, no die, no runs/ dirs made.
@@ -740,7 +762,7 @@ unfinished_merge_line() { # <runs-dir> [project-path] [project-branch] [held]
 # decision written in the plans. A run or a stopped step is listed only while its agent branch is still open:
 # the result files outlive their branch.
 waiting_lines() { # <slug> <runs-dir> [project-path] [project-branch]
-  local slug="$1" runs="$2" path="${3:-}" branch="${4:-main}" f n pid st reason first step repo="" hf htip hcur shown_tip pline ufline
+  local slug="$1" runs="$2" path="${3:-}" branch="${4:-main}" f n pid st shown reason first step repo="" hf htip hcur shown_tip pline ufline
   if [ -n "$path" ] && { [ -d "$path/.git" ] || [ -f "$path/.git" ]; }; then repo="$path"; fi
   if [ -n "$path" ] && [ -z "$repo" ]; then
     printf '%s: project path is not a git repo: %s\n' "$slug" "${path:-<empty>}"
@@ -751,7 +773,9 @@ waiting_lines() { # <slug> <runs-dir> [project-path] [project-branch]
   if [ -f "$runs/chain.status" ]; then
     st=$(head -n1 "$runs/chain.status")
     if [ "${st%% *}" = stopped ]; then
-      reason=$(printf '%s' "$st" | sed -E 's/^[^ ]+ [^ ]+ [^ ]+ [^ ]+ //')
+      # The same display cold start prints, so a stop already noted in stop-notes.tsv shows the note here too.
+      shown=$(chain_status_display "$runs" "$st")
+      reason=$(printf '%s' "$shown" | sed -E 's/^[^ ]+ [^ ]+ [^ ]+ [^ ]+ //')
       step=$(chain_stop_step "$runs" "$repo" "$reason")
       if [ -z "$step" ] || agent_branch_open "$repo" "$branch" "$step"; then
         printf '%s: chain stopped: %s\n' "$slug" "$reason"
@@ -811,12 +835,27 @@ opencode_prompt_args() {
 
 # The active project: an explicit slug, else WS_PROJECT (set by `ws <slug>` for that session, so a second session
 # on another project cannot redirect this one), else state/current (the last `ws <slug>`, for terminals).
+# A 2.x background service is one process shared by every project, so it carries the project it was last configured
+# for into each shell it starts, and a pin can name a project this session never recorded a session for. The pin still
+# wins; the mismatch is named on stderr once per process so the shell cannot act on a project silently that the
+# session's own runs/<slug>/session.id does not vouch for.
 resolve_slug() {
-  local slug="${1:-}"
-  [ -z "$slug" ] && slug="${WS_PROJECT:-}"
+  local slug="${1:-}" pinned="" current=""
+  if [ -z "$slug" ]; then
+    pinned="${WS_PROJECT:-}"
+    slug="$pinned"
+  fi
   if [ -z "$slug" ] && [ -f "$WS/state/current" ]; then slug="$(head -n1 "$WS/state/current")"; fi
   [ -n "$slug" ] || die "no project given and none selected (run: ws <slug>, or ws list)"
   [ -f "$WS/projects/$slug.conf" ] || die "unknown project '$slug' (see projects/; register with: ws init <path>)"
+  if [ -n "$pinned" ] && [ -f "$WS/state/current" ] && [ "${_ws_project_mismatch_named:-}" != "$pinned" ]; then
+    current="$(head -n1 "$WS/state/current")"
+    # An empty session.id records no session either, so it counts as missing here, as it does to wake_session.
+    if [ -n "$current" ] && [ "$current" != "$pinned" ] && [ ! -s "$WS/runs/$pinned/session.id" ]; then
+      _ws_project_mismatch_named="$pinned"
+      note "WS_PROJECT=$pinned but no session was recorded for it; state/current names $current (acting on $pinned; pass --project to change)"
+    fi
+  fi
   echo "$slug"
 }
 # Loads projects/<slug>.conf into PROJECT_PATH, PROJECT_BRANCH, TEST_CMD, EXTRA_TOOLS (array), PREVIEW_CMD,
@@ -1053,6 +1092,10 @@ WS_MERGE_SUBJECT_RE='^Merge agent/([A-Za-z0-9._/-]+)(: .*)? \((reviewed at ([0-9
 # --no-review reason would otherwise swallow it; merge.sh refuses a reason holding this marker.
 # shellcheck disable=SC2034  # read by orchestrator-record.sh and verify.sh
 WS_NO_LOOK_RE='^(.*); --no-look: (.*)\)$'
+# An --allow-secret-scan reason closes the parenthesis the same way. A parser splits this marker before the --no-look
+# one, because its text comes later in the subject; merge.sh refuses any override reason holding either marker.
+# shellcheck disable=SC2034  # read by orchestrator-record.sh and verify.sh
+WS_SECRET_SCAN_RE='^(.*); --allow-secret-scan: (.*)\)$'
 # The final `result` event of a stream-json log, or nothing if the run has not ended.
 result_json() { grep '"type":"result"' "$1" 2>/dev/null | tail -1; }
 # The reset epoch a provider limit message names ("resets 3:50pm (America/Denver)"): the next such clock time after

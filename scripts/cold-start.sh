@@ -110,7 +110,7 @@ if [ -f "$RUNS/chain.status" ]; then
   if pid_file_alive "$RUNS/chain.pid"; then echo "  CHAIN running (pid $(cat "$RUNS/chain.pid")): $cs (log runs/$SLUG/chain.log; wait on it again under run_in_background if this session did not start it)"
   elif [ -n "$ufline" ] && [ "${cs%% *}" = running ]; then echo "  $ufline"
   elif [ -n "$dead" ]; then echo "  $dead"; [ -z "$ufline" ] || echo "  $ufline"
-  else echo "  chain: $cs"; [ -z "$ufline" ] || echo "  $ufline"; fi
+  else echo "  chain: $(chain_status_display "$RUNS" "$cs")"; [ -z "$ufline" ] || echo "  $ufline"; fi
 elif [ -n "$ufline" ]; then echo "  $ufline"; fi
 for sf in "$RUNS"/serve-*.pid; do
   [ -f "$sf" ] || continue; sp=$(cut -d' ' -f1 "$sf"); port=$(cut -d' ' -f2 "$sf"); what=$(basename "$sf" .pid); what="${what#serve-}"
@@ -124,6 +124,14 @@ fi
 "$WS/scripts/wake.sh" --project "$SLUG" status-lines
 for r in $(ls -t "$RUNS"/*.result.txt 2>/dev/null | head -5); do
   n=$(basename "$r" .result.txt); echo "  last: $n: $(head -n1 "$r" | cut -c1-110)"
+done
+# The path audit of recent runs: one warning line each, printed only when the run's audit file exists. A stamped
+# file belongs to a run a re-dispatch replaced, so it is skipped. The line never changes an exit status; ws wait
+# writes it from the run's events.
+for pf in $(ls -t "$RUNS"/*.path-audit.txt 2>/dev/null | head -5); do
+  n=$(basename "$pf" .path-audit.txt)
+  case "$n" in *.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z) continue ;; esac
+  echo "  $n: $(head -n1 "$pf")"
 done
 echo
 # The block runs from its heading to the next section; blank lines between its paragraphs are skipped.

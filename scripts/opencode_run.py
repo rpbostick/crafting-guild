@@ -4,9 +4,11 @@
 config   [--temperature T] [--top-p P] <tool>... [--deny <tool>]...
                                        the OpenCode config a builder runs under, from dispatch's Claude-style grants;
                                        T and P set the sampling of OpenCode's build agent (the one `opencode run` uses)
-config   --read-only [--directory <path>]
+config   --read-only [--no-shell] [--directory <path>]...
                                        the OpenCode config a review runs under: reads allowed, everything else denied;
-                                       <path> is a worktree the review reads as an external directory
+                                       <path> is a directory the review reads as an external directory, and may be
+                                       repeated; --no-shell grants no shell command at all, so a document review has
+                                       no interpreter and no way to open a socket
 variants <provider/model>              the model's variant names from `opencode models <provider> --verbose`, one
                                        per line; exit 1 when the model is absent, 2 when the listing cannot be read
 watch    <log> <budget> <pid>          stop <pid> once the step costs in <log> pass <budget> dollars
@@ -146,11 +148,16 @@ def build_config(tools, deny, temperature=None, top_p=None, line=1):
     edit = "allow" if any(tool.startswith("Edit(") for tool in tools) else "deny"
     webfetch = "allow" if "WebFetch" in tools else "deny"
     websearch = "allow" if "WebSearch" in tools else "deny"
+    # A research run may fan its fetches out into subagents (dispatch's Task grant); every other run denies the tool,
+    # because a child session has its own context and its cost and its transcript are not the run's own.
+    # 1.x names the action `task`, 2.x names it `subagent`.
+    fixed = dict(FIXED2 if line == 2 else FIXED)
+    fixed["subagent" if line == 2 else "task"] = "allow" if "Task" in tools else "deny"
     if line == 2:
         cfg = {"$schema": "https://opencode.ai/config.json", "share": "disabled", "autoupdate": False,
-               "permissions": permission_rules(FIXED2, bash, edit, webfetch, websearch)}
+               "permissions": permission_rules(fixed, bash, edit, webfetch, websearch)}
     else:
-        perm = {"*": "deny", **FIXED, "bash": bash, "edit": edit, "webfetch": webfetch, "websearch": websearch}
+        perm = {"*": "deny", **fixed, "bash": bash, "edit": edit, "webfetch": webfetch, "websearch": websearch}
         bad = [key for key, value in perm.items() if value not in ("allow", "deny") and not isinstance(value, dict)]
         bad += [f"bash {key}" for key, value in bash.items() if value not in ("allow", "deny")]
         if bad:
@@ -172,24 +179,32 @@ def build_config(tools, deny, temperature=None, top_p=None, line=1):
     return cfg
 
 
-def build_readonly_config(directory=None, line=1):
-    """A review's config: reads only, no edit, no write, no network tool and no shell command that writes.
+def build_readonly_config(directories=None, line=1, shell=True):
+    """A review's config: reads only, no edit, no write, no network tool and, with `shell`, no shell command that
+    writes.
 
-    A 2.x review runs outside the branch's worktree, so `directory` names the worktree it may read as an external
-    directory; without it every path outside the run's own project stays denied.
+    A 2.x review runs outside the branch's worktree, so `directories` names the trees it may read as external
+    directories; without them every path outside the run's own project stays denied. `shell=False` grants no shell
+    command at all: a document review reads the files it needs with the read tool and recomputes from the rows its
+    prompt carries, so its "no network" promise holds by construction rather than by the reviewer choosing not to
+    open a socket.
     """
     bash = {"*": "deny"}
-    for pattern in READONLY_BASH:
-        bash[pattern] = "allow"
-    for pattern in READONLY_BASH_DENY:
-        bash[pattern] = "deny"
+    if shell:
+        for pattern in READONLY_BASH:
+            bash[pattern] = "allow"
+        # The denies come last: OpenCode applies the last matching rule, so `*--output*` still beats a broader allow.
+        for pattern in READONLY_BASH_DENY:
+            bash[pattern] = "deny"
+    paths = [directories] if isinstance(directories, str) else list(directories or [])
+    external = [os.path.abspath(path).rstrip("/") + "/**" for path in paths if path]
     if line == 2:
-        external = {f"{directory.rstrip('/')}/**": "allow"} if directory else None
         return {"$schema": "https://opencode.ai/config.json", "share": "disabled", "autoupdate": False,
-                "permissions": permission_rules(READONLY_FIXED2, bash, "deny", "deny", "deny", external)}
+                "permissions": permission_rules(READONLY_FIXED2, bash, "deny", "deny", "deny",
+                                                {path: "allow" for path in external} if external else None)}
     perm = {"*": "deny", **READONLY_FIXED, "bash": bash}
-    if directory:
-        perm["external_directory"] = {"*": "deny", f"{directory.rstrip('/')}/**": "allow"}
+    if external:
+        perm["external_directory"] = {"*": "deny", **{path: "allow" for path in external}}
     bad = [key for key, value in perm.items() if value not in ("allow", "deny") and not isinstance(value, dict)]
     bad += [f"bash {key}" for key, value in bash.items() if value not in ("allow", "deny")]
     if bad:
@@ -1318,7 +1333,6 @@ def main(argv):
     cmd, args = argv[0], argv[1:]
     if cmd == "config":
         args = list(args)
-        directory = None
         line = 1
         if "--line" in args:
             index = args.index("--line")
@@ -1331,15 +1345,19 @@ def main(argv):
         readonly = "--read-only" in args
         if readonly:
             args.remove("--read-only")
-            if "--directory" in args:
+            no_shell = "--no-shell" in args
+            if no_shell:
+                args.remove("--no-shell")
+            directories = []
+            while "--directory" in args:
                 index = args.index("--directory")
                 if index + 1 >= len(args):
                     sys.exit("opencode_run: --directory needs a value")
-                directory = os.path.abspath(args[index + 1])
+                directories.append(os.path.abspath(args[index + 1]))
                 del args[index:index + 2]
             if args:
-                sys.exit(f"opencode_run: --read-only takes only --directory, not {' '.join(args)}")
-            print(json.dumps(build_readonly_config(directory, line), indent=2))
+                sys.exit(f"opencode_run: --read-only takes only --no-shell and --directory, not {' '.join(args)}")
+            print(json.dumps(build_readonly_config(directories, line, not no_shell), indent=2))
             return 0
         tools, deny, i = [], [], 0
         temperature = top_p = None

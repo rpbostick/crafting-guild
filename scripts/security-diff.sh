@@ -2,6 +2,8 @@
 # A deterministic scan of a branch's added lines for the merge gate: secrets and committed credential files block,
 # recognisably risky shell spellings are printed for the merge log and do not. Only the diff between two commits is
 # read, so a secret already on the main branch does not block every merge and a large tree costs nothing.
+# WS_SECURITY_DIFF_ALLOW_SECRETS=1 drops the secret-pattern blocks, for a merge whose --allow-secret-scan reason
+# covers the secret scan's findings; credential files and the risky spellings are unaffected.
 # Usage: security-diff.sh --base <ref> [--head <ref>] [--repo <path>]
 # Prints BLOCK <file>:<line> for a blocking finding and FLAG <file>:<line> for a non-blocking one; exits 1 when
 # anything is blocked.
@@ -53,6 +55,10 @@ credential_file() { # <path>
 added_files=$(git -C "$repo" diff --name-status --no-renames --diff-filter=A "$base...$head") || {
   echo "security-diff: cannot list the files added by $base...$head in $repo" >&2; exit 2; }
 secret_hits=$(printf '%s\n' "$added" | grep -E -- "$secret_pat" | awk -F'\t' '{ print $1 ":" $2 }')
+# merge.sh sets this only when an --allow-secret-scan reason covers the secret scan's findings: those same patterns
+# then do not block twice, while a committed credential file below still does. Deliberate: the override is recorded
+# in the merge subject, and only the branch's own diff is read.
+[ "${WS_SECURITY_DIFF_ALLOW_SECRETS:-}" = 1 ] && secret_hits=""
 file_hits=$(printf '%s\n' "$added_files" | while IFS=$'\t' read -r _ path; do
   [ -n "$path" ] || continue
   credential_file "$path" && printf '%s:1\n' "$path"

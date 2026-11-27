@@ -77,6 +77,13 @@ WS_REVIEW_MEM="${WS_REVIEW_MEM:-3G}"   # memory cap for a shadow review and ever
 # OpenCode Go limits, one per model and window: <provider/model>=<5h>,<7d>,<30d> in dollars, space-separated. From
 # opencode.ai/docs/go: 20%, 50% and 100% of a model's monthly dollars (Flash $100, Pro $15). ws allowance reads them.
 WS_ALLOWANCE_LIMITS="${WS_ALLOWANCE_LIMITS-opencode-go/deepseek-v4.1-flash=20,50,100 opencode-go/deepseek-v4-pro=3,7.5,15}"
+# Prices for the messages OpenCode stores with cost 0: <provider/model>=<input>,<output>,<cache read>,<cache write>,
+# <reasoning> in USD per 1M tokens, space-separated. Fitted 2026-11-24 on the client's own priced messages: a
+# least-squares fit over the token classes reproduces each priced message's stored cost with a median absolute error
+# of $0. Cache write is $0.00 for flash and pro, so adding it leaves their fit unchanged, and $0.25 for luna, whose
+# rows stored with cost 0 would otherwise drop their cache writes.
+# A model with no row here whose stored cost is 0 is unmeasured, never $0.
+WS_ALLOWANCE_PRICES="${WS_ALLOWANCE_PRICES-opencode-go/deepseek-v4.1-flash=0.15,0.6,0.003,0,0.6 opencode-go/deepseek-v4-pro=0.66,1.98,0.022,0,1.98 opencode-go/gpt-5.6-luna=0.2,1.2,0.02,0.25,1.2}"
 WS_ALLOWANCE_HOLD="${WS_ALLOWANCE_HOLD-80}"   # percent of the summed window total past which ws bench run waits, ws review-compare stops and shadow reviews are skipped; chains, dispatches and sessions only warn
 WS_ALLOWANCE_STARTS="${WS_ALLOWANCE_STARTS-}"   # <5h-epoch>,<7d-epoch>,<30d-epoch> from the Go Console; empty = rolling windows
 WS_ALLOWANCE_DB="${WS_ALLOWANCE_DB-$HOME/.local/share/opencode/opencode.db}"   # OpenCode's database, read-only; empty = the meter is off and nothing is held

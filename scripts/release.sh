@@ -7,7 +7,7 @@
 # Each release commit has exactly main's tree (or the RELEASE_PATHS part of it), so nothing that is not on main
 # can reach the public side.
 #   1. main checkout clean (generated files the gate rewrites are listed by git status; restore or commit them)
-#   2. version from package.json (tag vX.Y.Z); refuse a tag that already exists on `public`
+#   2. version from package.json or VERSION (X.Y.Z or a release date YYYY.MM.DD, tag v<version>); refuse a tag that already exists on `public`
 #   3. audit the lines main adds since the last public release: home paths, the user name, e-mail addresses,
 #      private keys and tokens, and attribution (WS_ATTRIBUTION_RE outside licence and credit files); any hit stops
 #   4. push main to origin; commit main's tree on public-release (parent: the previous release, or none for the
@@ -34,6 +34,46 @@ if [ -f "$PROJECT_PATH/package.json" ]; then
   version=$(node -p "require('$PROJECT_PATH/package.json').version" 2>/dev/null) || die "cannot read the version from package.json"
 elif [ -f "$PROJECT_PATH/VERSION" ]; then version=$(tr -d ' \n' < "$PROJECT_PATH/VERSION")
 else die "$SLUG has no package.json or VERSION to read a version from"; fi
+# A public version is the project's own SemVer (X.Y.Z) or a release date (Year.Month.Day, one version per release
+# day). This workspace releases by date, but `ws release` is used by every registered project, so the date rule
+# applies only to a date-shaped version: a four-digit first field is checked against the calendar, while a SemVer
+# version is left to its project's own scheme. Development carries a fourth field counting local bumps inside an
+# unreleased version (2026.11.26.001, 2026.11.26.002), so the working tree never pretends to be a release;
+# publishing means setting the release version first. The release commit holds exactly main's tree, which is why
+# this refuses rather than rewriting VERSION on the way out.
+case "$version" in
+  *[!0-9.]*|.*|*.|*..*) die "cannot read a version from $version (expected X.Y.Z or YYYY.MM.DD, or X.Y.Z.NNN while developing)" ;;
+esac
+case "$version" in
+  *.*.*.*.*) die "cannot read a version from $version (expected X.Y.Z or YYYY.MM.DD)" ;;
+  *.*.*.*) die "VERSION is $version: a development version. Set it to ${version%.*} before a public release, and bump the fourth number again afterwards" ;;
+esac
+case "$version" in
+  [0-9]*.[0-9]*.[0-9]*) ;;
+  *) die "VERSION is $version: a public release needs X.Y.Z or Year.Month.Day (YYYY.MM.DD)" ;;
+esac
+# A date-shaped version has four digits in its first field; only then is it checked against the calendar (month
+# length and leap year), because the shape alone admits 2026.13.40 and 2026.02.30. A public tag always names a day
+# that exists, since a tag cannot be moved once it is public. Pure shell rather than `date -d`, which BSD date lacks.
+first=${version%%.*}
+case "$first" in
+  [0-9][0-9][0-9][0-9])
+    year=$first; month=${version#*.}; month=${month%%.*}; day=${version##*.}
+    month=$((10#$month)); day=$((10#$day)); year=$((10#$year))
+    case "$month" in
+      1|3|5|7|8|10|12) last_day=31 ;;
+      4|6|9|11) last_day=30 ;;
+      2) if { [ $((year % 4)) -eq 0 ] && [ $((year % 100)) -ne 0 ]; } || [ $((year % 400)) -eq 0 ]; then
+           last_day=29
+         else
+           last_day=28
+         fi ;;
+      *) last_day=0 ;;
+    esac
+    { [ "$month" -ge 1 ] && [ "$month" -le 12 ] && [ "$day" -ge 1 ] && [ "$day" -le "$last_day" ]; } \
+      || die "VERSION is $version: not a date in the calendar; a public release needs Year.Month.Day (YYYY.MM.DD)"
+    ;;
+esac
 tag="v$version"
 git_ remote get-url public >/dev/null 2>&1 || die "$SLUG has no 'public' remote (git -C $PROJECT_PATH remote add public <url of the public repository>)"
 public_url=$(git_ remote get-url public)
@@ -82,18 +122,22 @@ else
   base=$(git_ hash-object -t tree /dev/null)   # first release: audit everything on main
 fi
 
-# 3. audit the added lines
-added=$(git_ diff "$base" "$rel_tree" | grep -E '^\+[^+]' || true)
+# 3. audit the added lines. A diff line's leading `+` is not content: left in, a decorator such as
+# `@pkg.name` reads as an address with the `+` as its local part, and any marker after it still matches. Strip
+# exactly one prefix character and let grep -n re-prefix each line with its number, so a hit keeps the
+# `<n>:<line>` shape and the number still counts the added lines.
+added_lines() { git_ diff "$base" "$rel_tree" "$@" | grep -E '^\+[^+]' | sed 's/^+//' || true; }
+added=$(added_lines)
 hits=$(printf '%s\n' "$added" | grep -nF -e "$HOME" -e "/$USER/" -e "-of-$USER" | head -5)
 # Third-party licence texts, manifests and lockfiles carry other authors' addresses; the e-mail check skips them,
 # as the attribution check does.
 mapfile -t mail_exempt < <(attribution_exempt)
-added_own=$(git_ diff "$base" "$rel_tree" -- . "${mail_exempt[@]}" | grep -E '^\+[^+]' || true)
+added_own=$(added_lines -- . "${mail_exempt[@]}")
 hits+=$(printf '%s\n' "$added_own" | grep -nE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' | grep -viE 'noreply@|@example\.|@users\.noreply|git@github\.com' | head -5)
 hits+=$(printf '%s\n' "$added" | grep -nE 'BEGIN (RSA|OPENSSH|EC|PGP|PRIVATE)|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}' | head -5)
 if [ -n "${WS_ATTRIBUTION_RE:-}" ]; then
   mapfile -t exempt < <(attribution_exempt)
-  attrib=$(git_ diff "$base" "$rel_tree" -- . "${exempt[@]}" | grep -E '^\+[^+]' | grep -iE "$WS_ATTRIBUTION_RE" | head -5 || true)
+  attrib=$(added_lines -- . "${exempt[@]}" | grep -nE "$WS_ATTRIBUTION_RE" | head -5 || true)
   hits+="$attrib"
 fi
 lines=$(printf '%s\n' "$added" | grep -c . || true)
@@ -134,12 +178,14 @@ git_ push -q public "refs/heads/public-release:refs/heads/main" "refs/tags/publi
 echo "published $tag to $public_repo ($(git_ rev-parse --short "$commit"))"
 
 # 5. markers: the private commit this release came from (for ws rollback and history), and, with
-# RELEASE_MAJOR_BRANCHES=1, a branch v<major> on the public repository that follows the newest release of
-# that major version, so users can stay on a major version and still get its fixes.
+# RELEASE_MAJOR_BRANCHES=1, a branch v<era> on the public repository that follows the newest release of that era,
+# so users can stay on an era and still get its fixes. A date version has no major number of its own, so the era
+# line (ERA, written as one line beside VERSION) supplies it; without one the version's first field is used.
 git_ tag -a "released-$tag" "$PROJECT_BRANCH" -m "$msg: the private commit published as $tag" && git_ push -q origin "refs/tags/released-$tag" \
   || echo "ws: could not tag or push released-$tag in the private repository" >&2
 if [ "${RELEASE_MAJOR_BRANCHES:-}" = 1 ]; then
-  major="v${version%%.*}"
+  era=""; [ -s "$PROJECT_PATH/ERA" ] && era=$(tr -d ' \n' < "$PROJECT_PATH/ERA")
+  major="v${era:-${version%%.*}}"
   { git_ push -q public "$commit:refs/heads/$major" 2>&1 | grep -v "^remote:" || true; }; echo "public branch $major now at $tag"
 fi
 

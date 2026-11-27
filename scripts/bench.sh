@@ -24,6 +24,9 @@ set -uo pipefail
 PY="$WS/scripts/bench.py"
 # The repo whose history holds the task files as dispatched: this workspace (the selftest points it at a scratch repo).
 HIST="${WS_TASK_HISTORY:-$WS}"
+# The repo an arm's git ref and its builder sheets are read from: this workspace (the selftest points it at a scratch
+# repo holding a commit with no sheet, the shape a bad ref leaves).
+ARM_REPO="${WS_BENCH_ARM_REPO:-$WS}"
 proj=""; [ "${1:-}" = --project ] && { proj="$2"; shift 2; }
 sub="${1:-}"; shift || true
 
@@ -310,14 +313,52 @@ run_one() { # <task> <arm> <trial>
   else echo "bench: $run done: tests $tests, review $(jq -r '.verdict // "none"' "$review" 2>/dev/null || echo none) (judge ${REVIEW:-default})"; fi
 }
 
-# An arm's instructions as a directory dispatch --instructions reads. A git ref is written out from the workspace at
-# the commit arms.tsv holds for it; a directory is used as it is. Trailing ,agent=<claude|opencode>, ,model=<id>,
-# ,temp=<T>, ,top_p=<P> and ,effort=<E> choose the builder, its sampling and its model variant; without them the arm
-# runs as dispatch decides (Claude unless WS_AGENT says otherwise). arms.tsv: label, spec, resolved ref, agent, model,
-# temp, top_p, effort; a row from before arms had an agent has three fields and is read as agent claude with the
-# default model and no sampling, one from before effort as having none.
+# An arm's instructions under arms/ as dispatch --instructions reads them: written into a temporary directory beside
+# the arm's own and moved into place only once every file is there, so a failed copy never leaves a directory that a
+# later run mistakes for a complete arm. Args: <label> <source directory, empty for a git ref> <commit of a git ref>.
+copy_arm() {
+  local label="$1" src="$2" sha="$3" tmp="$BENCH/arms/$1.tmp.$$" f
+  mkdir -p "$BENCH/arms" || die "arm $label: cannot create $BENCH/arms"
+  rm -rf "$tmp"
+  if [ -n "$src" ]; then
+    cp -r "$src" "$tmp" || { rm -rf "$tmp"; die "arm $label: cannot copy $src"; }
+  else
+    mkdir -p "$tmp/agents" "$tmp/lessons" || { rm -rf "$tmp"; die "arm $label: cannot create $tmp"; }
+    git -C "$ARM_REPO" show "$sha:agents/builder.md" > "$tmp/agents/builder.md" \
+      || { rm -rf "$tmp"; die "arm $label: no agents/builder.md at $sha"; }
+    while IFS= read -r f; do
+      case "$(basename "$f")" in
+        builder*.md) git -C "$ARM_REPO" show "$sha:$f" > "$tmp/$f" || { rm -rf "$tmp"; die "arm $label: cannot read $f at $sha"; } ;;
+      esac
+    done < <(git -C "$ARM_REPO" ls-tree --name-only "$sha" lessons/)
+    [ -f "$tmp/lessons/builder.md" ] || { rm -rf "$tmp"; die "arm $label: no lessons/builder.md at $sha"; }
+  fi
+  rm -rf "$BENCH/arms/$label"
+  mv "$tmp" "$BENCH/arms/$label" || { rm -rf "$tmp"; die "arm $label: cannot move $tmp to $BENCH/arms/$label"; }
+}
+
+# Whether a kept arm copy holds the sheets dispatch --instructions reads. A directory arm is accepted with either
+# sheet and copy_arm copies such a directory whole, so its copy is complete with either one; copy_arm writes both for
+# a git ref, so a ref copy missing either is half-written.
+arm_copy_complete() { # <copy> <dir|ref>
+  local copy="$1" kind="$2"
+  if [ "$kind" = dir ]; then
+    [ -f "$copy/agents/builder.md" ] || [ -f "$copy/lessons/builder.md" ]
+  else
+    [ -f "$copy/agents/builder.md" ] && [ -f "$copy/lessons/builder.md" ]
+  fi
+}
+
+# An arm's instructions as a directory dispatch --instructions reads. A git ref is written out from the arm repo at
+# the commit arms.tsv holds for it; a directory is used as it is, looked up in the caller's directory first and then in
+# the workspace (a bench started by `ws bg run` runs from runs/<slug>). Trailing ,agent=<claude|opencode>,
+# ,model=<id>, ,temp=<T>, ,top_p=<P> and ,effort=<E> choose the builder, its sampling and its model variant; without
+# them the arm runs as dispatch decides (Claude unless WS_AGENT says otherwise). arms.tsv: label, spec, resolved ref,
+# agent, model, temp, top_p, effort; a row from before arms had an agent has three fields and is read as agent claude
+# with the default model and no sampling, one from before effort as having none. The spec is kept as it was given, so a
+# resumed bench compares like with like.
 resolve_arm() { # <label=spec[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E]> <dry> -> sets ARM_DIR, ARM_AGENT, ARM_MODEL, ARM_TEMP, ARM_TOP_P, ARM_EFFORT [label], prints a description
-  local label="${1%%=*}" spec="${1#*=}" dry="$2" kept sha f agent="" model="" temperature="" top_p="" effort="" key was want kept_temp kept_top kept_effort
+  local label="${1%%=*}" spec="${1#*=}" dry="$2" kept sha f agent="" model="" temperature="" top_p="" effort="" key was want kept_temp kept_top kept_effort specdir="" relative="" repoword=workspace arm_kind=ref
   [ "$label" != "$1" ] && [ -n "$label" ] && [ -n "$spec" ] || die "an arm is <label>=<git-ref|dir>[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E], not '$1'"
   case "$label" in *[!A-Za-z0-9._-]*) die "bad arm label '$label'" ;; recorded) die "the arm label 'recorded' is the recorded baseline (report --baseline recorded); use another" ;; esac
   while [[ "$spec" =~ ^(.+),(agent|model|temp|top_p|effort)=([^,]*)$ ]]; do
@@ -352,27 +393,47 @@ resolve_arm() { # <label=spec[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E]>
     fi
     [ "$was" = "$want" ] || die "arm $label was $was in earlier runs, not $want; use another label"
   fi
+  # The spec is a directory when it names one, as given or under the workspace, and a git ref in the arm repo
+  # otherwise.
   if [ -d "$spec" ]; then
-    [ -f "$spec/agents/builder.md" ] || [ -f "$spec/lessons/builder.md" ] || die "arm $label: $spec has neither agents/builder.md nor lessons/builder.md"
-    ARM_DIR[$label]="$(cd "$spec" && pwd)"; echo "arm $label: directory ${ARM_DIR[$label]}${agent:+, agent $agent}${model:+, model $model}${temperature:+, temp $temperature}${top_p:+, top_p $top_p}${effort:+, effort $effort}"
+    specdir=$(cd "$spec" && pwd)
+    case "$spec" in /*) ;; *) relative="$PWD" ;; esac
+  elif [ "${spec#/}" = "$spec" ] && [ -d "$WS/$spec" ]; then
+    specdir=$(cd "$WS/$spec" && pwd); relative="$WS"
+  fi
+  [ -n "$specdir" ] && arm_kind=dir
+  # A kept arm's copy is used as it is; a half-written one (a copy that failed) is named here rather than left for
+  # dispatch, which would report the copy instead of the real failure.
+  if [ -n "$kept" ] && [ -d "$BENCH/arms/$label" ] && ! arm_copy_complete "$BENCH/arms/$label" "$arm_kind"; then
+    die "the arm copy at $BENCH/arms/$label is incomplete; remove it to recopy from $spec"
+  fi
+  if [ -n "$specdir" ]; then
+    [ -f "$specdir/agents/builder.md" ] || [ -f "$specdir/lessons/builder.md" ] || die "arm $label: $spec has neither agents/builder.md nor lessons/builder.md"
+    ARM_DIR[$label]="$specdir"
+    echo "arm $label: directory $specdir${relative:+ (relative to $relative)}${agent:+, agent $agent}${model:+, model $model}${temperature:+, temp $temperature}${top_p:+, top_p $top_p}${effort:+, effort $effort}"
     $dry && return 0
     # Dispatch reads a copy under arms/, taken at the first run: later edits to the directory do not reach a resumed bench.
     [ -n "$kept" ] && [ -d "$BENCH/arms/$label" ] && return 0
+    copy_arm "$label" "$specdir" ""
     [ -n "$kept" ] || printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$label" "$spec" "${ARM_DIR[$label]}" "$agent" "$model" "$temperature" "$top_p" "$effort" >> "$BENCH/arms.tsv"
-    rm -rf "$BENCH/arms/$label"; mkdir -p "$BENCH/arms"; cp -r "${ARM_DIR[$label]}" "$BENCH/arms/$label"
     return 0
   fi
-  if [ -n "$kept" ]; then sha=$(cut -f3 <<< "$kept"); else sha=$(git -C "$WS" rev-parse --verify -q "$spec^{commit}") || die "arm $label: $spec is neither a directory nor a workspace git ref"; fi
-  echo "arm $label: workspace $spec at $(git -C "$WS" rev-parse --short "$sha")${agent:+, agent $agent}${model:+, model $model}${temperature:+, temp $temperature}${top_p:+, top_p $top_p}${effort:+, effort $effort}"
+  if [ -n "$kept" ]; then sha=$(cut -f3 <<< "$kept"); else
+    sha=$(git -C "$ARM_REPO" rev-parse --verify -q "$spec^{commit}" 2>/dev/null) || {
+      case "$spec" in
+        /*) die "arm $label: $spec is not a directory and not a commit in $ARM_REPO" ;;
+        *) die "arm $label: $spec is not a directory at $PWD/$spec or $WS/$spec, and not a commit in $ARM_REPO" ;;
+      esac
+    }
+  fi
+  # The message names no absolute path: a bench's log can be committed by a test tree, and a home path in one fails
+  # the release audit.
+  [ "$ARM_REPO" = "$WS" ] || repoword="arm lib"
+  echo "arm $label: $repoword $spec at $(git -C "$ARM_REPO" rev-parse --short "$sha")${agent:+, agent $agent}${model:+, model $model}${temperature:+, temp $temperature}${top_p:+, top_p $top_p}${effort:+, effort $effort}"
   $dry && return 0
   [ -n "$kept" ] && [ -d "$BENCH/arms/$label" ] && return 0
+  copy_arm "$label" "" "$sha"
   [ -n "$kept" ] || printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$label" "$spec" "$sha" "$agent" "$model" "$temperature" "$top_p" "$effort" >> "$BENCH/arms.tsv"
-  rm -rf "$BENCH/arms/$label"; mkdir -p "$BENCH/arms/$label/agents" "$BENCH/arms/$label/lessons"
-  git -C "$WS" show "$sha:agents/builder.md" > "$BENCH/arms/$label/agents/builder.md" || die "arm $label: no agents/builder.md at $sha"
-  while IFS= read -r f; do
-    case "$(basename "$f")" in builder*.md) git -C "$WS" show "$sha:$f" > "$BENCH/arms/$label/$f" ;; esac
-  done < <(git -C "$WS" ls-tree --name-only "$sha" lessons/)
-  [ -f "$BENCH/arms/$label/lessons/builder.md" ] || die "arm $label: no lessons/builder.md at $sha"
 }
 
 # A review on Claude needs the CLI signed in. An unsigned one produces no review, or one that names another agent, so
@@ -388,7 +449,7 @@ review_judge_claude() {
 bench_run() {
   local slug="${1:-}"; [ -n "$slug" ] && [ "${slug#-}" = "$slug" ] || die "usage: ws bench run <slug> --arm <label>=<git-ref|dir>[,agent=A][,model=M][,temp=T][,top_p=P][,effort=E] --arm ... [--review none|claude|opencode] [--plain] [--trials N] [--parallel P] [--dry-run] [tasks...]"
   shift
-  local trials=1 par=1 dry=false a t tr row total=0 already=0 failed=0 label plain_flag=""; local -a arms=() tasks=() rows=()
+  local trials=1 par=1 dry=false a t tr row total=0 already=0 failed=0 label plain_flag="" holder d pruned=0; local -a arms=() tasks=() rows=()
   # No --review means the install's own judge: review.sh's WS_REVIEW_AGENT, or whatever it picks when that is empty.
   # An empty REVIEW passes no --agent.
   REVIEW="${WS_REVIEW_AGENT:-}"; review_flag=false
@@ -414,6 +475,25 @@ bench_run() {
   [ ${#tasks[@]} -gt 0 ] || mapfile -t tasks < <(awk -F'\t' 'NR>1{print $1}' "$CORPUS")
   for t in "${tasks[@]}"; do [ -n "$(corpus_field "$t" base)" ] || die "$t is not in plans/$SLUG/bench/corpus.tsv"; done
   $dry || mkdir -p "$BENCH"
+  # The run guard is a lock held for the whole run, not a pid file read and then written: two starts in the same
+  # instant both read no live pid, both write, and both copy the same arm. A start that finds the lock held names the
+  # pid inside it and stops before it touches a copy. A dry run takes no guard and writes nothing.
+  if ! $dry; then
+    exec 9>>"$BENCH/run.pid" || die "cannot open $BENCH/run.pid for the run guard"
+    if ! flock -n 9; then
+      holder=$(cat "$BENCH/run.pid" 2>/dev/null); die "a bench is already running for $SLUG${holder:+ (pid $holder)}"
+    fi
+    echo $$ > "$BENCH/run.pid"; trap 'rm -f "$BENCH/run.pid"' EXIT
+    # A copy killed after its mkdir/cp (SIGKILL, OOM) leaves arms/<label>.tmp.<pid> that no later run would remove:
+    # the pid is in the name, so a dead one's leftover goes here.
+    pruned=0
+    for d in "$BENCH"/arms/*.tmp.*; do
+      [ -d "$d" ] || continue
+      kill -0 "${d##*.}" 2>/dev/null && continue
+      rm -rf "$d"; pruned=$((pruned + 1))
+    done
+    [ "$pruned" = 0 ] || echo "bench: removed $pruned stale arm copy left by a killed run"
+  fi
   declare -gA ARM_DIR=() ARM_AGENT=() ARM_MODEL=() ARM_TEMP=() ARM_TOP_P=() ARM_EFFORT=()
   local -a labels=()
   for a in "${arms[@]}"; do resolve_arm "$a" "$dry" || exit 1; labels+=("${a%%=*}"); done
@@ -435,15 +515,14 @@ bench_run() {
     done
     return 0
   fi
-  if pid_file_alive "$BENCH/run.pid"; then die "a bench is already running for $SLUG (pid $(cat "$BENCH/run.pid"))"; fi
-  echo $$ > "$BENCH/run.pid"; trap 'rm -f "$BENCH/run.pid"' EXIT
   for row in "${rows[@]}"; do IFS=$'\t' read -r t label tr <<< "$row"; [ "$(python3 "$PY" runs-get "$TSV" "$t" "$label" "$tr" | cut -f2)" = "done" ] && already=$((already + 1)); done
   echo "bench: $already of $total runs already done; $((total - already)) to run, $par at a time"
   for row in "${rows[@]}"; do
     IFS=$'\t' read -r t label tr <<< "$row"
     while [ "$(jobs -rp | wc -l)" -ge "$par" ]; do wait -n || failed=1; done
     [ "$failed" = 0 ] || break
-    run_one "$t" "$label" "$tr" &
+    # The run guard's descriptor is not passed on: a detached child that outlived the bench would keep the lock.
+    run_one "$t" "$label" "$tr" 9>&- &
   done
   while [ "$(jobs -rp | wc -l)" -gt 0 ]; do wait -n || failed=1; done
   [ "$failed" = 0 ] || die "a run failed (above); fix the cause and run the bench again: finished runs are kept"

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Check that every merge on a project branch since a date kept the record's invariants: the subject names the
 # reviewed SHA and the step; a review at that SHA says merge; a merge test run is on record; no unreasoned
-# --no-review and no unreasoned --no-look (an override with a reason is a sanctioned one); with --passes N a merge
-# that changes code was reviewed with at least N passes.
+# --no-review, --no-look or --allow-secret-scan (an override with a reason is a sanctioned one); with --passes N a
+# merge that changes code was reviewed with at least N passes.
 # --merge <sha> checks that one merge alone, which is what merge.sh runs on the merge it is making: a whole-history
 # run reports merges that predate the records and would block every merge. It also names a branch that moved away
 # from the merged tip, which a history run cannot see (the branch is gone by then).
@@ -75,6 +75,15 @@ while IFS=$'\t' read -r sha parents _ subject; do
   rest="${parents#* }"; tip="${rest%% *}"
   mshort="${sha:0:7}"
   name="" kind="" reviewed="" no_review_reason="" no_look_reason="" no_look_present=false
+  secret_scan_reason="" secret_scan_present=false
+  # The --allow-secret-scan marker comes last in the subject, so it is split before the --no-look one; the text left
+  # may still be a --no-look subject, which the next split completes.
+  if [[ "$subject" =~ $WS_SECRET_SCAN_RE ]]; then
+    before_reason="${BASH_REMATCH[1]})"; after_reason="${BASH_REMATCH[2]}"
+    if [[ "$before_reason" =~ $WS_MERGE_SUBJECT_RE || "$before_reason" =~ $WS_NO_LOOK_RE ]]; then
+      subject="$before_reason"; secret_scan_reason="$after_reason"; secret_scan_present=true
+    fi
+  fi
   if [[ "$subject" =~ $WS_NO_LOOK_RE ]]; then
     before_reason="${BASH_REMATCH[1]})"; after_reason="${BASH_REMATCH[2]}"
     if [[ "$before_reason" =~ $WS_MERGE_SUBJECT_RE ]]; then subject="$before_reason"; no_look_reason="$after_reason"; no_look_present=true; fi
@@ -144,6 +153,9 @@ while IFS=$'\t' read -r sha parents _ subject; do
   fi
   if $no_look_present && [ -z "${no_look_reason//[[:space:]]/}" ]; then
     add_failure no-look "$mshort" "$name" "--no-look carries no reason"
+  fi
+  if $secret_scan_present && [ -z "${secret_scan_reason//[[:space:]]/}" ]; then
+    add_failure secret-scan "$mshort" "$name" "--allow-secret-scan carries no reason"
   fi
   # Only a one-merge run can see this: history runs find the branch deleted after its merge. A branch that moved
   # past the merged tip during the test run means commits the merge does not carry, which nothing else would name.

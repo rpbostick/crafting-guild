@@ -11,7 +11,9 @@
 # findings and suggestions, deduped by file and a line within 5 for the same fault (blocking) or by line alone
 # (suggestions), a suggestion dropped when a blocking finding names the same fault, and the strictest verdict. Two or
 # three passes run at the same time and are unioned in pass order. Each pass keeps its own files beside the record
-# (<record>.pass<i>.json and its .raw). Every record carries `passes`: 1 for a one-pass review,
+# (<record>.pass<i>.json and its .raw); a pass retried once writes <record>.pass<i>.retry1.json.raw and
+# <record>.pass<i>.retry1.err beside them, so no attempt truncates a log another attempt may still be writing. Every
+# record carries `passes`: 1 for a one-pass review,
 # so a reader can tell its count apart from a review written before the field existed. A review written beside a record
 # (--out) runs one pass unless --passes says otherwise, so a shadow or a comparison stays one review per arm.
 # --worktree, --base and --out are used by review-compare: review another checkout and write beside the record.
@@ -177,12 +179,23 @@ oc_prompt="$RUNS/$name.review-prompt.txt"
 # Beside a record (a shadow, review-compare) key both by the out base: another review of the same name can run
 # at the same time.
 if [ -n "$out_base" ]; then oc_config="$out_base.opencode-review.json"; oc_prompt="$out_base.review-prompt.txt"; fi
-# One review on the chosen agent, logged to <raw> and <err>. Sets so (the structured review), result_line (OpenCode's
-# result event) and pass_cost; returns 2 after printing why when the run gave no review.
-run_pass() { # <raw> <err> <opencode config> <opencode prompt>
-  local raw="$1" err="$2" cfg="$3" pf="$4" fallback
-  local -a cmd
-  result_line=""
+# The result lines a client wrote into a raw log. `grep -a` keeps a log whose truncation left NUL bytes from being
+# reported as a binary match instead of its lines, and `fromjson?` drops a line a partial or interleaved write left
+# unparsable, so a whole line written after it still counts.
+review_result_lines() { # <raw>
+  tr -d '\000' < "$1" 2>/dev/null | grep -a '"type":"result"' | jq -R -c 'fromjson? // empty' 2>/dev/null
+}
+review_last_result_line() { review_result_lines "$1" | tail -1; }
+review_structured_output() { review_result_lines "$1" | jq -c 'select(.structured_output != null) | .structured_output' 2>/dev/null | tail -1; }
+# One review on the chosen agent, logged to <raw> and <err>. A retry names the attempt it repeats in <earlier raw>,
+# newest first; the review is taken from the first of those logs that holds one, so a retry that wrote nothing usable
+# does not throw away the attempt's review. Sets so (the structured review), result_line (OpenCode's result event) and
+# pass_cost; returns 2 after printing why when no log gave a review.
+run_pass() { # <raw> <err> <opencode config> <opencode prompt> [<earlier attempt raw>...]
+  local raw="$1" err="$2" cfg="$3" pf="$4" fallback r rs
+  local -a cmd raws
+  raws=("$raw"); shift 4; raws+=("$@")
+  result_line=""; so=""
   if [ "$agent" = opencode ]; then
     # A 2.x review runs from the workspace (see opencode-review.sh), so its config grants read access to the
     # branch's worktree as an external directory; a 1.x review still runs inside the worktree and needs no grant.
@@ -195,8 +208,6 @@ run_pass() { # <raw> <err> <opencode config> <opencode prompt>
     [ -n "$variant" ] && cmd+=(--variant "$variant")
     cmd+=("$pf")
     ( cd "$wt" && timeout --kill-after=30s 30m "${cmd[@]}" ) < /dev/null > "$raw" 2>"$err" || true
-    result_line=$(grep '"type":"result"' "$raw" | tail -1)
-    so=$(printf '%s' "$result_line" | jq -c '.structured_output // empty' 2>/dev/null)
   else
     cmd=(claude -p "$prompt" --restricted --permission-prompts none --json-schema "$(cat "$WS/schema/review.json")"
       --max-budget-usd "$budget" --output-format json --name "ws:$SLUG:review:$name")
@@ -212,6 +223,18 @@ run_pass() { # <raw> <err> <opencode config> <opencode prompt>
       so=$(jq -c '.structured_output // empty' "$raw" 2>/dev/null)
     fi
   fi
+  # The log this attempt just wrote first, then the attempt a retry repeats: the first one that holds a review wins.
+  for r in "${raws[@]}"; do
+    [ -f "$r" ] || continue
+    if [ "$agent" = opencode ]; then
+      rs=$(review_structured_output "$r")
+      if [ -n "$rs" ]; then so="$rs"; result_line=$(review_last_result_line "$r"); break; fi
+      [ -n "$result_line" ] || result_line=$(review_last_result_line "$r")
+    else
+      rs=$(jq -c '.structured_output // empty' "$r" 2>/dev/null)
+      if [ -n "$rs" ] && [ "$rs" != "null" ]; then so="$rs"; break; fi
+    fi
+  done
   if [ -z "$so" ] || [ "$so" = "null" ]; then
     if [ "$agent" = opencode ]; then
       echo "review failed: $(printf '%s' "$result_line" | jq -r '.result // .subtype // "no output"' 2>/dev/null | head -c 300)"
@@ -224,11 +247,12 @@ run_pass() { # <raw> <err> <opencode config> <opencode prompt>
 }
 # One pass in its own subshell: run it, write its record, then leave its cost and status in files keyed by the pass.
 # The passes share no state beyond these files, so they can run at the same time without overwriting each other's
-# `so`, `result_line` and `pass_cost`.
-run_pass_job() { # <i> <status file> <cost file> <raw> <err> <opencode config> <opencode prompt>
+# `so`, `result_line` and `pass_cost`. Any raw after the seventh argument is an earlier attempt of the same pass, which
+# a retry falls back on when its own run gave no review.
+run_pass_job() { # <i> <status file> <cost file> <raw> <err> <opencode config> <opencode prompt> [<earlier raw>...]
   local i="$1" status="$2" costf="$3" pass_out
   pass_out="${out%.json}.pass$i.json"
-  run_pass "$4" "$5" "$6" "$7" || { echo "fail" > "$status"; return 2; }
+  run_pass "$4" "$5" "$6" "$7" "${@:8}" || { echo "fail" > "$status"; return 2; }
   jq -n --arg sha "$tip" --arg when "$(now_local)" --argjson r "$so" '{reviewed_sha:$sha, when:$when} + $r' > "$pass_out" \
     || { echo "fail" > "$status"; return 2; }
   printf '%s\n' "$pass_cost" > "$costf"
@@ -251,22 +275,27 @@ else
   for pid in "${pass_pids[@]}"; do wait "$pid" || true; done
   # A pass that dies on a transient OpenCode server error is retried once, after the other passes finish, so one bad
   # pass no longer fails a whole review. A usage-limit pass fails again at once and the chain's limit path takes over.
+  # The retry writes its own raw and err files: a retried attempt's log may still be open and must not be truncated
+  # under it, and a log holding two sessions' events cannot be read cleanly either way.
   if [ "${WS_REVIEW_PASS_RETRY:-1}" -gt 0 ]; then
     for i in $(seq 1 "$passes"); do
       status="${out%.json}.pass$i.status"
       [ "$(cat "$status" 2>/dev/null)" != "ok" ] || continue
-      note "pass $i failed; retrying it once"
+      attempt_raw="${out%.json}.pass$i.json.raw"
+      retry_raw="${out%.json}.pass$i.retry1.json.raw"
+      retry_err="${errf%.err}.pass$i.retry1.err"
+      note "pass $i failed; retrying it once (raw: ${retry_raw#"$RUNS/"}; err: ${retry_err#"$RUNS/"})"
       sleep "${WS_REVIEW_PASS_RETRY_DELAY:-5}"
       : > "$status"
-      run_pass_job "$i" "$status" "${out%.json}.pass$i.cost" "${out%.json}.pass$i.json.raw" "${errf%.err}.pass$i.err" \
-        "${oc_config%.json}.pass$i.json" "${oc_prompt%.txt}.pass$i.txt" >> "${errf%.err}.pass$i.err" 2>&1 || true
+      run_pass_job "$i" "$status" "${out%.json}.pass$i.cost" "$retry_raw" "$retry_err" \
+        "${oc_config%.json}.pass$i.json" "${oc_prompt%.txt}.pass$i.txt" "$attempt_raw" >> "$retry_err" 2>&1 || true
     done
   fi
   failed=0
   for i in $(seq 1 "$passes"); do
     if [ "$(cat "${out%.json}.pass$i.status" 2>/dev/null)" != "ok" ]; then
       echo "pass $i of $passes failed; no union written"
-      grep -m1 '^review failed:' "${errf%.err}.pass$i.err" 2>/dev/null || true
+      grep -h -m1 '^review failed:' "${errf%.err}.pass$i.err" "${errf%.err}.pass$i".retry*.err 2>/dev/null | head -1 || true
       failed=1
     fi
   done

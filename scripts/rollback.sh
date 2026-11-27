@@ -2,7 +2,7 @@
 # Put the project's published files back to a public release, as one new commit on main. Nothing else
 # changes: with RELEASE_PATHS, files outside them (plans, project confs, private lessons) stay as they are.
 # History is kept, so the rollback itself can be reverted.
-# Usage: rollback.sh [--project slug] [--dry-run] <version|vX.Y.Z>     (lists releases without a version)
+# Usage: rollback.sh [--project slug] [--dry-run] <version|vYYYY.MM.DD>     (lists releases without a version)
 . "$(dirname "$0")/lib.sh"
 # Deliberate: the whole body is one function, read before it runs. Rolling the workspace itself back rewrites
 # or deletes this very file, and bash reads a running script from disk as it goes.
@@ -56,6 +56,6 @@ git_ commit -q -m "Roll the published files back to $tag
 
 Restores every file of the public release $tag and removes published files added since. Files outside
 RELEASE_PATHS are unchanged. Revert this commit to undo the rollback." || die "commit failed"
-echo "committed $(git_ rev-parse --short HEAD): rolled back to $tag (not pushed). The next release needs a version above the newest public one."
+echo "committed $(git_ rev-parse --short HEAD): rolled back to $tag (not pushed). The next release needs a later release date."
 }
 main "$@"

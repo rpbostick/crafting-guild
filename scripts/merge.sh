@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 # Merge a reviewed branch into the main branch, run the tests, verify the merge's own record, push on green, clean up.
-# Usage: merge.sh [--project slug] [--no-review "<reason>"] [--no-look "<reason>"] [--keep-evidence-all] <name> <reviewed-sha>
+# Usage: merge.sh [--project slug] [--no-review "<reason>"] [--no-look "<reason>"] [--allow-secret-scan "<reason>"]
+#                 [--keep-evidence-all] <name> <reviewed-sha>
 #        merge.sh [--project slug] --test-only <name>
 # --test-only runs the project's tests (BENCH_TEST_CMD, else TEST_CMD) on the branch tip in its worktree and stops:
 # no lock, no merge, nothing in the main checkout. Log: .ws-evidence/test-only.log in the worktree. ws bench uses it.
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 slug="" need_review=true test_only=false no_review_reason="" need_look=true no_look_reason="" keep_evidence_all=false
+allow_secret_scan=false secret_scan_reason=""
 # Where a --no-look reason starts in the merge subject; orchestrator-record.sh splits the subject on it.
 no_look_mark='; --no-look: '
-while [ $# -gt 0 ]; do case "$1" in --project) slug="$2"; shift 2 ;; --no-review) need_review=false; no_review_reason="${2:-}"; [ $# -lt 2 ] || shift; shift ;; --no-look) need_look=false; no_look_reason="${2:-}"; [ $# -lt 2 ] || shift; shift ;; --keep-evidence-all) keep_evidence_all=true; shift ;; --test-only) test_only=true; shift ;; *) break ;; esac; done
+# Where an --allow-secret-scan reason starts, after the other overrides; verify.sh and orchestrator-record.sh split it
+# first, because it comes last in the subject.
+secret_scan_mark='; --allow-secret-scan: '
+while [ $# -gt 0 ]; do case "$1" in --project) slug="$2"; shift 2 ;; --no-review) need_review=false; no_review_reason="${2:-}"; [ $# -lt 2 ] || shift; shift ;; --no-look) need_look=false; no_look_reason="${2:-}"; [ $# -lt 2 ] || shift; shift ;; --allow-secret-scan) allow_secret_scan=true; secret_scan_reason="${2:-}"; [ $# -lt 2 ] || shift; shift ;; --keep-evidence-all) keep_evidence_all=true; shift ;; --test-only) test_only=true; shift ;; *) break ;; esac; done
 # Prints an override's reason on one line. An override with no reason is a silent one. The argument count catches the
 # form with the reason left out, `--no-review <name> <sha>`, whose name would otherwise be taken as the reason.
 override_reason() { # <flag> <reason> <positional arguments left>
@@ -18,11 +23,13 @@ override_reason() { # <flag> <reason> <positional arguments left>
     die "$1 needs a reason: ws merge $1 \"<reason>\" <name> <sha>"
   fi
   [[ "$reason" != *"$no_look_mark"* ]] || die "a $1 reason cannot contain '$no_look_mark': the merge subject is split on it"
+  [[ "$reason" != *"$secret_scan_mark"* ]] || die "a $1 reason cannot contain '$secret_scan_mark': the merge subject is split on it"
   printf '%s' "$reason"
 }
 if ! $test_only; then
   if ! $need_review; then no_review_reason=$(override_reason --no-review "$no_review_reason" $#) || exit 1; fi
   if ! $need_look; then no_look_reason=$(override_reason --no-look "$no_look_reason" $#) || exit 1; fi
+  if $allow_secret_scan; then secret_scan_reason=$(override_reason --allow-secret-scan "$secret_scan_reason" $#) || exit 1; fi
 fi
 name="${1:?usage: merge.sh [flags] <name> <reviewed-sha>}"
 load_project "$slug"; wt="$(worktree_dir "$name")"; br="$(branch_of "$name")"
@@ -250,11 +257,34 @@ if [ -n "${WS_ATTRIBUTION_RE:-}" ]; then
   [ -z "$attrib" ] || die "branch $br adds lines that attribute work to a person or to this process (first 5 below). State the reason as a fact, or 'Deliberate:' for a choice that must stay; commit, and review again. An intended credit belongs in the project's CREDIT_PATHS.
 $attrib"
 fi
+# The secret scan of the branch's added lines, before the merge commit exists: a private key or a vendor token shape
+# blocks it, so a finding cannot be argued past a reviewer. Deliberate: only the branch's diff is scanned, so an old
+# secret already on the main branch does not block every merge, and the scan's output never repeats the secret. An
+# --allow-secret-scan reason is recorded in the merge subject only when it actually overrode a finding.
+secret_scan_used=false
+x=0; sscan=$("$WS/scripts/secret-scan.sh" "$SLUG" "$PROJECT_BRANCH" "$tip" 2>&1) || x=$?
+[ -z "$sscan" ] || printf '%s\n' "$sscan" >&2
+if [ "$x" = 1 ]; then
+  if $allow_secret_scan; then
+    secret_scan_used=true
+    echo "ws: the secret scan's findings are overridden: $secret_scan_reason" >&2
+  else
+    die "secret scan blocked the merge (above); remove the secret from the branch and from its commits, then review again. To merge anyway: ws merge --allow-secret-scan \"<reason>\" $name $(short "$tip")"
+  fi
+elif [ "$x" != 0 ]; then
+  die "the secret scan could not read the diff (exit $x); fix the checkout and merge again"
+fi
+$allow_secret_scan && ! $secret_scan_used \
+  && echo "ws: --allow-secret-scan not used: the secret scan found nothing, so the subject does not record it" >&2
 # A deterministic scan of the branch's added lines, before the merge commit exists: a secret, a private-key header
 # or a committed credential file blocks it, so a finding cannot be argued past a reviewer; risky shell spellings
 # are printed for the merge log and do not block. Deliberate: only the branch's diff is scanned, so an old secret
-# already on the main branch does not block every merge, and no network call is made.
-x=0; scan=$("$WS/scripts/security-diff.sh" --repo "$PROJECT_PATH" --base "$PROJECT_BRANCH" --head "$tip" 2>&1) || x=$?
+# already on the main branch does not block every merge, and no network call is made. When the secret scan's findings
+# were overridden, its own secret patterns stop blocking (the one reason covers them); a credential file and the
+# risky spellings still count. The variable is scoped to the scan itself: exported, it would also reach the project
+# test run below, whose suite checks the merge gate and would then see its secret blocks disabled.
+scan_allow=""; $secret_scan_used && scan_allow=1
+x=0; scan=$(WS_SECURITY_DIFF_ALLOW_SECRETS="$scan_allow" "$WS/scripts/security-diff.sh" --repo "$PROJECT_PATH" --base "$PROJECT_BRANCH" --head "$tip" 2>&1) || x=$?
 [ -z "$scan" ] || printf '%s\n' "$scan" >&2
 [ "$x" = 0 ] || die "security scan blocked the merge (above); fix it on the branch, commit, and review again"
 has_remote=false
@@ -265,6 +295,7 @@ fi
 title=$(sed -n '1s/^#* *//p' "$(sed -n 's/^task=//p' "$RUNS/$name.task.txt" 2>/dev/null)" 2>/dev/null | head -c 70)
 how="reviewed at $(short "$tip")"; $need_review || how="merged at $(short "$tip") with --no-review: $no_review_reason"
 ! $no_look_used || how+="$no_look_mark$no_look_reason"
+! $secret_scan_used || how+="$secret_scan_mark$secret_scan_reason"
 git -C "$PROJECT_PATH" merge --no-ff "$br" -m "Merge $br${title:+: $title} ($how)" || { git -C "$PROJECT_PATH" merge --abort; restore_allowed; die "merge conflict; resolve by hand or ask a builder to merge $PROJECT_BRANCH into $br"; }
 merged=$(git -C "$PROJECT_PATH" rev-parse --short HEAD); merged_full=$(git -C "$PROJECT_PATH" rev-parse HEAD)
 # A crash before the tests and push finish leaves this behind: the next cold start and chain name the merge commit

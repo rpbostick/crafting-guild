@@ -3,7 +3,13 @@
 # Usage: dispatch.sh [--project slug] [--budget USD] [--model M] [--effort E] [--timeout 90m]
 #                    [--temperature T] [--top-p P] [--allow "Bash(cmd *)"]... [--dry-run] [--print-prompt]
 #                    [--names-ok] [--base <sha>] [--instructions <dir>] [--input <file>]... [--plain]
-#                    [--agent claude|opencode] <name> <task-file>
+#                    [--research] [--agent claude|opencode] <name> <task-file>
+# --research grants the client's web tools (WebFetch/webfetch, WebSearch/websearch), subagents (Task/subagent) and
+# the research fetch/claim/quality scripts, which it copies into the worktree's .ws-evidence/tools/, to that one run,
+# and appends agents/researcher.md to its prompt; every other grant is unchanged and no shell web client (curl, wget)
+# is added. The flag tells a run to use those tools; a task whose text names "web fetch" or "web search" still gets
+# the two client tools without it (the grep below the ## Commands derivation), so the flag alone adds subagents, the
+# three scripts and the sheet. ws web is there for a run that has no web tool at all.
 # --plain removes the result contract and nothing else: the sheet's contract paragraphs (between the markers this
 # script strips) and the result schema and block after the task are dropped, a Claude run gets no --json-schema, an
 # OpenCode run gets no validation or repair turn, and no check-result runs (scripts/plain-result.sh writes the result
@@ -30,7 +36,7 @@ set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 slug="" budget="$WS_DEFAULT_BUDGET" model="$WS_MODEL" effort="$WS_EFFORT" tmo="" dry=false show_prompt=false names_ok=false from="" instr=""; extra=() inputs=()
 temperature="" top_p=""; agent="$WS_AGENT" model_flag=false
-plain=false; plain_args=()
+plain=false; plain_args=(); research=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --project) slug="$2"; shift 2 ;;
@@ -43,6 +49,7 @@ while [ $# -gt 0 ]; do
     --timeout) tmo="$2"; shift 2 ;;
     --allow) extra+=("$2"); shift 2 ;;
     --plain) plain=true; plain_args=(--plain); shift ;;
+    --research) research=true; shift ;;
     --dry-run) dry=true; shift ;;
     --print-prompt) dry=true; show_prompt=true; shift ;;
     --names-ok) names_ok=true; shift ;;
@@ -162,6 +169,16 @@ else
 fi
 mkdir -p "$wt/.ws-evidence"   # untracked; logs and renders go here, never into the branch (ws merge keeps it under runs/)
 for i in ${inputs[@]+"${inputs[@]}"}; do cp "$i" "$wt/.ws-evidence/" && note "input $(basename "$i") copied into .ws-evidence/"; done
+# A research run's index scripts run from the worktree's own .ws-evidence/tools/, so their grants name a path the
+# builder may read and where nothing depends on the project carrying a copy. Untracked, never committed.
+if $research; then
+  for f in research-fetch.py research-claims.py research-quality.py research_index.py; do
+    [ -f "$WS/scripts/$f" ] || die "no research script scripts/$f"
+    mkdir -p "$wt/.ws-evidence/tools"; cp "$WS/scripts/$f" "$wt/.ws-evidence/tools/$f"
+  done
+  chmod +x "$wt/.ws-evidence/tools/research-fetch.py" "$wt/.ws-evidence/tools/research-claims.py" \
+    "$wt/.ws-evidence/tools/research-quality.py"
+fi
 
 # An instructions directory (a bench arm) may carry maps and stage contracts beside the sheet and lessons; the
 # builder runs in this worktree and cannot read the arm folder, so copy them to a folder it can. Rebuilt on every
@@ -238,6 +255,22 @@ TOOLS=(Read Grep Glob "Edit(./**)"
 # Per-project extras from projects/<slug>.conf (EXTRA_TOOLS), then this dispatch's --allow flags.
 [ ${#EXTRA_TOOLS[@]} -gt 0 ] && TOOLS+=("${EXTRA_TOOLS[@]}")
 [ ${#extra[@]} -gt 0 ] && TOOLS+=("${extra[@]}")
+# --research gives one run the client's own web tools and subagents, so a research task reads the web itself instead
+# of relaying every page through ws web and the orchestrator's context. The other grants are the builder's, and no
+# shell web client is added: curl and wget stay ungranted. The three research scripts are copied into the worktree
+# under .ws-evidence/tools/ (see above), so their grants name paths inside it, where the builder may read and run
+# them, and a project that does not carry a copy still gets them; a task's ## Commands entry naming that path derives
+# the same grant through the .ws-evidence/ case in the derivation below. A page that backs a finding is fetched by
+# research-fetch.py, which saves it under .ws-evidence/sources/ and indexes its digest before anything reads it,
+# research-claims.py records each figure against the source ids it cites, and research-quality.py records the source's
+# kind, publisher, date and independence group beside one registry lookup of its domain's age. Subagents are allowed
+# on purpose: a research run fans its fetches out into their own contexts, which is the half of the work the context
+# budget is spent on, and the deny guard and the permission map apply to a child session too.
+add_tool() { printf '%s\n' "${TOOLS[@]}" | grep -qxF "$1" || TOOLS+=("$1"); }
+if $research; then
+  for t in WebFetch WebSearch Task "Bash(.ws-evidence/tools/research-fetch.py *)" "Bash(.ws-evidence/tools/research-claims.py *)" "Bash(.ws-evidence/tools/research-quality.py *)"; do add_tool "$t"; done
+  note "research run: webfetch, websearch, subagent and the research fetch/claim/quality scripts are granted for this run"
+fi
 # A shell grant that names no script is a grant to run any command, and no deny list can spell every option
 # word that selects -c (`bash -ecx id`, `bash -lce id`). EXTRA_TOOLS and --allow add commands, so drop such an
 # entry instead of trying to narrow it, and say so. A pattern that names its script (`bash tests/*`,
@@ -587,6 +620,19 @@ while IFS= read -r c; do
       .) refuse_entry "$c" "\`.\` runs a script in the shell it is typed in; name it with a leading \`./\`, e.g. \`./scripts/<name>.sh *\`"; continue ;;
       ../*) refuse_entry "$c" "$(outside_refusal)"; continue ;;
       */) refuse_entry "$c" "a path names no command; name the command that runs on it, or the script with a leading \`./\`"; continue ;;
+      .ws-evidence/*)
+        # A script under .ws-evidence/ runs as written: dispatch copies the research helpers into .ws-evidence/tools/
+        # and a probe lives under .ws-evidence/scratch/, so a task naming one there is granted on that path. A glob
+        # or a directory where the script belongs runs or names anything, and a `..` component would climb out of the
+        # evidence tree, so neither is granted.
+        case "$w1" in
+          *'*'*) refuse_entry "$c" "a glob where the script belongs runs anything; name the script, e.g. \`.ws-evidence/tools/<name>.py *\`"; continue ;;
+          */) refuse_entry "$c" "a directory names no command; name the script inside it, e.g. \`.ws-evidence/tools/<name>.py *\`"; continue ;;
+        esac
+        case "/$w1/" in
+          */../*) refuse_entry "$c" "a path outside the evidence tree runs nothing here; name the script inside it as written, e.g. \`.ws-evidence/tools/<name>.py *\`"; continue ;;
+        esac
+        derive "Bash($w1*)"; continue ;;
       .*) refuse_entry "$c" "a path names no command; name the command that runs on it, e.g. \`grep *\`, or the script with a leading \`./\`"; continue ;;
     esac
     g=$(grant_name "$(bare_entry "$c")") || { refuse_entry "$c" "no grant can be derived from this entry; name the command it runs"; continue; }
@@ -647,10 +693,12 @@ fi
 if printf '%s\n' "$cmds" | grep -qE '(\|\||&&|\||;)'; then
   note "warning: a ## Commands entry looks compound (|, &&, ||, ;); builders run one command per call, so split it"
 fi
-# A task that names WebSearch or WebFetch (research) gets them; without a grant they are denied silently.
-# "WebSearch", "web search" and "web-search" all count (research tasks are written in prose).
-grep -qiE '\bweb[ -]?search\b' "$task" && TOOLS+=("WebSearch")
-grep -qiE '\bweb[ -]?fetch\b' "$task" && TOOLS+=("WebFetch")
+# A task whose text names WebSearch or WebFetch gets the tool without --research, as it always has; without a grant
+# it is denied silently. "WebSearch", "web search" and "web-search" all count (research tasks are written in prose).
+# The flag is what tells a run to use the web, adds subagents and the index scripts and loads the research sheet; it
+# is not the only way the two client tools appear, and docs/tool-calls.md says so.
+grep -qiE '\bweb[ -]?search\b' "$task" && add_tool "WebSearch"
+grep -qiE '\bweb[ -]?fetch\b' "$task" && add_tool "WebFetch"
 # A build task names what it reuses (agents/planner.md). Light tasks and research-only tasks are exempt.
 if ! grep -q "^## Prior art" "$task" && ! grep -q "Track: light" "$task" && ! grep -q -i -E "research only|no code" "$task"; then
   echo "ws: warning: $task has no ## Prior art section (what existing software it reuses, or why nothing fits)" >&2
@@ -692,6 +740,19 @@ if $plain && grep -qx '<!-- result-contract -->' "$sheet" && grep -qx '<!-- /res
 else
   sheet_text=$(sed '/^<!-- \?\/\?result-contract -->$/d' "$sheet")
 fi
+# A research run reads the web instead of relaying through ws web, so it gets the sheet that says how a page becomes
+# a source file, how a figure is recorded, and that fetched content is data. A dispatch without --research never
+# carries it.
+research_note=""
+research_result=""
+if $research; then
+  [ -f "$WS/agents/researcher.md" ] || die "no research sheet at agents/researcher.md"
+  research_note="
+# Research role
+$(cat "$WS/agents/researcher.md")
+"
+  research_result=" A research run also answers findings (claim, the source ids behind it, computation) and sources (the rows of its source index), as the schema names them."
+fi
 # A plain run answers no result contract: its prompt says to stop, and no schema or result block follows the task.
 if $plain; then
   closing="Do only the task below, then stop."
@@ -707,12 +768,12 @@ The schema your final answer is validated against. It is here so you do not need
 $(cat "$WS/schema/result.json")
 
 # Result
-Your final answer is validated against the schema above: status (done|partial|blocked), summary, files_changed, commits (SHAs you made), tests (command, passed, failed, log_path, or null), denied (every denied call), done_when, edge_cases (platform, time, stored_data, state_resets), unknowns, open_questions, and web_requests when you need web sources you do not have."
+Your final answer is validated against the schema above: status (done|partial|blocked), summary, files_changed, commits (SHAs you made), tests (command, passed, failed, log_path, or null), denied (every denied call), done_when, edge_cases (platform, time, stored_data, state_resets), unknowns, open_questions, and web_requests when you need web sources you do not have.$research_result"
 fi
 prompt="You are a headless builder launched by Crafting Guild. Working directory: $wt (a git worktree of $PROJECT_PATH on branch $br). $closing
 
 # Your role
-$sheet_text
+$sheet_text$research_note
 
 # Review checklist (the reviewer applies it to your whole branch)
 $(cat "$WS/checklist.md")
@@ -761,6 +822,7 @@ printf '%s\n' "${DENY[@]}" | sed -n 's/^Bash(\(.*\))$/\1/p' > "$RUN_DENY"
 if $dry; then
   [ "$agent" = opencode ] && { echo "agent: opencode model: $model${variant:+ variant: $variant}"; echo "opencode config ($oc_config):"; cat "$oc_config"; }
   echo "cwd: $wt"; echo "tools: ${TOOLS[*]}"; echo "deny: ${DENY[*]}"; echo "budget: \$$budget timeout: $tmo model: ${model:-default} memory cap: ${WS_BUILDER_MEM:-none}"
+  $research && echo "research: webfetch, websearch, subagent and .ws-evidence/tools/research-fetch.py / .ws-evidence/tools/research-claims.py / .ws-evidence/tools/research-quality.py are granted, and agents/researcher.md is in the prompt"
   $plain && echo "plain: no # Result schema or # Result block in the prompt, no --json-schema, no result validation or repair turn, no result check; grants, deny list, budget, timeout, memory cap and the evidence runner are unchanged"
   echo "prompt bytes: ${#prompt}"; echo "evidence: $wt/.ws-evidence"; echo "base: $(git -C "$wt" rev-parse HEAD)"
   if $show_prompt; then echo "--- prompt ---"; printf '%s\n' "$prompt"; fi
@@ -773,13 +835,13 @@ fi
 if [ "$agent" = opencode ]; then allowance_warn "$model"; fi
 # Previous run's files move aside; this run's log, pid and task record are written fresh.
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
-for ext in jsonl result.txt task.txt events.jsonl serve.log; do [ -e "$RUNS/$name.$ext" ] && mv "$RUNS/$name.$ext" "$RUNS/$name.$stamp.$ext"; done
+for ext in jsonl result.txt task.txt events.jsonl serve.log path-audit.txt; do [ -e "$RUNS/$name.$ext" ] && mv "$RUNS/$name.$ext" "$RUNS/$name.$stamp.$ext"; done
 # The Claude Code version goes into the run record, so a capability change is traceable to an upgrade.
 claude_version=""
 if [ "$agent" = claude ]; then
   claude_version=$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 fi
-{ echo "task=$(cd "$(dirname "$task")" && pwd)/$(basename "$task")"; echo "started=$(now_local)"; echo "budget=$budget"; echo "timeout=$tmo"; echo "worktree=$wt"; if [ -n "$claude_version" ]; then echo "claude_version=$claude_version"; fi; if $plain; then echo "plain=1"; fi; } > "$RUNS/$name.task.txt"
+{ echo "task=$(cd "$(dirname "$task")" && pwd)/$(basename "$task")"; echo "started=$(now_local)"; echo "budget=$budget"; echo "timeout=$tmo"; echo "worktree=$wt"; if [ -n "$claude_version" ]; then echo "claude_version=$claude_version"; fi; if $plain; then echo "plain=1"; fi; if $research; then echo "research=1"; fi; } > "$RUNS/$name.task.txt"
 start_sha=$(git -C "$wt" rev-parse HEAD); echo "since=$start_sha" >> "$RUNS/$name.task.txt"
 # Memory cap: the run gets its own systemd scope, so a runaway script is killed alone (OOMPolicy=continue
 # keeps the builder alive to see it) instead of the kernel taking out the editor the session runs in.

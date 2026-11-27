@@ -176,4 +176,27 @@ report ""
 has "not recorded (no branch gone"
 x=0; out=$("$WS/bin/ws" --project "$slug" orchestrator-record --since 1-2-3 2>&1) || x=$?
 [ "$x" = 1 ] || fail "a malformed --since is refused"
+
+# A subject carrying an --allow-secret-scan reason parses as the merge it is: the record counts it as reviewed at
+# the merged SHA rather than unrecognised, and the reason stays in the history.
+repo2=$(mktemp -d); slug2="osec-$(basename "$repo2" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/-*$//')"
+runs2="$WS/runs/$slug2"; conf2="$WS/projects/$slug2.conf"
+trap 'rm -rf "$repo" "$repo2" "$runs" "$runs2" "$WS/plans/$slug" "$WS/plans/$slug2"; rm -f "$conf" "$conf2"' EXIT
+git_t2() { git -C "$repo2" -c user.name=t -c user.email=t@t "$@"; }
+git_t2 init -q -b main
+echo base > "$repo2/a.txt"; git_t2 add a.txt
+GIT_COMMITTER_DATE="2021-06-01T10:00:00" GIT_AUTHOR_DATE="2021-06-01T10:00:00" git_t2 commit -qm base
+printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$repo2" > "$conf2"
+mkdir -p "$runs2"
+git_t2 checkout -qb agent/sec
+echo sec > "$repo2/sec.txt"; git_t2 add sec.txt
+GIT_COMMITTER_DATE="2021-06-01T11:00:00" GIT_AUTHOR_DATE="2021-06-01T11:00:00" git_t2 commit -qm sec
+tip2=$(git_t2 rev-parse --short HEAD)
+git_t2 checkout -q main
+GIT_COMMITTER_DATE="2021-06-01T12:00:00" GIT_AUTHOR_DATE="2021-06-01T12:00:00" \
+  git_t2 merge -q --no-ff agent/sec -m "Merge agent/sec: a fixture key (reviewed at $tip2; --allow-secret-scan: the key is a fixture)"
+out=$(WS_ORCHESTRATOR_OPENCODE="" "$WS/bin/ws" --project "$slug2" orchestrator-record) || fail "exit $? from ws orchestrator-record on the secret-scan subject"
+grep -q "merges: 1 total; 1 reviewed at the merged SHA" <<< "$out" || fail "a --allow-secret-scan subject was not counted as reviewed"
+grep -q "1 no recognisable subject" <<< "$out" && fail "a --allow-secret-scan subject was counted as unrecognised"
+[[ "$(git_t2 log -1 --format=%s main)" == *"--allow-secret-scan: the key is a fixture"* ]] || fail "the subject lost its --allow-secret-scan reason"
 echo "orchestrator-record check ok"

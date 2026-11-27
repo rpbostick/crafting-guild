@@ -150,7 +150,7 @@ for form in relative absolute; do
   ws bg wait "path-$form" --timeout 20 >/dev/null 2>&1
   x=$?
   [ "$x" = 0 ] || fail "$form bin/ws version from the workspace root exited $x: $(cat "$runs/bg/path-$form.log" 2>/dev/null)"
-  grep -q '^Crafting Guild v' "$runs/bg/path-$form.log" 2>/dev/null || fail "$form log: $(cat "$runs/bg/path-$form.log" 2>/dev/null)"
+  grep -q '^Crafting Guild ' "$runs/bg/path-$form.log" 2>/dev/null || fail "$form log: $(cat "$runs/bg/path-$form.log" 2>/dev/null)"
   for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do wake_ran && break; sleep 0.5; done
   wake_sent ses_bgtest "bg path-$form exited 0;" || fail "$form wake: $(cat "$log/opencode.args" 2>/dev/null)"
   opencode --version >/dev/null 2>&1
@@ -246,8 +246,9 @@ wake "$old/opencode"; "$old/opencode" --version >/dev/null 2>&1
 old_file=$(cat "$log/opencode.args" 2>/dev/null)
 [ -n "$old_file" ] || fail "the old stand-in wrote nothing, so the case proves nothing"
 legacy_reads_run && fail "the one-write stand-in kept the session line after a late --version, so the case proves nothing"
-# The old wake case's own report on this file, then the reader this branch's case uses.
-echo "the old wake case on a one-write stand-in after a late --version: bg check FAILED: wake session: $old_file"
+# The old wake case's own report on this file, then the reader this branch's case uses. Deliberate: lowercase
+# "failed", because this line prints on every green run and teeth reads an uppercase FAILED as a reported failure.
+echo "the old wake case on a one-write stand-in after a late --version reported a failed wake session: $old_file"
 wake_sent ses_bgtest "bg waker exited 7; log runs/x/bg/waker.log" && fail "a one-write stand-in kept the run record after a late --version: $old_file"
 # The branch's stand-in, then a --version call after the wake: both records are in the file and the run is readable.
 rm -f "$log/opencode.args"

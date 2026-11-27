@@ -136,6 +136,65 @@
         "type": "string"
       }
     },
+    "findings": {
+      "type": "array",
+      "description": "A research run's findings, one per claim: the claim, the ids of the sources it rests on, and the computation behind a number. Every source id names a row of sources.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The source ids the finding rests on, each a row of sources."
+          },
+          "computation": {
+            "type": "string",
+            "description": "How a number in the claim was computed (the count, the denominator); empty for a claim that has no number."
+          }
+        },
+        "required": [
+          "claim",
+          "sources"
+        ]
+      }
+    },
+    "sources": {
+      "type": "array",
+      "description": "The sources a research run's findings cite, one row per source id, the same rows as the run's source index (id, url, fetched_at, sha256, title, evidences).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "fetched_at": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "evidences": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "sha256"
+        ]
+      }
+    },
     "web_requests": {
       "type": "array",
       "description": "Web sources the task needs that you do not have (no WebFetch or WebSearch granted). Omit when none. With requests, status is partial; the orchestrator fetches what it approves and resumes the task with the files.",

@@ -28,7 +28,7 @@ Cold-start says so. Ask the operator which repository to work on, register it wi
 
 ## Where things are
 - `projects/<slug>.conf`: path, branch, test command, extra tool grants, preview command. `plans/<slug>/`: plans and task files (tracked). `runs/<slug>/`: logs, results and each merged builder's evidence (not tracked). An OpenCode session's replies are saved in `runs/<slug>/replies.md` with a time banner; `bin/ws replies --follow` prints and tails them.
-- `checklist.md`: 21 review rules. `release-audit.md`: what must pass before anything goes public (fresh history, no secrets, no journey text, licences, built output). `agents/`: builder, reviewer, planner. `lessons/`: one file per role, always loaded, each with an optional private `<role>.local.md`.
+- `checklist.md`: 22 review rules. `release-audit.md`: what must pass before anything goes public (fresh history, no secrets, no journey text, licences, built output). `agents/`: builder, reviewer, planner. `lessons/`: one file per role, always loaded, each with an optional private `<role>.local.md`.
 - `config.sh`: budgets, timeouts, models, memory caps, preview ports, browser command; `config.local.sh` (optional, private) overrides it.
 - `MODIFYING.md` explains every file for whoever changes the tool. `bin/ws help` lists the commands.
 - `bin/ws archive-inflight [--dry-run] [<plan.md>...]` keeps one In flight block per plan; older blocks move, in order, to `plans/<slug>/in-flight-history.md`.

@@ -74,13 +74,23 @@ Run it:
 
 ### Install a specific version
 
-`main` is always the newest release. Every release is tagged (`v2.4.2`) and has a page under Releases with its notes. A branch per major version (`v2`) follows the newest release of that major, so you get its fixes without its breaking changes:
+`main` is always the newest release. This release is tagged `v2026.11.26` and has a page under Releases with its notes; earlier releases keep their SemVer tags (`v2.9.5`, `v2.4.2`), which are never moved. A branch per era (`v2`) follows the newest release of that era, so you get its fixes without its breaking changes:
 
 ```bash
-git clone --branch v2.4.2 <this repository's URL> ~/crafting-guild   # one exact release
-git clone --branch v2 <this repository's URL> ~/crafting-guild       # the newest 2.x
-git -C ~/crafting-guild fetch --tags && git -C ~/crafting-guild checkout v2.4.1   # switch an existing copy
+git clone --branch v2026.11.26 <this repository's URL> ~/crafting-guild   # one exact release
+git clone --branch v2 <this repository's URL> ~/crafting-guild            # the newest release of era 2
+git -C ~/crafting-guild fetch --tags && git -C ~/crafting-guild checkout v2026.11.26   # switch an existing copy
 ```
+
+### Bring your own model
+
+Crafting Guild runs on the agent client you already pay for: a current OpenCode, or Claude Code with your own Claude subscription. The builders, the reviews and the orchestrator session all run on that client's model.
+
+| Release | Last tested with (model, date) | Client requirement |
+|---|---|---|
+| 2026.11.26 | DeepSeek V4.1 Flash, 2026-11-26 | OpenCode 1.19.1 or later (1.x or 2.x line), or Claude Code 2.1.257 or later (`WS_MIN_OPENCODE` in `config.sh`, `min_claude` in `scripts/doctor.sh`) |
+
+The table is the record of what each release was last tested with; a new row is added at release time. On GitHub, each release page carries that release's changelog section. Claude Code is optional: an OpenCode-only install passes `ws doctor` and runs every builder, review and orchestrator session on OpenCode.
 
 ## Register a project
 
@@ -134,7 +144,7 @@ The orchestrator runs on either client: `ws oc <slug>` starts OpenCode in this f
 | `ws init <path> [--tests CMD] [--branch B] [--yes] [--dry-run] [--force]` | register a project; `--dry-run` shows the conf and changes first; an existing conf is replaced only with `--force`, after a backup, keeping keys init does not write |
 | `ws doctor [--parity]` | check this machine and the selected project, with a fix for each failure; `--parity` runs one paid probe per agent |
 | `ws list`, `ws status [slug]`, `ws brief [--write] [--since <file>]`, `ws version` | registered projects; cold-start by hand; the status page across projects; the version |
-| `ws dispatch [--budget N] [--timeout T] [--model M] [--effort E] [--temperature T] [--top-p P] [--agent claude\|opencode] [--allow RULE]... <name> <task-file>` | run a builder (`--dry-run` or `--print-prompt` to see what it would get) |
+| `ws dispatch [--budget N] [--timeout T] [--model M] [--effort E] [--temperature T] [--top-p P] [--research] [--agent claude\|opencode] [--allow RULE]... <name> <task-file>` | run a builder (`--dry-run` or `--print-prompt` to see what it would get); `--research` grants that run the client's web tools and subagents, with `agents/researcher.md` in its prompt |
 | `ws wait <name>`, `ws tail <name>`, `ws runs`, `ws stop <name>` | wait for, watch, list, stop runs |
 | `ws serve <name\|main> [port]`, `ws serve stop [name\|main]`, `ws serve list` | preview server from a worktree or the main checkout |
 | `ws review [--agent claude\|opencode] <name>`, `ws precheck <name>` | run `ws teeth` and then review the branch (prints the verdict and the SHA to merge); the mechanical checks alone |
@@ -145,7 +155,7 @@ The orchestrator runs on either client: `ws oc <slug>` starts OpenCode in this f
 | `ws wake <session> "<message>" [--at <time>\|--when-chain-stops\|--every <OnCalendar> [--until YYYY-MM-DD]]` | send one message into an idle OpenCode session |
 | `ws audit [days]` | what builders keep doing by hand, from the run logs |
 | `ws release [--dry-run] [--notes T] [--no-asset]` | publish main (or its `RELEASE_PATHS`) as one audited commit on a public repository |
-| `ws rollback [--dry-run] [vX.Y.Z]` | put the published files back to a public release, as one new commit (files outside `RELEASE_PATHS` untouched); without a version, list the releases |
+| `ws rollback [--dry-run] [vYYYY.MM.DD]` | put the published files back to a public release, as one new commit (files outside `RELEASE_PATHS` untouched); without a version, list the releases |
 | `ws site [--dry-run]` | copy a project's published files into a site project, test, push, wait until live |
 | `ws --project <slug> <command> ...` | act on a registered project other than the selected one |
 
@@ -154,7 +164,7 @@ The orchestrator runs on either client: `ws oc <slug>` starts OpenCode in this f
 - `config.sh`: budgets, timeouts (45m for a task marked `Track: light`, 120m otherwise), models, memory caps, timezone, preview ports, the browser command `ws serve` suggests, and `WS_ATTRIBUTION_RE` (names a merge refuses to add to a repository).
 - `config.local.sh` (optional): sourced after `config.sh`, for values you keep private, such as your own names in `WS_ATTRIBUTION_RE`.
 - `projects/<slug>.conf`: one per registered project (path, branch, `TEST_CMD`, `EXTRA_TOOLS`, `PREVIEW_CMD`, `POST_MERGE_CMD`, release and site settings).
-- `checklist.md`, `agents/*.md`, `lessons/*.md`: the review rules, the three roles and the lessons pasted into every prompt.
+- `checklist.md`, `agents/*.md`, `lessons/*.md`: the review rules, the four roles and the lessons pasted into every prompt.
 
 ## What stays private by design
 
@@ -170,7 +180,7 @@ The workspace keeps your working material beside the tool, and none of it is mea
 
 ## Changing the tool
 
-[MODIFYING.md](MODIFYING.md) explains every file and where to change what. After a change, `bash scripts/selftest.sh`.
+[docs/make-it-yours.md](docs/make-it-yours.md) maps what you want to change — the model, the client, the reviewer, the builders, budgets, projects, results, the bench, a release — to the files that do it and the check that proves it. [MODIFYING.md](MODIFYING.md) explains every file. After a change, `bash scripts/selftest.sh`.
 
 ## License
 

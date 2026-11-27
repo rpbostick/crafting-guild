@@ -1,6 +1,239 @@
 #!/usr/bin/env bash
+# The stand-in suite for both security scripts. The scanner installer runs first on a throwaway HOME, with a stand-in
+# curl whose files the suite fixes and a shortened table, so no real download happens; then `ws security-scan` runs on a
+# throwaway project with stand-in scanners first on PATH, so every input is fixed and no real tool is needed. selftest.sh
+# runs this. Every case reports and the script exits 1 if any failed, so a missing `ws security-tools-install` or
+# `ws security-scan` fails its cases.
+set -uo pipefail
+. "$(dirname "$0")/lib.sh"
+script="$WS/scripts/security-tools-install.sh"
+scratch=$(mktemp -d)
+home="$scratch/home"
+stub="$scratch/stub"
+files="$scratch/files"
+log="$scratch/curl.log"
+table="$scratch/table.tsv"
+rc=0
+case_rc=0
+out=""
+x=0
+fail() { echo "security check FAILED: $1"; printf '%s\n' "${out:-}"; rc=1; case_rc=1; }
+case_start() { case_rc=0; }
+case_end() { [ "$case_rc" = 0 ] && echo "$1 ok"; }
+inst_cleanup() { rm -rf "$scratch"; }
+trap inst_cleanup EXIT
+mkdir -p "$home" "$stub" "$files/seed"
+
+# The stand-in writes the fixture named by the URL's basename to the path after -o, so a case can change what a
+# download contains without touching the script. It logs every call, which is how "no download attempted" is seen.
+cat > "$stub/curl" <<'STANDIN'
+#!/usr/bin/env bash
+out=""; url=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="${2:?stand-in curl: -o needs a path}"; shift 2 ;;
+    -*) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+printf '%s\n' "$url" >> "$STUB_LOG"
+[ -n "$out" ] || { echo "stand-in curl: no -o" >&2; exit 2; }
+src="$STUB_FILES/$(basename "$url")"
+[ -f "$src" ] || { echo "stand-in curl: no fixture for $url" >&2; exit 22; }
+cp "$src" "$out"
+STANDIN
+chmod +x "$stub/curl"
+
+printf 'alpha binary 1.0\n' > "$files/alpha"
+printf 'gamma binary 1.0\n' > "$files/gamma"
+# beta is the tar asset: the stub serves the archive, and the installer unpacks it and keeps only the binary.
+printf '#!/bin/sh\necho "beta 2.0"\n' > "$files/seed/beta"
+tar -czf "$files/beta.tar.gz" -C "$files/seed" beta
+sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+alpha_sha=$(sha_of "$files/alpha")
+beta_sha=$(sha_of "$files/beta.tar.gz")
+beta_bin_sha=$(sha_of "$files/seed/beta")
+zero_sha=$(printf '%064d' 0)
+
+# The install cases run the compiled-in table, because --install refuses SECURITY_TOOLS_TABLE. The stand-in curl serves a
+# fixture named after each real asset: the four pinned assets hold other bytes, so their digest differs; cosign and
+# scorecard are the two unverified rows, and scorecard's archive holds the binary the installer keeps.
+printf 'stand-in osv-scanner 2.7.1\n' > "$files/osv-scanner_linux_amd64"
+printf 'not the syft archive\n' > "$files/syft_1.57.2_linux_amd64.tar.gz"
+printf 'not the gitleaks archive\n' > "$files/gitleaks_8.30.1_linux_x64.tar.gz"
+printf 'not the trivy archive\n' > "$files/trivy_0.76.2_Linux-64bit.tar.gz"
+printf '#!/bin/sh\necho "cosign 3.1.4 stand-in"\n' > "$files/cosign-linux-amd64"
+mkdir -p "$files/seed-scorecard"
+printf '#!/bin/sh\necho "scorecard 5.6.0 stand-in"\n' > "$files/seed-scorecard/scorecard"
+tar -czf "$files/scorecard_5.6.0_linux_amd64.tar.gz" -C "$files/seed-scorecard" scorecard
+
+# The three Python rows need a venv; the stand-in python3 refuses to build one, so they fail fast and no pip reaches the
+# network. The install cases judge the download rows.
+cat > "$stub/python3" <<'STANDIN'
+#!/usr/bin/env bash
+echo "stand-in python3: no venv is built in the suite" >&2
+exit 1
+STANDIN
+chmod +x "$stub/python3"
+
+# write_table <alpha-digest> <beta-digest>
+write_table() {
+  printf 'alpha\t1.0\thttps://example.test/alpha\t%s\tbinary\n' "$1" > "$table"
+  printf 'beta\t2.0\thttps://example.test/beta.tar.gz\t%s\ttar\n' "$2" >> "$table"
+}
+write_gamma_table() {
+  if [ "$1" = "-" ]; then
+    printf 'gamma\t1.0\thttps://example.test/gamma\t-\tbinary\n' > "$table"
+  else
+    printf 'gamma\t1.0\thttps://example.test/gamma\t%s\tbinary\n' "$1" > "$table"
+  fi
+}
+# run <script flags...>: the scratch root as the working directory (not a .worktrees path), an empty HOME of its own,
+# the stand-in curl first on PATH, and the shortened table. --check reads that table; --install refuses it.
+run() {
+  x=0
+  out=$(cd "$scratch" && HOME="$home" SECURITY_TOOLS_TABLE="$table" STUB_LOG="$log" STUB_FILES="$files" \
+    PATH="$stub:/usr/local/bin:/usr/bin:/bin" bash "$script" "$@" 2>&1) || x=$?
+}
+# run_install <script flags...>: --install with no SECURITY_TOOLS_TABLE, so the compiled-in table is read and each
+# download is the fixture named after its real asset.
+run_install() {
+  x=0
+  out=$(cd "$scratch" && HOME="$home" STUB_LOG="$log" STUB_FILES="$files" \
+    PATH="$stub:/usr/local/bin:/usr/bin:/bin" bash "$script" "$@" 2>&1) || x=$?
+}
+reset_home() { rm -rf "$home/security-tools"; : > "$log"; }
+
+# 1. Nothing installed: one missing line per tool and no download attempted.
+case_start
+reset_home
+write_table "$alpha_sha" "$beta_sha"
+run --check
+[ "$x" = 1 ] || fail "an empty install exited $x, not 1"
+[ "$(printf '%s\n' "$out" | grep -c .)" = 2 ] || fail "expected one line per tool: ${out:-}"
+grep -qx 'alpha 1.0 missing' <<< "$out" || fail "alpha line: ${out:-}"
+grep -qx 'beta 2.0 missing' <<< "$out" || fail "beta line: ${out:-}"
+[ ! -s "$log" ] || fail "--check downloaded: $(cat "$log")"
+[ ! -e "$home/security-tools/bin/alpha" ] || fail "--check created a binary"
+case_end "check with nothing installed reports every tool missing and downloads nothing"
+
+# 2. --check accepts a binary and a tar record whose digests match the table, and reports a digest differs once the
+# bytes or the record change; it downloads nothing either way.
+case_start
+reset_home
+write_table "$alpha_sha" "$beta_sha"
+mkdir -p "$home/security-tools/bin"
+cp "$files/alpha" "$home/security-tools/bin/alpha"
+cp "$files/seed/beta" "$home/security-tools/bin/beta"
+chmod +x "$home/security-tools/bin/alpha" "$home/security-tools/bin/beta"
+printf '2.0\t%s\t%s\ttar\n' "$beta_sha" "$beta_bin_sha" > "$home/security-tools/bin/beta.installed"
+run --check
+[ "$x" = 0 ] || fail "--check of a matching install exited $x, not 0: ${out:-}"
+grep -qx 'alpha 1.0 ok' <<< "$out" || fail "alpha ok line: ${out:-}"
+grep -qx 'beta 2.0 ok' <<< "$out" || fail "beta ok line: ${out:-}"
+printf 'tampered\n' > "$home/security-tools/bin/alpha"
+printf '2.0\t%s\t%s\ttar\n' "$zero_sha" "$beta_bin_sha" > "$home/security-tools/bin/beta.installed"
+run --check
+[ "$x" = 1 ] || fail "--check of a changed install exited $x, not 1"
+grep -qx 'alpha 1.0 digest differs' <<< "$out" || fail "alpha differs line: ${out:-}"
+grep -qx 'beta 2.0 digest differs' <<< "$out" || fail "beta record differs line: ${out:-}"
+[ ! -s "$log" ] || fail "--check downloaded: $(cat "$log")"
+case_end "--check accepts matching digests and reports a changed binary or record as digest differs"
+
+# 3. --check reports an unverified tool without --allow-unverified as a failure and with it as accepted, downloading
+# nothing either way.
+case_start
+reset_home
+write_gamma_table -
+mkdir -p "$home/security-tools/bin"
+cp "$files/gamma" "$home/security-tools/bin/gamma"
+chmod +x "$home/security-tools/bin/gamma"
+run --check
+[ "$x" = 1 ] || fail "check of an unverified tool without the flag exited $x, not 1"
+grep -qx 'gamma 1.0 unverified (pass --allow-unverified)' <<< "$out" || fail "gamma check line: ${out:-}"
+run --check --allow-unverified
+[ "$x" = 0 ] || fail "check with the flag exited $x, not 0: ${out:-}"
+grep -qx 'gamma 1.0 unverified' <<< "$out" || fail "gamma accepted line: ${out:-}"
+[ ! -s "$log" ] || fail "--check downloaded: $(cat "$log")"
+case_end "an unverified tool fails --check without the flag and passes with it, downloading nothing"
+
+# 4. --install refuses SECURITY_TOOLS_TABLE, so the test override cannot redirect an install; nothing is downloaded.
+case_start
+reset_home
+write_table "$alpha_sha" "$beta_sha"
+run --install
+[ "$x" = 1 ] || fail "--install with SECURITY_TOOLS_TABLE set exited $x, not 1"
+[ "$(printf '%s\n' "$out" | grep -c .)" = 1 ] || fail "the refusal is not one line: ${out:-}"
+grep -qF 'SECURITY_TOOLS_TABLE is for --check only; unset it to install' <<< "$out" || fail "refusal line: ${out:-}"
+[ ! -s "$log" ] || fail "the refused install downloaded: $(cat "$log")"
+case_end "--install with SECURITY_TOOLS_TABLE set is refused in one line and downloads nothing"
+
+# 5. --install against the compiled table leaves every pinned tool out of bin when the stand-in bytes do not match its
+# digest, and skips the two unverified rows without downloading them.
+case_start
+reset_home
+run_install --install
+[ "$x" = 1 ] || fail "--install with mismatched fixtures exited $x, not 1"
+for tool in 'osv-scanner 2.7.1' 'syft 1.57.2' 'gitleaks 8.30.1' 'trivy 0.76.2'; do
+  grep -qE "^$tool digest differs \(expected [0-9a-f]{64}, got [0-9a-f]{64}\)" <<< "$out" \
+    || fail "$tool differs line: ${out:-}"
+done
+for name in osv-scanner syft gitleaks trivy; do
+  [ ! -e "$home/security-tools/bin/$name" ] || fail "a mismatched $name reached bin"
+  [ ! -e "$home/security-tools/bin/$name.installed" ] || fail "a mismatched $name left a record"
+done
+grep -qx 'cosign 3.1.4 unverified (pass --allow-unverified)' <<< "$out" || fail "cosign skip line: ${out:-}"
+grep -qx 'scorecard 5.6.0 unverified (pass --allow-unverified)' <<< "$out" || fail "scorecard skip line: ${out:-}"
+grep -q '^unverified tools skipped: cosign scorecard ' <<< "$out" || fail "the skip summary is missing: ${out:-}"
+for name in 'semgrep 1.186.0' 'modelscan 0.8.8' 'pip-audit 2.10.1'; do
+  grep -qE "^$name install failed \(could not create " <<< "$out" || fail "$name venv line: ${out:-}"
+done
+[ "$(grep -c . "$log")" = 4 ] || fail "the four pinned assets should be the only downloads: $(cat "$log")"
+case_end "--install leaves a mismatched tool out of bin and skips the unverified rows without downloading them"
+
+# 6. --install --allow-unverified installs the two unverified rows: cosign's plain binary and scorecard from its tar,
+# each with an install record; the pinned rows still fail on their digest.
+case_start
+reset_home
+run_install --install --allow-unverified
+[ "$x" = 1 ] || fail "--install --allow-unverified exited $x, not 1"
+grep -qx 'cosign 3.1.4 installed (unverified)' <<< "$out" || fail "cosign install line: ${out:-}"
+grep -qx 'scorecard 5.6.0 installed (unverified)' <<< "$out" || fail "scorecard install line: ${out:-}"
+[ -x "$home/security-tools/bin/cosign" ] || fail "cosign is not executable in bin"
+[ -x "$home/security-tools/bin/scorecard" ] || fail "scorecard is not executable in bin"
+[ "$(bash "$home/security-tools/bin/scorecard")" = 'scorecard 5.6.0 stand-in' ] || fail "the tar's scorecard binary was not kept"
+[ -f "$home/security-tools/bin/cosign.installed" ] || fail "cosign left no install record"
+[ -f "$home/security-tools/bin/scorecard.installed" ] || fail "scorecard left no install record"
+for name in osv-scanner syft gitleaks trivy; do
+  [ ! -e "$home/security-tools/bin/$name" ] || fail "a pinned $name reached bin on a stand-in digest"
+done
+[ "$(grep -c . "$log")" = 6 ] || fail "all six assets should be downloaded: $(cat "$log")"
+case_end "--install --allow-unverified installs the plain-binary and tar rows with records, and the pinned rows still fail"
+
+# 7. An install from a project worktree is refused in one line before anything is downloaded.
+case_start
+reset_home
+wt="$scratch/.worktrees/project"
+mkdir -p "$wt"
+x=0
+out=$(cd "$wt" && HOME="$home" STUB_LOG="$log" STUB_FILES="$files" \
+  PATH="$stub:/usr/local/bin:/usr/bin:/bin" bash "$script" --install 2>&1) || x=$?
+[ "$x" = 1 ] || fail "an install under .worktrees exited $x, not 1"
+[ "$(printf '%s\n' "$out" | grep -c .)" = 1 ] || fail "the refusal is not one line: ${out:-}"
+grep -q 'refusing to install inside a project worktree' <<< "$out" || fail "refusal line: ${out:-}"
+grep -qF 'scanners go in $HOME/security-tools' <<< "$out" || fail "refusal does not say where scanners go: ${out:-}"
+[ ! -s "$log" ] || fail "the refused install downloaded: $(cat "$log")"
+case_end "an install from a .worktrees path is refused in one line and downloads nothing"
+
+[ "$rc" = 0 ] && echo "ws security-tools-install checks ok"
+inst_cleanup
+trap - EXIT
+
+# ---- ws security-scan ----
+# Its scratch is its own: the installer's is removed and its EXIT trap dropped above, and the trap below covers this
+# suite's scratch and the throwaway project it registers. `rc` carries the installer's failures into the final exit.
 # ws security-scan on a throwaway project, with stand-in scanners first on PATH so no real tool is needed and every
-# input is fixed. selftest.sh runs this. Every case reports and the script exits 1 if any failed, so a missing
+# input is fixed. Every case reports and the script exits 1 if any failed, so a missing
 # `ws security-scan` fails every case.
 #
 # The acceptance file (tool, rule, repo-relative path, reason) and the three outcomes are what most cases pin down:
@@ -8,8 +241,6 @@
 # a basename, the clean PASS, a tool's own errors[] beside its findings, an offline run, gitleaks' --report-path,
 # a refused --update-baseline and a TOML lock are each one case, and the earlier coverage (a new finding, --all,
 # --json, npm audit's ENOLOCK and its via array) follows them.
-set -uo pipefail
-. "$(dirname "$0")/lib.sh"
 scratch=$(mktemp -d)
 slug="security-$(basename "$scratch" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')"
 repo="$scratch/repo"
@@ -19,12 +250,8 @@ std="$scratch/stand-in"
 runs="$WS/runs/$slug"
 baseline="$WS/plans/$slug/security-baseline.tsv"
 conf="$WS/projects/$slug.conf"
-rc=0
 case_rc=0
 out=""
-fail() { echo "security check FAILED: $1"; printf '%s\n' "${out:-}"; rc=1; case_rc=1; }
-case_start() { case_rc=0; }
-case_end() { [ "$case_rc" = 0 ] && echo "$1 ok"; }
 cleanup() { rm -rf "$scratch" "$runs" "$WS/plans/$slug"; rm -f "$conf"; }
 trap cleanup EXIT
 mkdir -p "$repo/scripts/skip" "$repo/scripts/oldvenv" "$repo/node_modules/dep" "$repo/frontend" "$home" "$bin" "$std" "$runs"

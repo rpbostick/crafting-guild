@@ -198,12 +198,20 @@ if [ "$rc" -eq 124 ] || { [ "$rc" -eq 137 ] && [ -n "${WS_MERGE_TEST_TIMEOUT:-}"
 fi
 echo "exit $rc" >> "$log"
 
-# A runner that reports failing tests is what teeth looks for. A nonzero exit with no such report came from a
-# crash before the tests ran (a missing module that aborts collection, a syntax error), which is not a bite.
+# A runner that reports failing tests is what teeth looks for: a marker at the start of a line (FAIL, FAILED,
+# not ok, ✕, ✖, ✗), a count of failures, `test result: FAILED`, or a case name followed by FAILED (`<case name>
+# FAILED` or `<case name> FAILED: <detail>`, the shape the suite prints). A nonzero exit with no such report came
+# from a crash before the tests ran (a missing module that aborts collection, a syntax error), which is not a bite;
+# the green tail (`0 failed`, `all tests passed`, `selftest passed`) is lowercase and names no case, so it matches
+# none of these. The suite also prints `<case name> ok` for every case that passed, and a case name may quote a
+# failure marker, so a case-name line that ends in ` ok` is a pass report, not a failure: it is counted and excluded.
 if [ "$rc" -eq 0 ]; then
   finish 1 "teeth: toothless" "$testline" "$revline"
 fi
+case_name_lines=$(grep -cE '^[[:space:]]*[^[:space:]].*[[:space:]]FAILED(:.*)?[[:space:]]*$' "$log") || true
+case_name_pass=$(grep -cE '^[[:space:]]*[^[:space:]].*[[:space:]]FAILED(:.*)?[[:space:]]ok[[:space:]]*$' "$log") || true
 if grep -qE '^[[:space:]]*(FAIL|FAILED|not ok|✕|✖|✗)([[:space:]:]|$)' "$log" \
+  || [ "${case_name_lines:-0}" -gt "${case_name_pass:-0}" ] \
   || grep -qiE '(^|[^[:alnum:]_])[1-9][0-9]*[[:space:]]+(failed|failing|failures?)([^[:alnum:]_]|$)' "$log" \
   || grep -qE '^[[:space:]]*ℹ[[:space:]]+(fail|failed|failures)[[:space:]]+[1-9][0-9]*' "$log" \
   || grep -qiE 'test result: FAILED' "$log" \

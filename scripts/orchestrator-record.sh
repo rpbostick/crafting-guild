@@ -27,9 +27,11 @@ since_args=()
 # Deliberate: the time is spelled out; a bare date in git's --since takes the current time of day, which drops
 # that morning's commits.
 [ -z "$since" ] || since_args=("--since=$since 00:00:00")
-# The subject's shape and the --no-look split come from lib.sh, so verify.sh reads the same merge history.
+# The subject's shape, the --no-look split and the --allow-secret-scan split come from lib.sh, so verify.sh reads the
+# same merge history.
 subject_re="$WS_MERGE_SUBJECT_RE"
 no_look_re="$WS_NO_LOOK_RE"
+secret_scan_re="$WS_SECRET_SCAN_RE"
 
 # Paths a builder never needs: an edit here is the orchestrator's own record, not a change that bypassed one.
 is_bookkeeping() {
@@ -112,7 +114,12 @@ report_project() { # <slug>
   local RUNS="$runs" is_visible
   while IFS=$'\t' read -r sha parents merged_at subject; do
     merges=$((merges + 1)); tip="${parents#* }"; merged_tips["$tip"]=1; name=""; no_look_reason=""
-    # Only a subject that parses without the text holds a reason: a task title can carry it too.
+    # Only a subject that parses without the text holds a reason: a task title can carry it too. The
+    # --allow-secret-scan marker comes last, so it is split before the --no-look one.
+    if [[ "$subject" =~ $secret_scan_re ]]; then
+      before_reason="${BASH_REMATCH[1]})"
+      if [[ "$before_reason" =~ $subject_re || "$before_reason" =~ $no_look_re ]]; then subject="$before_reason"; fi
+    fi
     if [[ "$subject" =~ $no_look_re ]]; then
       before_reason="${BASH_REMATCH[1]})"; after_reason="${BASH_REMATCH[2]}"
       if [[ "$before_reason" =~ $subject_re ]]; then subject="$before_reason"; no_look_reason="$after_reason"; fi

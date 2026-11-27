@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Web sources a builder asked for. Builders have no WebFetch or WebSearch: one that needs a source returns status
-# partial with web_requests (schema/result.json), and this script does everything but the decision.
+# Web sources a builder asked for. A builder run has no web tool of its own unless its task names web fetch or web
+# search, or it was dispatched with --research; one that needs a source returns status partial with web_requests
+# (schema/result.json), and this script does everything but the decision.
 # Usage: web.sh [--project slug] <name>                                 the last run's requests and what was done with each
 #        web.sh [--project slug] <name> approve <n|all> [--url <url>]   fetch into the worktree's .ws-evidence/given/web/
 #        web.sh [--project slug] <name> deny <n> "<reason>"             record why a request is not answered

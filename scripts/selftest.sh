@@ -738,7 +738,267 @@ EVIDENCESTUB
   rm -rf "$work"
   [ "$fails" = 0 ]
 }
-# normalize() reads the malformed result shapes models write instead of the schema's. Each fixture is a shortened
+# ws review-doc checks a Markdown document against its own evidence. A claim whose source contradicts it, a rate
+# with no denominator, a workbook row that does not recompute and a prose figure missing from the claim table are
+# each blocking (exit 1); a clean document is merge (exit 0) and its record carries the document's digest; a rewritten
+# document is a new review and keeps the one it replaces as a round; a reviewer that writes no verdict exits 2. The
+# stand-in launcher reads the prompt, so a case passes only when the document, the sources index, and (for the
+# arithmetic case) the workbook path and digest reached the reviewer. It records the config it was given, so the
+# absence of any shell grant is checked from the run, and a config build, a pass union or a digest read that fails
+# is checked to exit 2 as a tool failure. <root> holds scripts/, config.sh and schema/, so the same cases can be
+# pointed at a pre-change copy and fail on the missing command. Prints one line per case and returns 1 when any
+# fails.
+review_doc_cases() { # <root>
+  local root="$1" work ws proj docs out x rec cfg old doc_sha rewrite_sha fails=0
+  work=$(mktemp -d); ws="$work/ws"; proj="$work/proj"; docs="$work/docs"
+  if [ ! -f "$root/scripts/review-doc.sh" ]; then
+    echo "review-doc FAILED: $root/scripts/review-doc.sh does not exist, so ws review-doc cannot run"
+    rm -rf "$work"
+    return 1
+  fi
+  mkdir -p "$ws/scripts" "$ws/projects" "$ws/plans/demo" "$ws/runs/demo" "$ws/schema" "$docs"
+  cp "$root/scripts/lib.sh" "$root/scripts/review-doc.sh" "$root/scripts/opencode_run.py" "$root/scripts/review_match.py" "$root/scripts/xlsx_dump.py" "$root/scripts/lessons-check.py" "$ws/scripts/"
+  cp "$root/config.sh" "$ws/config.sh"
+  cp "$root/schema/review.json" "$ws/schema/review.json"
+  chmod +x "$ws/scripts/review-doc.sh"
+  proj="$work/proj"; mkdir -p "$proj"
+  git -C "$proj" init -q -b main
+  echo docs > "$proj/README.md"; git -C "$proj" add README.md
+  git -C "$proj" -c user.name=t -c user.email=t@t commit -qm init
+  printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$proj" > "$ws/projects/demo.conf"
+  # The stand-in reviewer: reads the prompt review-doc wrote, answers the case the document marks, and copies the
+  # config it was handed so the grants can be checked.
+  cat > "$ws/scripts/opencode-review.sh" <<'DOCSTUB'
+#!/bin/bash
+log=""; pf=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log) log="$2"; shift 2 ;;
+    --model|--budget|--config|--name|--variant) shift 2 ;;
+    -*) shift ;;
+    *) pf="$1"; shift ;;
+  esac
+done
+[ -f "$pf" ] || { echo "stand-in: no prompt file" >&2; exit 1; }
+prompt=$(cat "$pf")
+doc=$(sed -n 's/^Path: //p' <<< "$prompt" | head -1)
+verdict=merge; rule=1; why=""
+case "$prompt" in
+  *'@@toolfail@@'*) printf '%s\n' '{"type":"result","result":"provider error: stand-in failure","structured_output":null}'; exit 0 ;;
+  *'@@overbudget@@'*) printf '%s\n' '{"type":"result","total_cost_usd":999,"structured_output":{"verdict":"merge","summary":"stand-in over budget","blocking":[],"suggestions":[]},"result":"stand-in"}'; exit 0 ;;
+  *'@@contradiction@@'*) verdict=do-not-merge; rule=1; why="@@contradiction@@ the cited source says the opposite" ;;
+  *'@@denominator@@'*) verdict=fix-first; rule=2; why="@@denominator@@ the rate names no denominator" ;;
+  *'@@arithmetic@@'*) verdict=fix-first; rule=3; why="@@arithmetic@@ the workbook row does not recompute" ;;
+  *'@@prose@@'*) verdict=fix-first; rule=4; why="@@prose@@ the figure is not in the claim table" ;;
+esac
+# The arithmetic case is answered only when the prompt carries the workbook's path, its digest and its dumped rows.
+case "$prompt" in
+  *'@@arithmetic@@'*)
+    if [ -n "${RD_DEBUG:-}" ]; then
+      { echo "RD_WORKBOOK=${RD_WORKBOOK:-<unset>}"; printf '%s\n' "$prompt"; } > "$RD_DEBUG"
+    fi
+    if [ -z "${RD_WORKBOOK:-}" ] || ! grep -qF "$RD_WORKBOOK" <<< "$prompt" \
+      || ! grep -qF "$(sha256sum "$RD_WORKBOOK" | cut -d' ' -f1)" <<< "$prompt" \
+      || ! grep -qF '## Sheet: Rows' <<< "$prompt" || ! grep -qF 'Actors' <<< "$prompt"; then
+      verdict=merge; why="stand-in found no workbook rows in the prompt"
+    fi ;;
+esac
+[ "$verdict" = merge ] && why=""
+jq -cn --arg v "$verdict" --arg f "$doc" --arg why "$why" --argjson rule "$rule" \
+  '{type:"result",total_cost_usd:0.01,structured_output:{verdict:$v,summary:("stand-in "+$why),blocking:(if $v=="merge" then [] else [{file:$f,line:4,rule:$rule,why:$why}] end),suggestions:[]},result:"stand-in"}'
+DOCSTUB
+  chmod +x "$ws/scripts/opencode-review.sh"
+  rdoc() { RD_WORKBOOK="$docs/workbook.xlsx" RD_DEBUG="$work/rd-debug" "$ws/scripts/review-doc.sh" --project demo "$@"; }
+  # A real .xlsx, so the fixture is the shape the reviewer opens: one sheet, a header and one row whose Rate does
+  # not follow from Count and Declared (40 of 100 is 0.4, not 0.5).
+  python3 - "$docs/workbook.xlsx" <<'XLSX'
+import sys, zipfile
+parts = {
+ "[Content_Types].xml": '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>',
+ "_rels/.rels": '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+ "xl/workbook.xml": '<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Rows" sheetId="1" r:id="rId1"/></sheets></workbook>',
+ "xl/_rels/workbook.xml.rels": '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>',
+ "xl/sharedStrings.xml": '<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="4" uniqueCount="4"><si><t>Group</t></si><si><t>Count</t></si><si><t>Declared</t></si><si><t>Rate</t></si></sst>',
+ "xl/worksheets/sheet1.xml": '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c><c r="D1" t="s"><v>3</v></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>Actors</t></is></c><c r="B2"><v>100</v></c><c r="C2"><v>40</v></c><c r="D2"><v>0.5</v></c></row></sheetData></worksheet>',
+}
+with zipfile.ZipFile(sys.argv[1], "w") as archive:
+    for name, text in parts.items():
+        archive.writestr(name, text)
+XLSX
+  # The dump is what the reviewer recomputes from, so its header and row are checked directly.
+  x=0; out=$(python3 -I "$ws/scripts/xlsx_dump.py" "$docs/workbook.xlsx" 2>&1) || x=$?
+  if [ "$x" = 0 ] && grep -qF '## Sheet: Rows' <<< "$out" && grep -qxF "$(printf 'Actors\t100\t40\t0.5')" <<< "$out"; then
+    echo "xlsx_dump prints each sheet's rows as tab-separated text ok"
+  else echo "xlsx_dump FAILED (exit $x): $out"; fails=$((fails + 1)); fi
+  printf 'not a zip' > "$docs/not-a-workbook.xlsx"
+  x=0; out=$(python3 -I "$ws/scripts/xlsx_dump.py" "$docs/not-a-workbook.xlsx" 2>&1) || x=$?
+  if [ "$x" = 2 ] && grep -q 'not a readable .xlsx' <<< "$out"; then
+    echo "xlsx_dump exits 2 on a file that is not a workbook ok"
+  else echo "xlsx_dump bad file FAILED (exit $x): $out"; fails=$((fails + 1)); fi
+  # A document review gets no shell and no interpreter: its "no network" promise must hold by construction, since
+  # python3 could open a socket. The 2.x shape still denies the web tools and reads the document's directory.
+  x=0; python3 -I "$ws/scripts/opencode_run.py" config --read-only --no-shell --line 2 --directory "$docs" > "$work/doc-cfg2.json" 2>"$work/doc-cfg2.err" || x=$?
+  if [ "$x" = 0 ] \
+    && jq -e '([.permissions[] | select(.action == "shell" and .effect == "allow")] | length) == 0' "$work/doc-cfg2.json" >/dev/null \
+    && jq -e '([.permissions[] | select(.action == "webfetch") | .effect] | first) == "deny"' "$work/doc-cfg2.json" >/dev/null \
+    && jq -e --arg r "$docs/**" '([.permissions[] | select(.action == "external_directory" and .resource == $r) | .effect] | first) == "allow"' "$work/doc-cfg2.json" >/dev/null; then
+    echo "the 2.x document-review config grants no shell, denies the web and reads the document's directory ok"
+  else echo "2.x document-review config FAILED (exit $x): $(cat "$work/doc-cfg2.err")"; fails=$((fails + 1)); fi
+  # --python was the grant that let a review open a socket; the config refuses it rather than ignoring it.
+  x=0; python3 -I "$ws/scripts/opencode_run.py" config --read-only --python --line 2 > /dev/null 2>"$work/doc-cfg-python.err" || x=$?
+  if [ "$x" != 0 ] && grep -q -- '--no-shell' "$work/doc-cfg-python.err"; then
+    echo "the document-review config refuses a --python grant ok"
+  else echo "document-review --python refusal FAILED (exit $x): $(cat "$work/doc-cfg-python.err")"; fails=$((fails + 1)); fi
+  printf 'id\turl\tfetched_at\tsha256\ttitle\tevidence\nsmith-2020\thttps://example.invalid/smith\thttps://example.invalid/smith\td4b6faddc152c8a55cbfb9b497e90a7b0f62c48f6c09a8ffe2e74ff942bbde1c\tSmith 2020\tactors and degrees\n' > "$docs/sources.tsv"
+  printf '# Actors and degrees\n\nCase: @@contradiction@@\n\n| Claim | Source | Figure |\n| --- | --- | --- |\n| 60%% of the sampled actors hold a degree | smith-2020 | 60%% |\n' > "$docs/contradiction.md"
+  printf '# Majors\n\nCase: @@denominator@@\n\n| Claim | Source | Figure |\n| --- | --- | --- |\n| 60%% have no degree | smith-2020 | 60%% |\n' > "$docs/denominator.md"
+  printf '# Rows\n\nCase: @@arithmetic@@\n\n| Claim | Source | Figure |\n| --- | --- | --- |\n| half of the sampled actors hold a degree | smith-2020 | 50%% |\n' > "$docs/arithmetic.md"
+  printf '# Figures\n\nCase: @@prose@@\n\nThe report says 41%%.\n\n| Claim | Source | Figure |\n| --- | --- | --- |\n' > "$docs/prose.md"
+  printf '# Clean\n\nCase: clean\n\n| Claim | Source | Figure |\n| --- | --- | --- |\n| 50%% of the sampled actors hold a degree | smith-2020 | 50%% |\n' > "$docs/clean.md"
+  printf '# Prompt shape\n\n| Claim | Source | Figure |\n| --- | --- | --- |\n| 50%% of the sampled actors hold a degree | smith-2020 | 50%% |\n' > "$docs/print-only.md"
+  printf '# Failure\n\nCase: @@toolfail@@\n' > "$docs/toolfail.md"
+  printf '# Over budget\n\nCase: @@overbudget@@\n' > "$docs/overbudget.md"
+  # 1-4: each defect is blocking, exit 1, and its finding reaches the markdown.
+  for entry in contradiction:1 denominator:2 arithmetic:3 prose:4; do
+    doc="${entry%%:*}"; rule="${entry#*:}"; x=0
+    out=$(rdoc --passes 1 --sources "$docs/sources.tsv" --workbook "$docs/workbook.xlsx" "$docs/$doc.md" 2>&1) || x=$?
+    rec=$(ls "$ws"/runs/demo/"$doc"-*.review-doc.json 2>/dev/null | head -1)
+    if [ "$x" = 1 ] && grep -q '^## Blocking' <<< "$out" && grep -q "@@$doc@@" <<< "$out" \
+      && [ -n "$rec" ] && [ "$(jq -r '.verdict' "$rec")" != merge ] \
+      && [ "$(jq -r '.blocking[0].rule' "$rec")" = "$rule" ]; then
+      echo "review-doc case $doc: blocking, exit 1 ok"
+    else echo "review-doc case $doc FAILED (exit $x, record ${rec:-none}): $out"; cat "$work/rd-debug" 2>/dev/null | head -30; fails=$((fails + 1)); fi
+  done
+  # 5: a clean document is merge, exit 0, and the record names the document's path and digest; the config is the
+  # read-only one plus python3 and no network.
+  doc_sha=$(sha256sum "$docs/clean.md" | cut -d' ' -f1)
+  x=0; out=$(rdoc --passes 1 --sources "$docs/sources.tsv" "$docs/clean.md" 2>&1) || x=$?
+  rec=$(ls "$ws"/runs/demo/clean-*.review-doc.json 2>/dev/null | head -1)
+  cfg=$(ls "$ws"/runs/demo/clean-*.review-doc.opencode.json 2>/dev/null | head -1)
+  # The config the run built, in either line's shape: no shell grant at all and no web tool allowed.
+  cfg_shell_allows=$(jq -r 'if .permissions then [.permissions[] | select(.action == "shell" and .effect == "allow")] | length
+    else [.permission.bash // {} | to_entries[] | select(.value == "allow")] | length end' "$cfg" 2>/dev/null)
+  cfg_web_allows=$(jq -r 'if .permissions then [.permissions[] | select((.action == "webfetch" or .action == "websearch") and .effect == "allow")] | length
+    else [.permission.webfetch, .permission.websearch] | map(select(. == "allow")) | length end' "$cfg" 2>/dev/null)
+  if [ "$x" = 0 ] && grep -q 'Verdict: merge' <<< "$out" && [ -n "$rec" ] && [ -n "$cfg" ] \
+    && [ "$(jq -r '.doc_sha256' "$rec")" = "$doc_sha" ] && [ "$(jq -r '.doc' "$rec")" = "$docs/clean.md" ] \
+    && [ "$(jq -r '.passes' "$rec")" = 1 ] \
+    && [ "$cfg_shell_allows" = 0 ] && [ "$cfg_web_allows" = 0 ] \
+    && [ "$(jq -r 'if .permission then .permission.bash["*"] else ([.permissions[] | select(.action == "shell" and .resource == "*") | .effect] | first) end' "$cfg")" = deny ] \
+    && [ "$(jq -r 'if .permission then .permission.webfetch else ([.permissions[] | select(.action == "webfetch") | .effect] | first) end' "$cfg")" = deny ]; then
+    echo "review-doc clean document: merge, exit 0, record names the digest, config grants no shell or web tool ok"
+  else echo "review-doc clean FAILED (exit $x, record ${rec:-none}, config ${cfg:-none}): $out"; fails=$((fails + 1)); fi
+  # A rewrite is a new review at a new digest, and the review it replaces is kept as a round.
+  printf '\nCase: @@contradiction@@\n' >> "$docs/clean.md"
+  rewrite_sha=$(sha256sum "$docs/clean.md" | cut -d' ' -f1)
+  x=0; out=$(rdoc --passes 1 --sources "$docs/sources.tsv" "$docs/clean.md" 2>&1) || x=$?
+  rec=$(ls "$ws"/runs/demo/clean-*.review-doc.json 2>/dev/null | head -1)
+  old=$(ls "$ws"/runs/demo/rounds/clean-*.review-doc.*.json 2>/dev/null | head -1)
+  if [ "$x" = 1 ] && [ "$rewrite_sha" != "$doc_sha" ] && [ -n "$rec" ] && [ -n "$old" ] \
+    && [ "$(jq -r '.doc_sha256' "$rec")" = "$rewrite_sha" ] && [ "$(jq -r '.doc_sha256' "$old")" = "$doc_sha" ]; then
+    echo "review-doc rewrite is a new review and keeps the old one as a round ok"
+  else echo "review-doc rewrite FAILED (exit $x, record ${rec:-none}, old ${old:-none}): $out"; fails=$((fails + 1)); fi
+  # A reviewer that writes no verdict is a tool failure: exit 2, not a blocking verdict and not a clean one.
+  x=0; out=$(rdoc --passes 1 "$docs/toolfail.md" 2>&1) || x=$?
+  if [ "$x" = 2 ] && grep -q 'review-doc failed' <<< "$out"; then
+    echo "review-doc without a verdict exits 2 as a tool failure ok"
+  else echo "review-doc tool failure FAILED (exit $x): $out"; fails=$((fails + 1)); fi
+  # A run that costs past its budget is a meter failure too: exit 2, and no verdict is written.
+  x=0; out=$(rdoc --passes 1 "$docs/overbudget.md" 2>&1) || x=$?
+  if [ "$x" = 2 ] && grep -q 'over the \$8 allowed' <<< "$out" && [ ! -e "$ws"/runs/demo/overbudget-*.review-doc.json ]; then
+    echo "review-doc over budget exits 2 as a meter failure and writes no verdict ok"
+  else echo "review-doc over budget FAILED (exit $x): $out"; fails=$((fails + 1)); fi
+  # Two passes union into one record that carries both their cost and its count.
+  printf '# Clean two\n\n| Claim | Source | Figure |\n| --- | --- | --- |\n| half declared it | smith-2020 | 50%% |\n' > "$docs/clean-two.md"
+  x=0; out=$(rdoc --passes 2 "$docs/clean-two.md" 2>&1) || x=$?
+  rec=$(ls "$ws"/runs/demo/clean-two-*.review-doc.json 2>/dev/null | head -1)
+  if [ "$x" = 0 ] && [ -n "$rec" ] && [ "$(jq -r '.passes' "$rec")" = 2 ] && [ "$(jq -r '.total_cost_usd' "$rec")" = 0.02 ]; then
+    echo "review-doc --passes 2 unions both passes into one record ok"
+  else echo "review-doc passes FAILED (exit $x, record ${rec:-none}): $out"; fails=$((fails + 1)); fi
+  # The prompt carries the four checks, the document and its digest, and the paths and index the reviewer checks
+  # against; --print-prompt starts no reviewer.
+  x=0; out=$(rdoc --print-prompt --sources "$docs/sources.tsv" --workbook "$docs/workbook.xlsx" "$docs/print-only.md" 2>&1) || x=$?
+  if [ "$x" = 0 ] && grep -q 'Does the cited source say this?' <<< "$out" \
+    && grep -q 'Is the denominator named?' <<< "$out" && grep -q 'Does the arithmetic reproduce?' <<< "$out" \
+    && grep -q 'Is a prose figure missing from the claim table?' <<< "$out" \
+    && grep -q 'no shell and no interpreter' <<< "$out" \
+    && grep -qF "SHA-256: $(sha256sum "$docs/print-only.md" | cut -d' ' -f1)" <<< "$out" \
+    && grep -qF "$docs/workbook.xlsx" <<< "$out" && grep -qF 'smith-2020' <<< "$out" \
+    && [ ! -e "$ws"/runs/demo/print-only-*.review-doc.opencode.json ]; then
+    echo "review-doc --print-prompt carries the four checks, the document, its digest, the workbook and the sources ok"
+  else echo "review-doc print-prompt FAILED (exit $x): $out"; fails=$((fails + 1)); fi
+  # A dump longer than the cap is cut, and the prompt and the record both say how many rows of how many were kept and
+  # which sheet the cut stopped in: a reviewer must not be told it has every row while holding a fraction of them.
+  python3 - "$docs/big.xlsx" <<'BIGXLSX'
+import sys, zipfile
+def sheet(rows):
+    return ('<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            '<sheetData>%s</sheetData></worksheet>' % "".join(rows))
+people = ['<row r="%d"><c r="A%d" t="inlineStr"><is><t>Person %04d of the sample, with a long description that fills the cell: the dump prints values and not the markup, so the text itself has to run past the cap, with one more clause to make it long enough for that</t></is></c><c r="B%d"><v>%d</v></c><c r="C%d"><v>%d</v></c></row>'
+          % (i, i, i, i, i, i, i * 2) for i in range(1, 701)]
+notes = ['<row r="%d"><c r="A%d" t="inlineStr"><is><t>Note %d</t></is></c></row>' % (i, i, i) for i in range(1, 4)]
+parts = {
+ "[Content_Types].xml": '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
+ "_rels/.rels": '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+ "xl/workbook.xml": '<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="People" sheetId="1" r:id="rId1"/><sheet name="Notes" sheetId="2" r:id="rId2"/></sheets></workbook>',
+ "xl/_rels/workbook.xml.rels": '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/></Relationships>',
+ "xl/worksheets/sheet1.xml": sheet(people),
+ "xl/worksheets/sheet2.xml": sheet(notes),
+}
+with zipfile.ZipFile(sys.argv[1], "w") as archive:
+    for name, text in parts.items():
+        archive.writestr(name, text)
+BIGXLSX
+  printf '# Big rows\n\n| Claim | Source | Figure |\n| --- | --- | --- |\n| half declared it | smith-2020 | 50%% |\n' > "$docs/big.md"
+  x=0; out=$(rdoc --passes 1 --workbook "$docs/big.xlsx" "$docs/big.md" 2>&1) || x=$?
+  rec=$(ls "$ws"/runs/demo/big-*.review-doc.json 2>/dev/null | head -1)
+  promptf=$(ls "$ws"/runs/demo/big-*.review-doc-prompt.txt 2>/dev/null | head -1)
+  bkept=$(jq -r '.workbook_dump.rows_kept' "$rec" 2>/dev/null)
+  btotal=$(jq -r '.workbook_dump.rows_total' "$rec" 2>/dev/null)
+  if [ "$x" = 0 ] && [ -n "$rec" ] && [ -n "$promptf" ] \
+    && [ "$(jq -r '.workbook_dump.cut' "$rec")" = true ] \
+    && [ "$(jq -r '.workbook_dump.stopped_in_sheet' "$rec")" = People ] \
+    && [ "$bkept" -gt 0 ] && [ "$btotal" -gt "$bkept" ] \
+    && [ "$(jq -r '.workbook_dump.kept_bytes' "$rec")" -le 60000 ] \
+    && grep -qF "of $btotal rows" "$promptf" && grep -qF 'is cut' "$promptf" && grep -qF '"People"' "$promptf" \
+    && grep -qF "workbook dump: cut at 60000 bytes: $bkept of $btotal rows" <<< "$out"; then
+    echo "review-doc says a cut workbook dump kept $bkept of $btotal rows and stopped inside People, in the prompt and the record ok"
+  else echo "review-doc cut dump FAILED (exit $x, record ${rec:-none}, prompt ${promptf:-none}, dump $(jq -c '.workbook_dump' "$rec" 2>/dev/null)): $out"; fails=$((fails + 1)); fi
+  # A config build, a pass union and a digest read that fail are tool failures: exit 2 as documented, never 1, which
+  # means a blocking verdict.
+  mv "$ws/scripts/opencode_run.py" "$work/opencode_run.py.off"
+  x=0; out=$(rdoc --passes 1 "$docs/clean-two.md" 2>&1) || x=$?
+  mv "$work/opencode_run.py.off" "$ws/scripts/opencode_run.py"
+  if [ "$x" = 2 ] && grep -q 'could not build the OpenCode document-review config' <<< "$out"; then
+    echo "review-doc config-build failure exits 2 as a tool failure ok"
+  else echo "review-doc config-build failure FAILED (exit $x): $out"; fails=$((fails + 1)); fi
+  mv "$ws/scripts/review_match.py" "$work/review_match.py.off"
+  x=0; out=$(rdoc --passes 2 "$docs/clean-two.md" 2>&1) || x=$?
+  mv "$work/review_match.py.off" "$ws/scripts/review_match.py"
+  if [ "$x" = 2 ] && grep -q 'could not union the 2 document-review passes' <<< "$out"; then
+    echo "review-doc pass-union failure exits 2 as a tool failure ok"
+  else echo "review-doc pass-union failure FAILED (exit $x): $out"; fails=$((fails + 1)); fi
+  # A digest that cannot be read (a file removed or unreadable between the existence check and the read) is a tool
+  # failure too: a sha256sum stub fails for the one file, as that read does.
+  mkdir -p "$work/stubbin"
+  real_sha=$(command -v sha256sum)
+  cat > "$work/stubbin/sha256sum" <<STUB
+#!/bin/bash
+for a in "\$@"; do
+  case "\$a" in */unreadable.md) echo "sha256sum: cannot read \$a: No such file or directory" >&2; exit 1 ;; esac
+done
+exec $real_sha "\$@"
+STUB
+  chmod +x "$work/stubbin/sha256sum"
+  printf '# Unreadable\n' > "$docs/unreadable.md"
+  x=0; out=$(PATH="$work/stubbin:$PATH" rdoc --passes 1 "$docs/unreadable.md" 2>&1) || x=$?
+  if [ "$x" = 2 ] && grep -q 'cannot read the document' <<< "$out"; then
+    echo "review-doc digest-read failure exits 2 as a tool failure ok"
+  else echo "review-doc digest-read failure FAILED (exit $x): $out"; fails=$((fails + 1)); fi
+  rm -rf "$work"
+  [ "$fails" = 0 ]
+}
+
 # copy of a real first reply from reports/builder-repair-rate-2026-11-06.md, and an already valid result must come
 # back unchanged. <root> holds scripts/ and schema/, <scratch> holds the fixtures. Prints one line per case and
 # returns 1 when any fails.
@@ -882,6 +1142,37 @@ result_format_cases() { # <root> <scratch>
   result_repair_cases "$1" "$2/repair" || rc=1
   return "$rc"
 }
+# Every file path docs/make-it-yours.md names in backticks exists at this commit: the guide is the intention map, so
+# a moved or deleted file is renamed there in the same change. A path with a placeholder (<slug>, <name>), a glob, a
+# variable or a URL names something the reader supplies, not a file in this tree. A path the line calls optional
+# ("an optional `config.local.sh`") names a private file a public checkout need not have, and is not checked; only
+# that span is skipped, so a required path on the same line is still checked.
+make_it_yours_case() { # <root>
+  local root="$1" guide line rest before path missing=""
+  guide="$root/docs/make-it-yours.md"
+  [ -f "$guide" ] || { echo "make it yours paths FAILED: docs/make-it-yours.md is missing"; return 1; }
+  while IFS= read -r line; do
+    rest="$line"
+    while [[ "$rest" == *'`'*'`'* ]]; do
+      before="${rest%%'`'*}"
+      rest="${rest#*'`'}"
+      path="${rest%%'`'*}"
+      rest="${rest#*'`'}"
+      case "$before" in *optional[[:space:]]) continue ;; esac
+      case "$path" in
+        ''|*'*'*|*'?'*|*'['*|*'<'*|*'>'*|*'='*|*' '*|*'$'*|http*|/*|*:*) continue ;;
+      esac
+      case "$path" in
+        */*|*.md|*.sh|*.json) ;;
+        *) continue ;;
+      esac
+      [ -e "$root/$path" ] || missing="$missing $path"
+    done
+  done < "$guide"
+  [ -z "$missing" ] \
+    && echo "docs/make-it-yours.md names only paths that exist ok" \
+    || { echo "make it yours paths FAILED: docs/make-it-yours.md names missing paths:$missing"; return 1; }
+}
 # The deterministic scan of a branch's added lines for the merge gate: a seeded token, a private-key header and a
 # committed .env block; a curl|sh line, a variable rm -rf and sudo in a builder script flag without blocking; a clean
 # diff passes; a secret left on the branch outside the scanned range is not reported. The merge gate is exercised on a
@@ -1024,6 +1315,537 @@ evidence_archive_cases() { # <root> <scratch>
   rm -rf "$root/runs/$slug" "$root/plans/$slug"
   [ "$fails" = 0 ]
 }
+# The path audit's cases: an events file with one outside path and one worktree path prints one line; a clean one
+# prints none; ~/ and ../ resolve; another process's /proc is reported while /proc/self is not, and a device node is
+# reported while the standard streams are not; an events file with no tool event is skipped rather than called
+# clean; a stamped file from a replaced run is left out of ws status; and ws wait and ws status print the line.
+# <root> is the workspace; <scratch> is a fresh directory the caller removes. Prints one line per case and returns 1
+# when any fails.
+path_audit_cases() { # <root> <scratch>
+  local root="$1" t="$2" repo="$2/repo" slug out x fails=()
+  mkdir -p "$root/projects" "$repo"
+  git -C "$repo" init -q -b main
+  printf 'base\n' > "$repo/a.txt"
+  git -C "$repo" add a.txt
+  git -C "$repo" -c user.name=t -c user.email=t@t commit -qm base
+  slug="pathaudit-$(basename "$t" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')"
+  printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$repo" > "$root/projects/$slug.conf"
+  mkdir -p "$root/runs/$slug" "$repo/.worktrees/auditout/src" "$repo/.worktrees/auditclean"
+  : > "$repo/.worktrees/auditout/src/a.ts"
+  pa() { x=0; out=$(bash "$root/scripts/path-audit.sh" "$slug" "$1" 2>&1) || x=$?; }
+  # One command naming a key outside the worktree and one naming a file inside it: one reported path, named alone.
+  {
+    printf '{"event":"tool.started","tool_input":{"command":"cat /home/user/.ssh/id_ed25519"}}\n'
+    printf '{"event":"tool.started","tool_input":{"command":"cat %s/.worktrees/auditout/src/a.ts"}}\n' "$repo"
+    printf '{"event":"tool.started","tool_input":{"path":"%s/.worktrees/auditout/src/a.ts","limit":20}}\n' "$repo"
+  } > "$root/runs/$slug/auditout.events.jsonl"
+  pa auditout
+  if [ "$x" = 0 ] && [ "$out" = "path audit: 1 outside the worktree (/home/user/.ssh/id_ed25519)" ] \
+    && [ "$(head -n1 "$root/runs/$slug/auditout.path-audit.txt")" = "$out" ] \
+    && grep -qF "$(printf '/home/user/.ssh/id_ed25519\tcommand')" "$root/runs/$slug/auditout.path-audit.txt"; then
+    echo "path audit names the one outside path and its file keeps the list ok"
+  else echo "FAIL path audit outside (exit $x): $out"; fails+=(outside); fi
+  # Worktree, system trees and /tmp only: no finding.
+  {
+    printf '{"event":"tool.started","tool_input":{"command":"cat %s/.worktrees/auditclean/src/a.ts"}}\n' "$repo"
+    printf '{"event":"tool.started","tool_input":{"command":"sed -n 1p /etc/ssl/certs/ca-certificates.crt"}}\n'
+    printf '{"event":"tool.started","tool_input":{"path":"/usr/bin/git","pattern":"x"}}\n'
+    printf '{"event":"tool.started","tool_input":{"command":"cat /tmp/notes.txt"}}\n'
+  } > "$root/runs/$slug/auditclean.events.jsonl"
+  pa auditclean
+  if [ "$x" = 0 ] && [ "$out" = "path audit: none" ] \
+    && [ "$(head -n1 "$root/runs/$slug/auditclean.path-audit.txt")" = "path audit: none" ]; then
+    echo "path audit passes worktree, system and /tmp paths ok"
+  else echo "FAIL path audit clean (exit $x): $out"; fails+=(clean); fi
+  # ~/ resolves against $HOME, and a *.env name outside the worktree is reported even under an allowed root.
+  mkdir -p "$t/home"
+  printf '{"event":"tool.started","tool_input":{"command":"cat ~/.ssh/id_rsa"}}\n' > "$root/runs/$slug/tilde.events.jsonl"
+  x=0; out=$(HOME="$t/home" bash "$root/scripts/path-audit.sh" "$slug" tilde 2>&1) || x=$?
+  if [ "$x" = 0 ] && [ "$out" = "path audit: 1 outside the worktree ($t/home/.ssh/id_rsa)" ]; then
+    echo "path audit resolves ~/ against \$HOME ok"
+  else echo "FAIL path audit tilde (exit $x): $out"; fails+=(tilde); fi
+  printf '{"event":"tool.started","tool_input":{"path":"/tmp/example.env"}}\n' > "$root/runs/$slug/envname.events.jsonl"
+  pa envname
+  if [ "$x" = 0 ] && [ "$out" = "path audit: 1 outside the worktree (/tmp/example.env)" ]; then
+    echo "path audit reports a .env name outside the worktree ok"
+  else echo "FAIL path audit .env (exit $x): $out"; fails+=(envname); fi
+  # /proc: another process's environment is another bug class and is reported; this process, the kernel's shared
+  # files and the standard streams are not.
+  {
+    printf '{"event":"tool.started","tool_input":{"command":"cat /proc/12345/environ"}}\n'
+    printf '{"event":"tool.started","tool_input":{"command":"cat /proc/self/status"}}\n'
+    printf '{"event":"tool.started","tool_input":{"path":"/proc/cpuinfo"}}\n'
+    printf '{"event":"tool.started","tool_input":{"command":"head -1 /proc/meminfo"}}\n'
+    printf '{"event":"tool.started","tool_input":{"command":"cat /dev/null"}}\n'
+    printf '{"event":"tool.started","tool_input":{"command":"tee /dev/stdout"}}\n'
+  } > "$root/runs/$slug/proc.events.jsonl"
+  pa proc
+  if [ "$x" = 0 ] && [ "$out" = "path audit: 1 outside the worktree (/proc/12345/environ)" ]; then
+    echo "path audit reports another process's /proc environ and allows /proc/self ok"
+  else echo "FAIL path audit proc (exit $x): $out"; fails+=(proc); fi
+  # A device node is reported; the standard streams are not.
+  {
+    printf '{"event":"tool.started","tool_input":{"command":"cat /dev/sda"}}\n'
+    printf '{"event":"tool.started","tool_input":{"command":"echo hi > /dev/stderr"}}\n'
+  } > "$root/runs/$slug/dev.events.jsonl"
+  pa dev
+  if [ "$x" = 0 ] && [ "$out" = "path audit: 1 outside the worktree (/dev/sda)" ]; then
+    echo "path audit reports a device node and allows the standard streams ok"
+  else echo "FAIL path audit dev (exit $x): $out"; fails+=(dev); fi
+  # An events file with only permission events carries no path to audit: it says so, never a false "none".
+  printf '%s\n' '{"event":"permission.asked","tool":"bash","metadata":{"command":"git push"}}' \
+    '{"event":"permission.replied","reply":"reject"}' > "$root/runs/$slug/noevent.events.jsonl"
+  pa noevent
+  if [ "$x" = 0 ] && [ "$out" = "path audit: skipped (no tool events recorded)" ] \
+    && [ "$(head -n1 "$root/runs/$slug/noevent.path-audit.txt")" = "path audit: skipped (no tool events recorded)" ]; then
+    echo "path audit skips an events file with no tool events ok"
+  else echo "FAIL path audit no tool events (exit $x): $out"; fails+=(noevent); fi
+  # ws wait prints the run's audit line, having written it from the events file; ws status prints both recent ones.
+  for n in auditout auditclean noevent; do
+    printf 'done: %s\n' "$n" > "$root/runs/$slug/$n.result.txt"
+    : > "$root/runs/$slug/$n.jsonl"
+  done
+  x=0; out=$("$root/bin/ws" --project "$slug" wait auditout 0 2>&1) || x=$?
+  if [ "$x" = 0 ] && grep -qF 'path audit: 1 outside the worktree (/home/user/.ssh/id_ed25519)' <<< "$out"; then
+    echo "ws wait prints the path audit line for a run with an outside path ok"
+  else echo "FAIL ws wait path audit (exit $x): $out"; fails+=(wait-out); fi
+  x=0; out=$("$root/bin/ws" --project "$slug" wait auditclean 0 2>&1) || x=$?
+  if [ "$x" = 0 ] && grep -qx 'path audit: none' <<< "$out"; then
+    echo "ws wait prints the path audit line for a clean run ok"
+  else echo "FAIL ws wait path audit clean (exit $x): $out"; fails+=(wait-clean); fi
+  x=0; out=$("$root/bin/ws" --project "$slug" wait noevent 0 2>&1) || x=$?
+  if [ "$x" = 0 ] && grep -qx 'path audit: skipped (no tool events recorded)' <<< "$out"; then
+    echo "ws wait prints the skipped line for a run with no tool events ok"
+  else echo "FAIL ws wait path audit skipped (exit $x): $out"; fails+=(wait-skip); fi
+  # A stamped audit file belongs to the run a re-dispatch replaced, so ws status leaves it out; the current run's
+  # line still prints.
+  printf 'path audit: 1 outside the worktree (/old/secret)\n' > "$root/runs/$slug/auditout.20260101T000000Z.path-audit.txt"
+  x=0; out=$("$root/bin/ws" --project "$slug" status 2>&1) || x=$?
+  if ! grep -qF '/old/secret' <<< "$out" \
+    && grep -qF 'path audit: 1 outside the worktree (/home/user/.ssh/id_ed25519)' <<< "$out" \
+    && grep -qF 'path audit: none' <<< "$out"; then
+    echo "ws status prints both current runs and leaves a replaced run's stamped audit line out ok"
+  else echo "FAIL ws status path audit (exit $x)"; fails+=(status); fi
+  rm -f "$root/projects/$slug.conf"
+  rm -rf "$root/runs/$slug" "$root/plans/$slug"
+  [ ${#fails[@]} -eq 0 ]
+}
+# The secret scan's cases: a clean diff passes, a PEM/OpenSSH or PGP key, a GitHub token built at run time, and an
+# _authToken= value of 8 characters block while a 7-character value does not; an unreadable ref exits 2; and a merge
+# refuses the branch with the file and line named, then merges it with --allow-secret-scan and records the reason
+# while the gate project's own test command, which reads WS_SECURITY_DIFF_ALLOW_SECRETS, still passes.
+# <root> is the workspace; <scratch> is a fresh directory the caller removes.
+secret_scan_cases() { # <root> <scratch>
+  local root="$1" t="$2" repo="$2/repo" gate="$2/gate" slug slugx
+  local base tip out x gtip gpre ttip tpre ptip pem pgp ghp auth ctip cpre
+  local gate_test='[ -z "${WS_SECURITY_DIFF_ALLOW_SECRETS:-}" ]'
+  local -a fails=()
+  mkdir -p "$repo" "$root/projects"
+  git -C "$repo" init -q -b main
+  printf 'base\n' > "$repo/a.txt"
+  git -C "$repo" add a.txt
+  git -C "$repo" -c user.name=t -c user.email=t@t commit -qm base
+  base=$(git -C "$repo" rev-parse HEAD)
+  slug="secretscan-$(basename "$t" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')"
+  printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$repo" > "$root/projects/$slug.conf"
+  ss_commit() { git -C "$repo" add -A; git -C "$repo" -c user.name=t -c user.email=t@t commit -qm "$1"; }
+  ss_scan() { x=0; out=$(bash "$root/scripts/secret-scan.sh" "$slug" "$1" "$2" 2>&1) || x=$?; }
+  printf 'hello\n' > "$repo/b.txt"; ss_commit clean; tip=$(git -C "$repo" rev-parse HEAD)
+  ss_scan "$base" "$tip"; base=$tip
+  if [ "$x" = 0 ] && [ -z "$out" ]; then echo "secret scan passes a clean diff ok"
+  else echo "FAIL secret scan clean (exit $x): $out"; fails+=(clean); fi
+  # Built at run time so this file never holds a matching header.
+  pem=$(printf -- '-----BEGIN %s PRIVATE KEY-----' OPENSSH)
+  printf 'one\ntwo\n%s\n' "$pem" > "$repo/keys.txt"; ss_commit key; tip=$(git -C "$repo" rev-parse HEAD)
+  ss_scan "$base" "$tip"; base=$tip
+  if [ "$x" = 1 ] && [ "$out" = "keys.txt:3: private-key" ]; then echo "secret scan blocks a PEM key and names file and line ok"
+  else echo "FAIL secret scan PEM (exit $x): $out"; fails+=(pem); fi
+  pgp=$(printf -- '-----BEGIN %s PRIVATE KEY BLOCK-----' PGP)
+  printf '%s\n' "$pgp" > "$repo/pgp.asc"; ss_commit pgp; tip=$(git -C "$repo" rev-parse HEAD)
+  ss_scan "$base" "$tip"; base=$tip
+  if [ "$x" = 1 ] && [ "$out" = "pgp.asc:1: pgp-private-key" ]; then echo "secret scan blocks a PGP private-key block ok"
+  else echo "FAIL secret scan PGP (exit $x): $out"; fails+=(pgp); fi
+  ghp="ghp_$(printf 'a%.0s' $(seq 1 36))"
+  mkdir -p "$repo/scripts/fixtures"
+  printf 'token: %s\n' "$ghp" > "$repo/scripts/fixtures/token.txt"; ss_commit token; tip=$(git -C "$repo" rev-parse HEAD)
+  ss_scan "$base" "$tip"; base=$tip
+  if [ "$x" = 1 ] && [ "$out" = "scripts/fixtures/token.txt:1: github-token" ]; then echo "secret scan blocks a ghp_ token in a fixture ok"
+  else echo "FAIL secret scan token (exit $x): $out"; fails+=(token); fi
+  auth="_auth""Token="
+  printf '%s%s\n' "$auth" "abcd1234" > "$repo/npmrc"; ss_commit auth8; tip=$(git -C "$repo" rev-parse HEAD)
+  ss_scan "$base" "$tip"; base=$tip
+  if [ "$x" = 1 ] && [ "$out" = "npmrc:1: auth-token" ]; then echo "secret scan blocks an 8-character _authToken= value ok"
+  else echo "FAIL secret scan auth8 (exit $x): $out"; fails+=(auth8); fi
+  printf '%s%s\n' "$auth" "abcd123" > "$repo/npmrc"; ss_commit auth7; tip=$(git -C "$repo" rev-parse HEAD)
+  ss_scan "$base" "$tip"; base=$tip
+  if [ "$x" = 0 ] && [ -z "$out" ]; then echo "secret scan leaves a 7-character _authToken= value alone ok"
+  else echo "FAIL secret scan auth7 (exit $x): $out"; fails+=(auth7); fi
+  ss_scan no-such-ref "$tip"
+  if [ "$x" = 2 ]; then echo "secret scan exits 2 when it cannot read the diff ok"
+  else echo "FAIL secret scan unreadable (exit $x): $out"; fails+=(unreadable); fi
+  # The merge gate: refused before the merge commit, naming the file and line; the override merges and records why.
+  # The gate project's test command reads WS_SECURITY_DIFF_ALLOW_SECRETS: a merge whose override leaked into the
+  # suite disables this project's own secret blocks, so the suite fails and the merge is undone.
+  mkdir -p "$gate"
+  git -C "$gate" init -q -b main
+  printf 'base\n' > "$gate/a.txt"
+  git -C "$gate" add a.txt
+  git -C "$gate" -c user.name=t -c user.email=t@t commit -qm base
+  slugx="secretmerge-$(basename "$t" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')"
+  printf "PROJECT_PATH=\"%s\"\nPROJECT_BRANCH=\"main\"\nTEST_CMD='%s'\n" "$gate" "$gate_test" > "$root/projects/$slugx.conf"
+  mkdir -p "$root/runs/$slugx" "$root/plans/$slugx"
+  mg() { x=0; out=$(bash "$root/scripts/merge.sh" --project "$slugx" "$@" 2>&1) || x=$?; }
+  git -C "$gate" checkout -q -b agent/keybranch main
+  printf 'one\ntwo\n%s\n' "$pem" > "$gate/keys.txt"
+  git -C "$gate" add keys.txt
+  git -C "$gate" -c user.name=t -c user.email=t@t commit -qm key
+  gtip=$(git -C "$gate" rev-parse HEAD); git -C "$gate" checkout -q main; gpre=$(git -C "$gate" rev-parse HEAD)
+  mg --no-review "selftest secret scan" keybranch "$gtip"
+  if [ "$x" = 1 ] && grep -qx 'keys.txt:3: private-key' <<< "$out" && grep -q 'secret scan blocked the merge' <<< "$out" \
+    && [ "$(git -C "$gate" rev-parse HEAD)" = "$gpre" ] && ! git -C "$gate" merge-base --is-ancestor "$gtip" main; then
+    echo "the merge gate refuses a branch adding a private key, naming file and line ok"
+  else echo "FAIL secret scan merge gate (exit $x): $out"; fails+=(gate); fi
+  mg --no-review "selftest secret scan" --allow-secret-scan "keys.txt is a fixture" keybranch "$gtip"
+  if [ "$x" = 0 ] && git -C "$gate" merge-base --is-ancestor "$gtip" main \
+    && [[ "$(git -C "$gate" log -1 --format=%s main)" == *"; --allow-secret-scan: keys.txt is a fixture)" ]]; then
+    echo "--allow-secret-scan merges the branch, records its reason, and the suite sees no override ok"
+  else echo "FAIL --allow-secret-scan (exit $x): $(git -C "$gate" log -1 --format=%s main 2>/dev/null); $out"; fails+=(override); fi
+  # A clean branch with no override: the same test command passes, so the override is the only difference.
+  git -C "$gate" checkout -q -b agent/cleanbranch main
+  printf 'clean\n' > "$gate/clean.txt"
+  git -C "$gate" add clean.txt
+  git -C "$gate" -c user.name=t -c user.email=t@t commit -qm clean
+  ctip=$(git -C "$gate" rev-parse HEAD); git -C "$gate" checkout -q main; cpre=$(git -C "$gate" rev-parse HEAD)
+  mg --no-review "selftest secret scan" cleanbranch "$ctip"
+  if [ "$x" = 0 ] && git -C "$gate" merge-base --is-ancestor "$ctip" main \
+    && [ "$(git -C "$gate" rev-parse HEAD)" != "$cpre" ]; then
+    echo "the gate project's test command passes on a merge with no override ok"
+  else echo "FAIL secret scan clean merge (exit $x): $out"; fails+=(clean-merge); fi
+  git -C "$gate" checkout -q -b agent/tokenbranch main
+  mkdir -p "$gate/scripts/fixtures"
+  printf 'token: %s\n' "$ghp" > "$gate/scripts/fixtures/token.txt"
+  git -C "$gate" add scripts/fixtures/token.txt
+  git -C "$gate" -c user.name=t -c user.email=t@t commit -qm token
+  ttip=$(git -C "$gate" rev-parse HEAD); git -C "$gate" checkout -q main; tpre=$(git -C "$gate" rev-parse HEAD)
+  mg --no-review "selftest secret scan" tokenbranch "$ttip"
+  if [ "$x" = 1 ] && grep -qx 'scripts/fixtures/token.txt:1: github-token' <<< "$out" \
+    && [ "$(git -C "$gate" rev-parse HEAD)" = "$tpre" ]; then
+    echo "the merge gate refuses a ghp_ token in a test fixture, naming file and line ok"
+  else echo "FAIL secret scan token gate (exit $x): $out"; fails+=(token-gate); fi
+  mg --no-review "selftest secret scan" --allow-secret-scan "the token is a test fixture" tokenbranch "$ttip"
+  if [ "$x" = 0 ] && git -C "$gate" merge-base --is-ancestor "$ttip" main \
+    && [[ "$(git -C "$gate" log -1 --format=%s main)" == *"; --allow-secret-scan: the token is a test fixture)" ]]; then
+    echo "--allow-secret-scan lets the fixture token through and records its reason ok"
+  else echo "FAIL secret scan token override (exit $x): $out"; fails+=(token-override); fi
+  git -C "$gate" checkout -q -b agent/plainbranch main
+  printf 'notes\n' > "$gate/notes.txt"
+  git -C "$gate" add notes.txt
+  git -C "$gate" -c user.name=t -c user.email=t@t commit -qm notes
+  ptip=$(git -C "$gate" rev-parse HEAD); git -C "$gate" checkout -q main
+  mg --no-review "selftest secret scan" --allow-secret-scan "nothing to override" plainbranch "$ptip"
+  if [ "$x" = 0 ] && git -C "$gate" merge-base --is-ancestor "$ptip" main \
+    && grep -q -- '--allow-secret-scan not used' <<< "$out" \
+    && [[ "$(git -C "$gate" log -1 --format=%s main)" != *"--allow-secret-scan"* ]]; then
+    echo "an unused --allow-secret-scan leaves the subject unmarked ok"
+  else echo "FAIL secret scan unused override (exit $x): $out"; fails+=(unused); fi
+  rm -f "$root/projects/$slug.conf" "$root/projects/$slugx.conf"
+  rm -rf "$root/runs/$slug" "$root/plans/$slug" "$root/runs/$slugx" "$root/plans/$slugx"
+  [ ${#fails[@]} -eq 0 ]
+}
+# The release audit's own false positives: an added Python decorator line is not an e-mail address, a real address
+# is still caught, and a real private-key header is caught and named. The PGP pattern the secret scan assembles at
+# run time is covered by secret_scan_cases. <root> is the workspace; <scratch> is a fresh directory the caller
+# removes.
+release_audit_cases() { # <root> <scratch>
+  local root="$1" t="$2" repo="$2/repo" slug out x deco addr keyh
+  local -a fails=()
+  mkdir -p "$repo" "$root/projects"
+  git -C "$repo" init -q -b main
+  git -C "$repo" config user.name t
+  git -C "$repo" config user.email t@t
+  git init -q --bare "$t/public.git"
+  git -C "$repo" remote add public "$t/public.git"
+  printf '2026.11.26\n' > "$repo/VERSION"
+  printf 'base\n' > "$repo/a.txt"
+  git -C "$repo" add VERSION a.txt
+  git -C "$repo" commit -qm base
+  slug="releaseaudit-$(basename "$t" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')"
+  printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$repo" > "$root/projects/$slug.conf"
+  mkdir -p "$root/runs/$slug" "$root/plans/$slug"
+  ra() { x=0; out=$(bash "$root/scripts/release.sh" --project "$slug" --dry-run 2>&1) || x=$?; }
+  ra_commit() { git -C "$repo" add -A; git -C "$repo" commit -qm "$1"; }
+  # The dotted decorator is the shape the old check read as an address (`+` before `@` as its local part); the plain
+  # decorator is the common case. Both are written without spelling the dotted name in this file, which the release
+  # audit itself scans.
+  deco=$(printf '%s%s' '@' 'contextlib.contextmanager')
+  mkdir -p "$repo/app"
+  printf 'from dataclasses import dataclass\nimport contextlib\n\n@dataclass\nclass Point:\n    x: int\n\n%s\ndef ctx():\n    yield\n' "$deco" > "$repo/app/point.py"
+  ra_commit decorator
+  ra
+  if [ "$x" = 0 ] && grep -q 'dry run: would publish' <<< "$out" \
+    && grep -q 'no home paths, user name, e-mail, keys or attribution' <<< "$out" \
+    && ! grep -q 'release audit found' <<< "$out"; then
+    echo "release audit passes an added decorator line and reports no e-mail hit ok"
+  else echo "FAIL release audit decorator (exit $x): $out"; fails+=(decorator); fi
+  # The same check still catches a real address and keeps a numbered line. The address is assembled so this file
+  # does not carry one either.
+  addr=$(printf '%s@%s.%s' someone contoso com)
+  printf 'contact: %s\n' "$addr" > "$repo/contact.txt"
+  ra_commit contact
+  ra
+  if [ "$x" = 1 ] && grep -q 'release audit found' <<< "$out" \
+    && grep -qF "contact: $addr" <<< "$out" && grep -qE '^[0-9]+:contact: ' <<< "$out"; then
+    echo "release audit still catches a real address on an added line ok"
+  else echo "FAIL release audit address (exit $x): $out"; fails+=(address); fi
+  git -C "$repo" rm -q contact.txt
+  ra_commit "no contact"
+  # A private-key header is still caught, with its line.
+  keyh=$(printf -- '-----BEGIN %s PRIVATE KEY-----' OPENSSH)
+  printf '%s\n' "$keyh" > "$repo/id_ed25519"
+  ra_commit key
+  ra
+  if [ "$x" = 1 ] && grep -q 'release audit found' <<< "$out" \
+    && grep -qE "^[0-9]+:$keyh\$" <<< "$out"; then
+    echo "release audit blocks an added private-key header and names the line ok"
+  else echo "FAIL release audit key (exit $x): $out"; fails+=(key); fi
+  rm -f "$root/projects/$slug.conf"
+  rm -rf "$root/runs/$slug" "$root/plans/$slug"
+  [ ${#fails[@]} -eq 0 ]
+}
+# The workspace's version is a release date (Year.Month.Day, one number per release day), with the era on one line
+# in ERA beside it: `ws version` names both, `ws release` accepts a date or a project's own SemVer (X.Y.Z), refuses
+# a development field, and checks a date-shaped version against the calendar (a month outside 1-12, a day past the
+# month's length, a leap day in a common year); the changelog section reader finds a dated heading, and the README's
+# tested-clients table names the model and date it was last tested with and the client versions the code enforces.
+# <root> is the workspace whose code and README the cases read; each case builds its own workspace beneath it.
+calver_cases() { # <root> <scratch>
+  local root="$1" t="$2" ws="$2/ws" proj="$2/proj" slug ver era out x row cells hdr bad hdr_cells rc=0
+  local tested req min_oc min_cc relver tagline
+  slug="calver-$(basename "$t" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/^-*//;s/-*$//')"
+  mkdir -p "$ws/projects" "$proj"
+  cp -a "$root/bin" "$root/scripts" "$root/schema" "$ws/"
+  cp "$root/config.sh" "$root/README.md" "$ws/"
+  cp "$root/VERSION" "$ws/VERSION"
+  [ -f "$root/ERA" ] && cp "$root/ERA" "$ws/ERA"
+  # `ws version` names the era and the date version; a workspace with no ERA prints the date alone.
+  ver=$(tr -d ' \n' < "$ws/VERSION")
+  era=""; [ -s "$ws/ERA" ] && era=$(tr -d ' \n' < "$ws/ERA")
+  x=0; out=$("$ws/bin/ws" version 2>&1) || x=$?
+  if [ "$x" = 0 ] && [ -n "$era" ] && [ "$out" = "Crafting Guild $era ($ver)" ] \
+    && grep -qE '^Crafting Guild [0-9]+ \([0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]+)?\)$' <<< "$out"; then
+    echo "ws version prints the era and the date version ok"
+  else echo "FAIL ws version with an era (exit $x): out=[$out] era=[$era] VERSION=[$ver]"; rc=1; fi
+  rm -f "$ws/ERA"
+  x=0; out=$("$ws/bin/ws" version 2>&1) || x=$?
+  if [ "$x" = 0 ] && [ "$out" = "Crafting Guild $ver" ]; then
+    echo "ws version prints the date alone without ERA ok"
+  else echo "FAIL ws version without an era (exit $x): out=[$out]"; rc=1; fi
+  [ -f "$root/ERA" ] && cp "$root/ERA" "$ws/ERA"
+  # A public version is the project's own SemVer or a calendar date: a SemVer version is accepted as its project
+  # releases it, a date-shaped version (four digits in the first field) must name a real calendar day, a fourth
+  # field is a development version that names the version to set, and the date itself is accepted.
+  git -C "$proj" init -q -b main
+  git -C "$proj" config user.name t; git -C "$proj" config user.email t@t
+  git init -q --bare "$t/public.git"; git init -q --bare "$t/origin.git"
+  git -C "$proj" remote add public "$t/public.git"; git -C "$proj" remote add origin "$t/origin.git"
+  printf '2026.11.26\n' > "$proj/VERSION"; printf '2\n' > "$proj/ERA"; printf 'base\n' > "$proj/a.txt"
+  git -C "$proj" add -A; git -C "$proj" -c user.name=t -c user.email=t@t commit -qm base
+  printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\nRELEASE_MAJOR_BRANCHES=1\n' "$proj" > "$ws/projects/$slug.conf"
+  mkdir -p "$ws/runs/$slug" "$ws/plans/$slug"
+  cv_set() { printf '%s\n' "$1" > "$proj/VERSION"; git -C "$proj" add -A; git -C "$proj" -c user.name=t -c user.email=t@t commit -qm "version $1"; }
+  cv_rel() { x=0; out=$("$ws/bin/ws" --project "$slug" release --no-asset --dry-run 2>&1) || x=$?; }
+  cv_set 2.9.6; cv_rel
+  if [ "$x" = 0 ] && grep -q 'dry run: would publish' <<< "$out" && grep -q 'v2.9.6' <<< "$out"; then
+    echo "release accepts a SemVer version ok"
+  else echo "FAIL release SemVer version (exit $x): $out"; rc=1; fi
+  cv_set 2026.13.40; cv_rel
+  if [ "$x" = 1 ] && grep -q 'not a date in the calendar' <<< "$out"; then
+    echo "release refuses a version that is not a calendar date ok"
+  else echo "FAIL release impossible date (exit $x): $out"; rc=1; fi
+  # Month length and leap year: a day the calendar does not have is refused, so no public tag names one; the leap
+  # day is accepted in a leap year only.
+  for bad in 2026.02.30 2026.04.31 2026.09.31 2027.02.29; do
+    cv_set "$bad"; cv_rel
+    if [ "$x" = 1 ] && grep -q 'not a date in the calendar' <<< "$out"; then
+      echo "release refuses $bad, a day the calendar does not have ok"
+    else echo "FAIL release impossible date $bad (exit $x): $out"; rc=1; fi
+  done
+  cv_set 2028.02.29; cv_rel
+  if [ "$x" = 0 ] && grep -q 'dry run: would publish' <<< "$out" && grep -q 'v2028.02.29' <<< "$out"; then
+    echo "release accepts the leap day 2028.02.29 ok"
+  else echo "FAIL release leap day 2028.02.29 (exit $x): $out"; rc=1; fi
+  # A fourth field is a development version in either shape, and its message names the version to set.
+  cv_set 2.9.6.001; cv_rel
+  if [ "$x" = 1 ] && grep -q 'a development version' <<< "$out" && grep -q 'Set it to 2.9.6 before a public release' <<< "$out"; then
+    echo "release refuses a SemVer development version and names the version to set ok"
+  else echo "FAIL release SemVer development version (exit $x): $out"; rc=1; fi
+  cv_set 2026.11.26.001; cv_rel
+  if [ "$x" = 1 ] && grep -q 'a development version' <<< "$out" && grep -q 'Set it to 2026.11.26 before a public release' <<< "$out"; then
+    echo "release refuses a date development version and names the date to set ok"
+  else echo "FAIL release date development version (exit $x): $out"; rc=1; fi
+  cv_set 2026.11.26; cv_rel
+  if [ "$x" = 0 ] && grep -q 'dry run: would publish' <<< "$out" && grep -q 'v2026.11.26' <<< "$out"; then
+    echo "release dry run accepts the date version ok"
+  else echo "FAIL release date version (exit $x): $out"; rc=1; fi
+  # A date version has no major number of its own: the public branch RELEASE_MAJOR_BRANCHES moves is the era (v2),
+  # not the year the date starts with.
+  x=0; out=$("$ws/bin/ws" --project "$slug" release --no-asset 2>&1) || x=$?
+  if [ "$x" = 0 ] && [ "$(git --git-dir="$t/public.git" rev-parse --verify -q refs/heads/v2 2>/dev/null || true)" = "$(git --git-dir="$t/public.git" rev-parse --verify -q refs/heads/main 2>/dev/null || true)" ] \
+    && [ -z "$(git --git-dir="$t/public.git" rev-parse --verify -q refs/heads/v2026 2>/dev/null || true)" ]; then
+    echo "release moves the era branch v2, not a year branch ok"
+  else echo "FAIL release era branch (exit $x): $out"; rc=1; fi
+  # The changelog section reader returns a dated heading's body and stops at the next one.
+  printf '# Changelog\n\n## 2026.11.26\n\n- the 2026.11.26 body\n- second line\n\n## 2026.11.25\n\n- the older body\n' > "$proj/CHANGELOG.public.md"
+  git -C "$proj" add -A; git -C "$proj" -c user.name=t -c user.email=t@t commit -qm changelog
+  printf 'RELEASE_PATHS=("CHANGELOG.public.md=CHANGELOG.md")\n' >> "$ws/projects/$slug.conf"
+  x=0; out=$(WS_PROJECT= bash -c '. "$1/scripts/lib.sh"; load_project "$2"; release_notes 2026.11.26' _ "$ws" "$slug" 2>&1) || x=$?
+  if [ "$x" = 0 ] && [ "$out" = $'- the 2026.11.26 body\n- second line' ]; then
+    echo "the changelog reader returns a dated section's body ok"
+  else echo "FAIL changelog reader (exit $x): [$out]"; rc=1; fi
+  # The tested-clients table names the model and date each release was last tested with and the client versions the
+  # code enforces, one row per release. The case pins the table's shape, never a row for the workspace's own
+  # VERSION: a private iteration (a fourth field) has no row of its own and must not fail the suite, and the
+  # requirement cell names the minimums read from config.sh and doctor.sh rather than a guess.
+  printf '2099.12.31.004\n' > "$ws/VERSION"
+  hdr=$(grep -m1 -F '| Release |' "$ws/README.md" || true)
+  row=$(awk -F'|' '
+    /^[ \t]*\|/ {
+      v=$2; gsub(/^[ \t]+|[ \t]+$/, "", v)
+      m=$3; gsub(/^[ \t]+|[ \t]+$/, "", m)
+      r=$4; gsub(/^[ \t]+|[ \t]+$/, "", r)
+      if (v ~ /^[0-9][0-9][0-9][0-9]\.[0-9][0-9]\.[0-9][0-9]$/ && m != "" && r != "") { print; exit }
+    }' "$ws/README.md")
+  cells=$(printf '%s\n' "$row" | awk -F'|' '{ n=0; for (i=2; i<NF; i++) if ($i ~ /[^ \t]/) n++; print n }')
+  tested=$(printf '%s\n' "$row" | awk -F'|' '{ print $3 }')
+  req=$(printf '%s\n' "$row" | awk -F'|' '{ print $4 }')
+  relver=$(printf '%s\n' "$row" | awk -F'|' '{ v=$2; gsub(/^[ \t]+|[ \t]+$/, "", v); print v }')
+  hdr_cells=$(printf '%s\n' "$hdr" | awk -F'|' '{ n=0; for (i=2; i<NF; i++) if ($i ~ /[^ \t]/) n++; print n }')
+  if [ -n "$row" ] && [ "$cells" = 3 ] && [ "$hdr_cells" = 3 ] \
+    && grep -q 'Last tested with (model, date)' <<< "$hdr" && grep -q 'Client requirement' <<< "$hdr" \
+    && ! grep -q 'OpenCode lines and versions tested' <<< "$hdr" \
+    && ! grep -qE '[0-9]+\.[0-9]+\.[0-9]+' <<< "$tested"; then
+    echo "the README tested-clients table has a date-version row with a model and no installed client version ok"
+  else echo "FAIL README tested-clients table (row=[$row] cells=${cells:-none} header=[$hdr] hdr_cells=${hdr_cells:-none} tested=[$tested]): $row"; rc=1; fi
+  min_oc=$(sed -n 's/^WS_MIN_OPENCODE="\([0-9.]*\)".*/\1/p' "$ws/config.sh" | head -1)
+  min_cc=$(sed -n 's/^min_claude="\([0-9.]*\)".*/\1/p' "$ws/scripts/doctor.sh" | head -1)
+  if [ -n "$min_oc" ] && [ -n "$min_cc" ] && grep -qF "OpenCode $min_oc or later" <<< "$req" \
+    && grep -qF "Claude Code $min_cc or later" <<< "$req"; then
+    echo "the README client requirement names the minimums the code enforces ok"
+  else echo "FAIL README client requirement (req=[$req] min_oc=[$min_oc] min_cc=[$min_cc]): $row"; rc=1; fi
+  # The tag sentence names the row's release tag and says the earlier SemVer tags stay: the public tags v2.9.5 and
+  # v2.4.2 cannot be moved, so a sentence claiming every tag is a date is false for them.
+  tagline=$(grep -F 'This release is tagged' "$ws/README.md" || true)
+  if [ -n "$relver" ] && grep -qF "\`v$relver\`" <<< "$tagline" && grep -q 'SemVer tags' <<< "$tagline" \
+    && grep -q 'never moved' <<< "$tagline"; then
+    echo "the README tag sentence names the date tag and keeps earlier SemVer tags ok"
+  else echo "FAIL README tag sentence (line=[$tagline])"; rc=1; fi
+  rm -f "$ws/projects/$slug.conf"
+  rm -rf "$ws/runs/$slug" "$ws/plans/$slug"
+  return "$rc"
+}
+# resolve_slug keeps the WS_PROJECT pin and names a pin this workspace recorded no session for while state/current
+# names another project: a 2.x background service carries the project it was last configured for into every shell it
+# starts, so the pin can name a project the session is not on. A pin with a recorded session, a pin agreeing with
+# state/current and an explicit slug stay silent. A bare `ws review` resolves the pin once in bin/ws and hands that
+# slug to review.sh, whose own process then resolves an explicit slug and names nothing again. <root> holds bin/ws,
+# scripts/lib.sh and config.sh; the cases build their own workspace beneath it.
+resolve_slug_pin_cases() { # <root>
+  local root="$1" work ws a b want out err x lines warns rargs rc=0
+  work=$(mktemp -d)
+  ws="$work/ws"
+  mkdir -p "$ws/bin" "$ws/scripts" "$ws/projects" "$ws/state" "$ws/runs/pin-a" "$ws/runs/pin-b" "$work/proj"
+  cp "$root/bin/ws" "$ws/bin/ws"
+  cp "$root/scripts/lib.sh" "$ws/scripts/lib.sh"
+  cp "$root/config.sh" "$ws/config.sh"
+  git -C "$work/proj" init -q -b main
+  for a in pin-a pin-b; do
+    printf 'PROJECT_PATH="%s"\nPROJECT_BRANCH="main"\nTEST_CMD="true"\n' "$work/proj" > "$ws/projects/$a.conf"
+  done
+  a=pin-a; b=pin-b
+  printf '%s\n' "$b" > "$ws/state/current"
+  want="ws: WS_PROJECT=$a but no session was recorded for it; state/current names $b (acting on $a; pass --project to change)"
+  # Two resolutions in one process print the line once: a script that resolves twice does not repeat it.
+  x=0; out=$(WS_PROJECT="$a" bash -c '. "$1/scripts/lib.sh"; resolve_slug; resolve_slug' _ "$ws" 2>"$work/err") || x=$?
+  err=$(< "$work/err")
+  if [ "$x" = 0 ] && [ "$out" = "$(printf '%s\n%s' "$a" "$a")" ] && [ "$err" = "$want" ]; then
+    echo "resolve_slug names a pin with no recorded session once and still returns the pin ok"
+  else echo "resolve_slug pin warning FAILED (exit $x): out=[$out] err=[$err]"; rc=1; fi
+  # A recorded session id is a real second session on that project: silent.
+  printf 'ses_standin\n' > "$ws/runs/$a/session.id"
+  x=0; out=$(WS_PROJECT="$a" bash -c '. "$1/scripts/lib.sh"; resolve_slug' _ "$ws" 2>"$work/err") || x=$?
+  err=$(< "$work/err")
+  if [ "$x" = 0 ] && [ "$out" = "$a" ] && [ -z "$err" ]; then
+    echo "resolve_slug stays silent for a pin whose session was recorded ok"
+  else echo "resolve_slug recorded session FAILED (exit $x): out=[$out] err=[$err]"; rc=1; fi
+  # state/current on the pinned project: the two agree, so there is nothing to name.
+  rm -f "$ws/runs/$a/session.id"
+  printf '%s\n' "$a" > "$ws/state/current"
+  x=0; out=$(WS_PROJECT="$a" bash -c '. "$1/scripts/lib.sh"; resolve_slug' _ "$ws" 2>"$work/err") || x=$?
+  err=$(< "$work/err")
+  if [ "$x" = 0 ] && [ "$out" = "$a" ] && [ -z "$err" ]; then
+    echo "resolve_slug stays silent when the pin agrees with state/current ok"
+  else echo "resolve_slug agreeing pin FAILED (exit $x): out=[$out] err=[$err]"; rc=1; fi
+  # An explicit slug is the caller's own choice, not the environment's: silent, and that slug is returned.
+  printf '%s\n' "$b" > "$ws/state/current"
+  x=0; out=$(WS_PROJECT="$a" bash -c '. "$1/scripts/lib.sh"; resolve_slug "$2"' _ "$ws" "$b" 2>"$work/err") || x=$?
+  err=$(< "$work/err")
+  if [ "$x" = 0 ] && [ "$out" = "$b" ] && [ -z "$err" ]; then
+    echo "resolve_slug stays silent for an explicit slug ok"
+  else echo "resolve_slug explicit slug FAILED (exit $x): out=[$out] err=[$err]"; rc=1; fi
+  # No state/current at all (a fresh checkout): nothing names another project, so nothing is named.
+  rm -f "$ws/state/current"
+  x=0; out=$(WS_PROJECT="$a" bash -c '. "$1/scripts/lib.sh"; resolve_slug' _ "$ws" 2>"$work/err") || x=$?
+  err=$(< "$work/err")
+  if [ "$x" = 0 ] && [ "$out" = "$a" ] && [ -z "$err" ]; then
+    echo "resolve_slug stays silent with no state/current ok"
+  else echo "resolve_slug no state/current FAILED (exit $x): out=[$out] err=[$err]"; rc=1; fi
+  # A bare `ws` command in that state: one warning line on stderr, and the command acts on the pinned project.
+  printf '%s\n' "$b" > "$ws/state/current"
+  x=0; out=$(WS_PROJECT="$a" "$ws/bin/ws" runs 2>"$work/err") || x=$?
+  err=$(< "$work/err"); lines=$(grep -c . "$work/err" || true)
+  if [ "$x" = 0 ] && [ "$out" = "runs for $a:" ] && [ "$lines" = 1 ] && [ "$err" = "$want" ]; then
+    echo "a bare ws command names the pin mismatch once and acts on the pin ok"
+  else echo "ws command pin warning FAILED (exit $x): out=[$out] err=[$err] lines=[$lines]"; rc=1; fi
+  # A bare `ws review` hands the slug bin/ws resolved to review.sh as its leading --project. review.sh runs in its
+  # own process, where a guard set in bin/ws means nothing: without the handoff it resolves the pin again and one
+  # command names the mismatch twice. The stand-in resolves the project as review.sh does and records its arguments.
+  cat > "$ws/scripts/review.sh" <<'PINREVIEW'
+#!/bin/bash
+. "$(dirname "$0")/lib.sh"
+printf '%s\n' "$@" > "$(dirname "$0")/../review-args"
+slug=""; prev=""
+for a in "$@"; do
+  [ "$prev" = --project ] && slug="$a"
+  prev="$a"
+done
+resolve_slug "$slug" >/dev/null
+PINREVIEW
+  chmod +x "$ws/scripts/review.sh"
+  x=0; out=$(WS_PROJECT="$a" "$ws/bin/ws" review demo 2>"$work/err") || x=$?
+  err=$(< "$work/err"); warns=$(grep -c 'but no session was recorded' "$work/err" || true)
+  rargs=$(< "$ws/review-args")
+  if [ "$x" = 0 ] && [ "$warns" = 1 ] && [ "$rargs" = "$(printf '%s\n%s\n%s' --project "$a" demo)" ]; then
+    echo "a bare ws review hands review.sh the pinned slug and names the mismatch once ok"
+  else echo "ws review pin handoff FAILED (exit $x): warns=[$warns] args=[$rargs] err=[$err]"; rc=1; fi
+  rm -rf "$work"
+  [ "$rc" = 0 ]
+}
+# Run only the resolve_slug pin cases, so a change there is checked without the whole suite. The -before form runs
+# them against another revision's lib.sh, so the cases can be shown failing on the code before the change.
+if [ "${1:-}" = --resolve-slug ] || [ "${1:-}" = --resolve-slug-before ]; then
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  root="$WS"
+  if [ "${1:-}" = --resolve-slug-before ]; then
+    ref="${2:?usage: selftest.sh --resolve-slug-before <git-ref>}"
+    root="$d/ws"; mkdir -p "$root/bin" "$root/scripts"
+    cp "$WS/bin/ws" "$root/bin/ws"
+    cp "$WS/scripts/lib.sh" "$root/scripts/lib.sh"
+    cp "$WS/config.sh" "$root/config.sh"
+    git -C "$WS" show "$ref:scripts/lib.sh" > "$root/scripts/lib.sh" || { echo "no scripts/lib.sh at $ref"; exit 1; }
+  fi
+  resolve_slug_pin_cases "$root"
+  exit $?
+fi
 # Run only the evidence-archive cases, so a change there is checked without the whole suite. The -before form runs
 # them against another revision's merge.sh, so the cases can be shown failing on the code before the change.
 if [ "${1:-}" = --evidence-archive ] || [ "${1:-}" = --evidence-archive-before ]; then
@@ -1046,6 +1868,88 @@ if [ "${1:-}" = --security-diff ]; then
   d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
   security_diff_cases "$WS" "$d"
   exit $?
+fi
+# Run only the path-audit cases, against this worktree or another revision's bin/ws, cold-start.sh, lib.sh and the
+# audit itself: a ref without the audit has it removed, so the -before form shows the cases failing on the code
+# before the change.
+if [ "${1:-}" = --path-audit ] || [ "${1:-}" = --path-audit-before ]; then
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  root="$WS"
+  if [ "${1:-}" = --path-audit-before ]; then
+    ref="${2:?usage: selftest.sh --path-audit-before <git-ref>}"
+    root="$d/ws"; mkdir -p "$root/projects"
+    cp -a "$WS/bin" "$WS/scripts" "$WS/schema" "$root/"
+    cp "$WS/config.sh" "$WS/VERSION" "$root/"
+    for f in bin/ws scripts/cold-start.sh scripts/lib.sh scripts/path-audit.sh; do
+      git -C "$WS" show "$ref:$f" > "$root/$f" 2>/dev/null || rm -f "$root/$f"
+    done
+  fi
+  path_audit_cases "$root" "$d/case"; exit $?
+fi
+# Run only the secret-scan cases, against this worktree or another revision's merge.sh and the scan: a ref without
+# the scan has it removed, so the -before form shows the cases failing on the code before the change.
+if [ "${1:-}" = --secret-scan ] || [ "${1:-}" = --secret-scan-before ]; then
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  root="$WS"
+  if [ "${1:-}" = --secret-scan-before ]; then
+    ref="${2:?usage: selftest.sh --secret-scan-before <git-ref>}"
+    root="$d/ws"; mkdir -p "$root/projects"
+    cp -a "$WS/bin" "$WS/scripts" "$WS/schema" "$root/"
+    cp "$WS/config.sh" "$WS/VERSION" "$root/"
+    for f in scripts/merge.sh scripts/lib.sh scripts/security-diff.sh scripts/verify.sh scripts/secret-scan.sh; do
+      git -C "$WS" show "$ref:$f" > "$root/$f" 2>/dev/null || rm -f "$root/$f"
+    done
+  fi
+  secret_scan_cases "$root" "$d/case"; exit $?
+fi
+# Run only the release audit cases, against this worktree or another revision's release and secret scan: the -before
+# form shows the decorator and key cases failing on the code before the change.
+if [ "${1:-}" = --release-audit ] || [ "${1:-}" = --release-audit-before ]; then
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  root="$WS"
+  if [ "${1:-}" = --release-audit-before ]; then
+    ref="${2:?usage: selftest.sh --release-audit-before <git-ref>}"
+    root="$d/ws"; mkdir -p "$root/projects"
+    cp -a "$WS/bin" "$WS/scripts" "$WS/schema" "$root/"
+    cp "$WS/config.sh" "$WS/VERSION" "$root/"
+    for f in scripts/release.sh scripts/secret-scan.sh; do
+      git -C "$WS" show "$ref:$f" > "$root/$f" 2>/dev/null || rm -f "$root/$f"
+    done
+  fi
+  release_audit_cases "$root" "$d/case"; exit $?
+fi
+# Run only the calendar-version cases, against this worktree or another revision's bin/ws, lib.sh, release.sh and
+# README: the -before form shows the version, release-shape and tested-clients cases failing on the code before the
+# change.
+if [ "${1:-}" = --calver ] || [ "${1:-}" = --calver-before ]; then
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  root="$WS"
+  if [ "${1:-}" = --calver-before ]; then
+    ref="${2:?usage: selftest.sh --calver-before <git-ref>}"
+    root="$d/ws"; mkdir -p "$root/projects"
+    cp -a "$WS/bin" "$WS/scripts" "$WS/schema" "$root/"
+    cp "$WS/config.sh" "$root/"
+    for f in VERSION ERA bin/ws scripts/lib.sh scripts/release.sh README.md; do
+      git -C "$WS" show "$ref:$f" > "$root/$f" 2>/dev/null || rm -f "$root/$f"
+    done
+  fi
+  calver_cases "$root" "$d/case"; exit $?
+fi
+# Run only the orchestrator-record check, against this worktree or another revision's record script: the -before
+# form shows the new merge-subject case failing on the code before the change.
+if [ "${1:-}" = --orchestrator-record ] || [ "${1:-}" = --orchestrator-record-before ]; then
+  d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+  root="$WS"
+  if [ "${1:-}" = --orchestrator-record-before ]; then
+    ref="${2:?usage: selftest.sh --orchestrator-record-before <git-ref>}"
+    root="$d/ws"; mkdir -p "$root/projects"
+    cp -a "$WS/bin" "$WS/scripts" "$WS/schema" "$root/"
+    cp "$WS/config.sh" "$WS/VERSION" "$root/"
+    for f in scripts/orchestrator-record.sh scripts/lib.sh; do
+      git -C "$WS" show "$ref:$f" > "$root/$f" 2>/dev/null || rm -f "$root/$f"
+    done
+  fi
+  bash "$root/scripts/orchestrator-record-check.sh"; exit $?
 fi
 # The evidence archive cases: the table's text/bulk split, prune's dry run, the prune itself, and an archive newer
 # than the window. The tree is written here, since the suite runs no merge; WS_EVIDENCE_MAX_MB=1 puts the size rule
@@ -1164,6 +2068,9 @@ if [ "${1:-}" = --result-format ]; then
   result_format_cases "$WS" "$d"
   exit $?
 fi
+# Run only the intention-map case, so a moved file is checked without the whole suite. A second argument checks a
+# scratch tree instead of the workspace; that is how the case's own teeth are shown.
+if [ "${1:-}" = --make-it-yours ]; then make_it_yours_case "${2:-$WS}"; exit $?; fi
 # Run only the browser MCP cases, so a change there is checked without the whole suite.
 if [ "${1:-}" = --doctor-browser ]; then exec bash "$WS/scripts/doctor-browser-selftest.sh"; fi
 # Run only the client-requirement cases, so a change there is checked without the whole suite.
@@ -1174,6 +2081,8 @@ if [ "${1:-}" = --bg-check ]; then exec bash "$WS/scripts/bg-check.sh"; fi
 if [ "${1:-}" = --security-check ]; then exec bash "$WS/scripts/security-check.sh"; fi
 # Run only the background-research cases, so a change there is checked without the whole suite.
 if [ "${1:-}" = --ask-check ]; then exec bash "$WS/scripts/ask-check.sh"; fi
+# Run only the research-role cases, so a change there is checked without the whole suite.
+if [ "${1:-}" = --research-cases ]; then exec bash "$WS/scripts/research-cases.sh"; fi
 # Run only the link-check cases, so a change there is checked without the whole suite.
 if [ "${1:-}" = --link-check ]; then exec bash "$WS/scripts/link-check-check.sh"; fi
 # Run only the wake cases, so a change there is checked without the whole suite.
@@ -1608,6 +2517,88 @@ OC
   { [ "$x" = 0 ] && [ "$(cat "$vn")" = max ]; } \
     && echo "ws review --variant max reaches opencode run ok" \
     || { echo "ws review variant FAILED (exit $x): $out (variants: $(paste -sd, "$vn"))"; rc=1; }
+  # A raw log as a crashed retry leaves it: the client's prefix line and events, the result line review.sh reads, and
+  # the bytes a truncation splices in (NUL padding, a straggling partial line, a second session's events). The fixture
+  # launcher hands these out byte for byte, because a stub that prints clean events cannot reproduce a spliced log.
+  local fx="$t/rawfix" n
+  rm -rf "$fx"; mkdir -p "$fx/a" "$fx/b" "$fx/c" "$fx/d"
+  raw_result() { # <summary> <cost>
+    printf '{"type":"result","agent":"opencode","total_cost_usd":%s,"model":"stub","structured_output":{"verdict":"merge","summary":"%s","blocking":[],"suggestions":[]},"result":"%s review"}' "$2" "$1" "$1"
+  }
+  printf 'opencode-review: ok: stand-in ZDR verdict\n{"type":"step_start","sessionID":"ses_a"}\n' > "$fx/a/one.raw"
+  raw_result nulraw 0.02 >> "$fx/a/one.raw"
+  printf '\n' >> "$fx/a/one.raw"
+  head -c 32 /dev/zero >> "$fx/a/one.raw"
+  printf '\n{"type":"step_start","sessionID":"ses_a"}\n' >> "$fx/a/one.raw"
+  printf 'opencode-review: ok: stand-in ZDR verdict\n{"type":"step_start","sessionID":"ses_a"}\n' > "$fx/b/one.raw"
+  raw_result older-session 0.01 >> "$fx/b/one.raw"
+  printf '\n{"type":"step_start","sessionID":"ses_b"}\n' >> "$fx/b/one.raw"
+  raw_result newer-session 0.03 >> "$fx/b/one.raw"
+  printf '\n{"type":"result","agent":"opencode","structured_outp' >> "$fx/b/one.raw"
+  printf 'opencode-review: ok: stand-in ZDR verdict\n{"type":"step_start","sessionID":"ses_p2"}\n' > "$fx/c/pass2.raw"
+  printf '{"type":"result","agent":"opencode","total_cost_usd":0.01,"model":"stub","structured_output":null,"result":"stand-in pass 2 gives no review"}\n' >> "$fx/c/pass2.raw"
+  printf 'opencode-review: ok: stand-in ZDR verdict\n{"type":"step_start","sessionID":"ses_p2r"}\n' > "$fx/c/pass2-retry1.raw"
+  raw_result 'retry review' 0.02 >> "$fx/c/pass2-retry1.raw"
+  printf '\n' >> "$fx/c/pass2-retry1.raw"
+  printf 'opencode-review: ok: stand-in ZDR verdict\n{"type":"step_start","sessionID":"ses_d"}\n' > "$fx/d/one.raw"
+  printf '{"type":"result","agent":"opencode","total_cost_usd":0,"model":"stub","structured_output":null,"result":"stand-in server error"}\n' >> "$fx/d/one.raw"
+  cp "$w/scripts/opencode-review.sh" "$w/scripts/opencode-review-real.sh"
+  cat > "$w/scripts/opencode-review.sh" <<'RAWSTUB'
+#!/bin/bash
+# A fixture log in place of the client, byte for byte: a case shows what a truncated or spliced raw holds, which no
+# stand-in that prints clean events can. A log with no fixture falls through to the real launcher, which lives beside
+# this one so it finds its own lib.sh.
+log=""
+args=("$@")
+while [ $# -gt 0 ]; do case "$1" in --log) log="$2"; shift 2 ;; *) shift ;; esac; done
+pass=""; retry=""
+case "$log" in *.pass1.*) pass=1 ;; *.pass2.*) pass=2 ;; *.pass3.*) pass=3 ;; esac
+case "$log" in *.retry1.*) retry=1 ;; *.retry2.*) retry=2 ;; esac
+if [ -n "$pass" ] && [ -n "$retry" ]; then key="pass${pass}-retry${retry}"
+elif [ -n "$pass" ]; then key="pass$pass"
+else key="one"; fi
+if [ -n "${OC_RAW_FIXTURES:-}" ] && [ -f "$OC_RAW_FIXTURES/$key.raw" ]; then
+  cat "$OC_RAW_FIXTURES/$key.raw"; exit 0
+fi
+exec "$(dirname "$0")/opencode-review-real.sh" "${args[@]}"
+RAWSTUB
+  chmod +x "$w/scripts/opencode-review.sh" "$w/scripts/opencode-review-real.sh"
+  # (a) NUL bytes in the log: grep calls it a binary file, so the review must still be read out of it.
+  rm -f "$rj.json" "$rj.md"; rm -f "$rj".pass*
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" OC_RAW_FIXTURES="$fx/a" \
+    "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
+  { [ "$x" = 0 ] && [ "$(jq -r '.summary' "$rj.json" 2>/dev/null)" = nulraw ]; } \
+    && echo "a review log holding NUL bytes still yields its review ok" \
+    || { echo "NUL-byte review log FAILED (exit $x): $out (record: $(cat "$rj.json" 2>/dev/null))"; rc=1; }
+  # (b) Two sessions in one log, the newer review last, and a straggling partial line after it: the newer review wins.
+  rm -f "$rj.json" "$rj.md"; rm -f "$rj".pass*
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" OC_RAW_FIXTURES="$fx/b" \
+    "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
+  { [ "$x" = 0 ] && [ "$(jq -r '.summary' "$rj.json" 2>/dev/null)" = newer-session ]; } \
+    && echo "a review log holding two sessions yields the newer review ok" \
+    || { echo "two-session review log FAILED (exit $x): $out (record: $(cat "$rj.json" 2>/dev/null))"; rc=1; }
+  # (c) A retried pass writes its own raw and err files, keeps the attempt's log intact, and takes the retry's review.
+  rm -f "$rj.json" "$rj.md"; rm -f "$rj".pass*
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" WS_REVIEW_PASSES=2 OC_RAW_FIXTURES="$fx/c" \
+    "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
+  { [ "$x" = 0 ] && grep -q 'pass 2 failed; retrying it once (raw: .*pass2\.retry1\.json\.raw; err: .*pass2\.retry1\.err)' <<< "$out" \
+    && [ -s "$rj.pass2.retry1.json.raw" ] && [ -e "$rj.pass2.retry1.err" ] \
+    && cmp -s "$rj.pass2.json.raw" "$fx/c/pass2.raw" \
+    && [ "$(jq -r '.summary' "$rj.pass2.json" 2>/dev/null)" = 'retry review' ] \
+    && [ "$(jq -r '.verdict' "$rj.json" 2>/dev/null)" = merge ]; } \
+    && echo "a retried pass writes its own log, keeps the attempt's, and takes the retry's review ok" \
+    || { echo "retried pass log FAILED (exit $x): $out (record: $(cat "$rj.json" 2>/dev/null))"; rc=1; }
+  # (d) A log with no structured output still fails the pass with the message it printed before.
+  rm -f "$rj.json" "$rj.md"; rm -f "$rj".pass*
+  : > "$cl"; : > "$oc"; x=0
+  out=$(env "${common[@]}" OC_RAW_FIXTURES="$fx/d" \
+    "$w/scripts/review.sh" --project "$slugx" --agent opencode docsonly 2>&1) || x=$?
+  { [ "$x" = 2 ] && grep -q 'review failed: stand-in server error' <<< "$out" && [ ! -e "$rj.json" ]; } \
+    && echo "a review log with no review still fails the pass ok" \
+    || { echo "review log without a review FAILED (exit $x): $out"; rc=1; }
   return "$rc"
 }
 # Run only the review-agent cases against the worktree's own scripts.
@@ -2195,6 +3186,7 @@ export WS_REVIEW_AGENT= WS_REVIEW_PASSES=1   # likewise for the installation's r
 export WS_REVIEW_SHADOW=   # shadow reviews are checked here with their own env; a private config must not start them in every review above
 # This machine's real Go spend must not hold or warn on the stand-ins below; the allowance cases point at their own fixture.
 export WS_ALLOWANCE_DB= WS_ALLOWANCE_HOLD=80 WS_ALLOWANCE_STARTS= WS_ALLOWANCE_LIMITS='opencode-go/deepseek-v4.1-flash=20,50,100 opencode-go/deepseek-v4-pro=3,7.5,15'
+export WS_ALLOWANCE_PRICES='opencode-go/deepseek-v4.1-flash=0.15,0.6,0.003,0,0.6 opencode-go/deepseek-v4-pro=0.66,1.98,0.022,0,1.98 opencode-go/gpt-5.6-luna=0.2,1.2,0.02,0.25,1.2'
 # The Claude cap cases set their own; a real day's ledger must not refuse the stand-in jobs below.
 export WS_CLAUDE_DAY_CAP=
 # This suite runs inside the tree a merge is testing: a tool that committed the files it writes would put commits in
@@ -2553,6 +3545,9 @@ d_deny_built=$( (eval "$deny_block"; printf '%s\n' "${#interpreter_deny[@]}") )
   && grep -qF "$d_deny_built rules" "$WS/docs/tool-calls.md"; } \
   && echo "docs/tool-calls.md's counts match dispatch.sh ($d_tools tool entries, $d_bash shell patterns, $d_deny deny patterns: $d_deny_written written out and $d_deny_built interpreter rules) ok" \
   || { echo "docs/tool-calls.md counts FAILED: dispatch.sh has $d_tools entries, $d_bash shell patterns, $d_deny deny patterns ($d_deny_written written out, $d_deny_built interpreter rules)"; exit 1; }
+# The intention map keeps step with the tree: every path docs/make-it-yours.md names in backticks exists, so a moved
+# file is renamed there in the same change instead of the guide going stale.
+make_it_yours_case "$WS" || exit 1
 # Cold start suggests the command for a plan with more than one In flight block.
 printf '# suggest\n\n**In flight right now (new):** a\n\n**In flight right now (old):** b\n' > "$WS/plans/$slug/archive-suggest.md"
 cs=$("$WS/scripts/cold-start.sh" "$slug" 2>&1 || true); grep -q 'ws archive-inflight' <<< "$cs" \
@@ -2570,6 +3565,36 @@ rm -f "$WS/runs/$slug/csbuild.pid" "$WS/runs/$slug/chain.pid" "$WS/runs/$slug/ch
 { grep -q 'RUNNING csbuild' <<< "$cs" && ! grep -q 'RUNNING chain' <<< "$cs" && grep -q 'CHAIN running' <<< "$cs"; } \
   && echo "cold start leaves the chain to the CHAIN line ok" \
   || { echo "cold start chain duplicate FAILED"; echo "$cs"; exit 1; }
+# A stopped chain line carries "before the next run, note this stop: ws stop-note …". Once runs/<slug>/stop-notes.tsv
+# holds a row for that stop, ws stop-note refuses a second note, so cold start shows the note's time and class in place
+# of the instruction. A row for the same step but another stop time is another stop and leaves the line alone.
+csnotest='stopped 2026-11-19 00:31 MST csnote: the builder did not finish (status partial); before the next run, note this stop: ws stop-note csnote handled|re-explained "<note>"'
+csnote_cmd='before the next run, note this stop: ws stop-note csnote handled|re-explained "<note>"'
+printf '%s\n' "$csnotest" > "$WS/runs/$slug/chain.status"
+printf '2026-11-19 00:35 MST\tcsnote\tthe builder did not finish (status partial)\thandled\ta note\t2026-11-19 00:31 MST\n' > "$WS/runs/$slug/stop-notes.tsv"
+cs=$("$WS/scripts/cold-start.sh" "$slug" 2>&1)
+{ grep -qF 'chain: stopped 2026-11-19 00:31 MST csnote: the builder did not finish (status partial) (noted 2026-11-19 00:35 MST as handled)' <<< "$cs" \
+  && ! grep -qF 'note this stop' <<< "$cs"; } \
+  && echo "cold start shows a noted stop in place of the note instruction ok" \
+  || { echo "cold start noted stop FAILED"; echo "$cs"; exit 1; }
+rm -f "$WS/runs/$slug/stop-notes.tsv"
+cs=$("$WS/scripts/cold-start.sh" "$slug" 2>&1)
+grep -qF "$csnote_cmd" <<< "$cs" \
+  && echo "cold start keeps the note instruction when no note exists ok" \
+  || { echo "cold start unnoted stop FAILED"; echo "$cs"; exit 1; }
+printf '2026-11-19 00:35 MST\tcsnote\tthe builder did not finish (status partial)\thandled\ta note\t2026-11-18 23:00 MST\n' > "$WS/runs/$slug/stop-notes.tsv"
+cs=$("$WS/scripts/cold-start.sh" "$slug" 2>&1)
+{ grep -qF "$csnote_cmd" <<< "$cs" && ! grep -qF '(noted ' <<< "$cs"; } \
+  && echo "cold start does not match a note for another stop at the same step ok" \
+  || { echo "cold start other stop note FAILED"; echo "$cs"; exit 1; }
+# A status that is not a stop is printed unchanged, whatever the notes file holds.
+csd_status() { ( . "$WS/scripts/lib.sh" >/dev/null; chain_status_display "$@" ); }
+csd_done=$(csd_status "$WS/runs/$slug" 'done: selftest')
+csd_running=$(csd_status "$WS/runs/$slug" 'running csstep')
+{ [ "$csd_done" = 'done: selftest' ] && [ "$csd_running" = 'running csstep' ]; } \
+  && echo "cold start leaves a chain status that is not stopped unchanged ok" \
+  || { echo "cold start non-stopped chain status FAILED: '$csd_done' '$csd_running'"; exit 1; }
+rm -f "$WS/runs/$slug/stop-notes.tsv" "$WS/runs/$slug/chain.status"
 # A live ws bg job is named with its run time and log path; a dead pid and a job that wrote its exit print nothing,
 # and a project with no bg dir keeps the output it had.
 rm -rf "$WS/runs/$slug/bg"
@@ -2612,7 +3637,33 @@ for index, row in enumerate(sys.argv[3:]):
 db.commit()
 PY
 }
+# The 2.x shape: one session_message row per message, with the model, the client's cost and the token classes in its
+# JSON. al_sdb <file> <model:cost:age:input:output:cache-read:cache-write:reasoning>...; "other" is a Claude-provider
+# row, and `-` for every token class leaves the row's tokens out altogether.
+al_sdb() { python3 -I - "$al_now" "$@" <<'PY'
+import json, sqlite3, sys
+now, path = int(sys.argv[1]), sys.argv[2]
+db = sqlite3.connect(path)
+db.execute("create table if not exists session_message (id text primary key, session_id text, time_created integer, time_updated integer, data text)")
+for index, row in enumerate(sys.argv[3:]):
+    model, cost, age, tokens_in, tokens_out, cache_read, cache_write, reasoning = row.split(":")
+    created = (now - int(age)) * 1000
+    data = {"role": "assistant", "model": {"providerID": "anthropic" if model == "other" else "opencode-go", "id": model},
+            "cost": float(cost)}
+    if tokens_in != "-":
+        data["tokens"] = {"input": int(tokens_in), "output": int(tokens_out),
+                          "cache": {"read": int(cache_read), "write": int(cache_write)},
+                          "reasoning": int(reasoning)}
+    db.execute("insert into session_message values (?, 's', ?, ?, ?)", (f"s{created}-{index}", created, created, json.dumps(data)))
+db.commit()
+PY
+}
 alf=deepseek-v4.1-flash; aldb="$T/allowance-past.db"; alclear="$T/allowance-clear.db"
+# The meter required --prices before token-class pricing existed, and a teeth run reverts the meter to the merge
+# base, so the helpers below pass the table only when the meter's usage line names the flag.
+al_usage=$(python3 -I "$WS/scripts/allowance.py" 2>&1 || true)
+al_prices=()
+case "$al_usage" in *--prices*) al_prices=(--prices "$WS_ALLOWANCE_PRICES") ;; esac
 # Flash: $17 at 4h55m ago (85% of the $20 5h limit) and $1 of older spend; a Claude row and a zero-cost row do not count.
 al_db "$aldb" "$alf:17:17700" "$alf:1:90000" "$alf:0:60" "other:500:60" "deepseek-v4-pro:1:3600"
 al_db "$alclear" "$alf:2:3600"
@@ -2660,7 +3711,7 @@ out=$(WS_ALLOWANCE_DB="$alpool" WS_ALLOWANCE_LIMITS="$plim" "$WS/bin/ws" --proje
   && echo "the allowance sums one shared pool ok" || { echo "allowance shared pool FAILED (exit $x): $out"; exit 1; }
 # The hold uses the sum: Flash $17 of $40 (42.5%) and Pro $6 of $12 (50%) are each under 80%, but together 92.5%.
 alsum="$T/allowance-sum.db"; al_db "$alsum" "$alf:17:3600" "deepseek-v4-pro:6:3600"
-al_sum_check() { python3 -I "$WS/scripts/allowance.py" check --db "$alsum" --hold 80 --limits "$plim" --model "$1" --now "$al_now"; }
+al_sum_check() { python3 -I "$WS/scripts/allowance.py" check --db "$alsum" --hold 80 --limits "$plim" "${al_prices[@]}" --model "$1" --now "$al_now"; }
 x=0; out=$(al_sum_check "opencode-go/$alf") || x=$?; x2=0; out2=$(al_sum_check opencode-go/deepseek-v4-pro) || x2=$?
 [ "$x" = 3 ] && [ "$x2" = 3 ] && grep -q 'summed ~92\.5%' <<< "$out" && grep -q 'deepseek-v4-pro' <<< "$out" \
   && echo "the hold fires on the shared pool sum ok" || { echo "allowance shared pool hold FAILED ($x, $x2): $out / $out2"; exit 1; }
@@ -2675,9 +3726,106 @@ out=$(WS_ALLOWANCE_DB="$alstart" WS_ALLOWANCE_LIMITS="$plim" "$WS/bin/ws" --proj
 x=0; out=$(WS_ALLOWANCE_DB="$alstart" WS_ALLOWANCE_LIMITS="$plim" "$WS/bin/ws" --project "$slug" allowance --now "$al_now" --starts '1,2' 2>&1) || x=$?
 [ "$x" = 2 ] && grep -q 'WS_ALLOWANCE_STARTS' <<< "$out" && echo "a malformed start list fails loud ok" || { echo "allowance starts malformed FAILED (exit $x): $out"; exit 1; }
 # The window rolls: the $17 is 4h55m old at al_now and leaves the 5h window five minutes on, with no change to the database.
-al_check() { python3 -I "$WS/scripts/allowance.py" check --db "$aldb" --hold 80 --limits "$WS_ALLOWANCE_LIMITS" --model "opencode-go/$alf" --now "$1"; }
+al_check() { python3 -I "$WS/scripts/allowance.py" check --db "$aldb" --hold 80 --limits "$WS_ALLOWANCE_LIMITS" "${al_prices[@]}" --model "opencode-go/$alf" --now "$1"; }
 out=$(al_check "$al_now") && x=0 || x=$?; x2=0; al_check "$((al_now + 301))" >/dev/null || x2=$?
 [ "$x" = 3 ] && [ "$x2" = 0 ] && grep -q 'clears about' <<< "$out" && echo "the hold clears when spend leaves the rolling window ok" || { echo "allowance rolling window FAILED ($x, $x2): $out"; exit 1; }
+# A readable 2.x store whose session_message holds no row yet, and has no legacy table, is zero spend: the table is
+# there, so the meter must not call the store unreadable.
+alem="$T/allowance-empty.db"; al_sdb "$alem"
+out=$(WS_ALLOWANCE_LIMITS="$plim" alws "$alem" allowance --now "$al_now") && x=0 || x=1
+[ "$x" = 0 ] && grep -qE "^5h rolling +summed ~0\.0%" <<< "$out" && ! grep -q 'allowance meter failed' <<< "$out" \
+  && echo "an empty session_message table reads zero spend ok" || { echo "an empty session_message table reads zero spend FAILED"; printf '%s\n' "$out"; exit 1; }
+# A 2.x row the client priced keeps the client's own figure: $1.50 stored beside tokens that would price at $1.353.
+alc="$T/allowance-cost.db"; al_sdb "$alc" "$alf:1.5:60:1000000:1000000:1000000:0:1000000"
+out=$(WS_ALLOWANCE_LIMITS="$plim" alws "$alc" allowance --now "$al_now") && x=0 || x=1
+[ "$x" = 0 ] && grep -qE "^5h rolling +summed ~3\.8%.*$alf +~\\\$1\.50/\\\$40 3\.8%" <<< "$out" \
+  && echo "a 2.x row with a stored cost keeps it ok" || { echo "a 2.x row with a stored cost keeps it FAILED"; printf '%s\n' "$out"; exit 1; }
+# A 2.x row the client stopped pricing is priced from its token classes: 1M of each at Flash's $0.15, $0.60, $0.003,
+# $0.00 cache write and $0.60 is $1.353, so a $1.353 limit reads 100.0% (a $1.350 total would read 99.8%).
+alz="$T/allowance-zero.db"; al_sdb "$alz" "$alf:0:60:1000000:1000000:1000000:0:1000000"
+zlim='opencode-go/deepseek-v4.1-flash=1.353,1.353,1.353'
+out=$(WS_ALLOWANCE_LIMITS="$zlim" alws "$alz" allowance --now "$al_now") && x=0 || x=1
+[ "$x" = 0 ] && grep -qE "^5h rolling +summed ~100\.0%.*$alf +~\\\$1\.35/\\\$1\.353 100\.0%" <<< "$out" \
+  && echo "a 2.x row with cost 0 is priced from its tokens ok" || { echo "allowance priced estimate FAILED (exit $x): $out"; exit 1; }
+# A model with no row in WS_ALLOWANCE_PRICES whose stored cost is 0 is unmeasured, never $0: the report names it,
+# shows its cell as unmeasured rather than a $0.00 spend, and check answers 4.
+alq="$T/allowance-unpriced.db"; al_sdb "$alq" "qwen3.7-plus:0:60:1000000:1000000:0:0:0"
+qlim="$plim opencode-go/qwen3.7-plus=1,1,1"
+out=$(WS_ALLOWANCE_LIMITS="$qlim" alws "$alq" allowance --now "$al_now") && x=0 || x=1
+x2=0; out2=$(python3 -I "$WS/scripts/allowance.py" check --db "$alq" --hold 80 --limits "$qlim" --prices "$WS_ALLOWANCE_PRICES" --model opencode-go/qwen3.7-plus --now "$al_now") || x2=$?
+[ "$x" = 0 ] && [ "$x2" = 4 ] && grep -q 'opencode-go/qwen3.7-plus  not measured: stored cost is 0 and no price in WS_ALLOWANCE_PRICES' <<< "$out" \
+  && grep -q 'no price in WS_ALLOWANCE_PRICES' <<< "$out2" \
+  && grep -qE "^5h rolling .*opencode-go/qwen3\.7-plus unmeasured \(not counted\)" <<< "$out" \
+  && ! grep -qE 'qwen3\.7-plus +~\$0\.00' <<< "$out" \
+  && echo "an unpriced 2.x model reads unmeasured ok" || { echo "allowance unmeasured model FAILED ($x, $x2): $out / $out2"; exit 1; }
+# A row the meter cannot price from tokens either (cost 0, a price row, no token classes at all) is unmeasured, not
+# a $0.00 spend, and check answers 4.
+alnt="$T/allowance-notokens.db"; al_sdb "$alnt" "$alf:0:60:-:-:-:-:-"
+out=$(WS_ALLOWANCE_LIMITS="$plim" alws "$alnt" allowance --now "$al_now") && x=0 || x=1
+x2=0; out2=$(python3 -I "$WS/scripts/allowance.py" check --db "$alnt" --hold 80 --limits "$plim" --model "opencode-go/$alf" --now "$al_now") || x2=$?
+[ "$x" = 0 ] && [ "$x2" = 4 ] && grep -q "$alf  not measured: stored cost is 0 and the row has no token classes" <<< "$out" \
+  && ! grep -qE "$alf +~\$0\.00" <<< "$out" \
+  && echo "a priced row with no token classes reads unmeasured ok" || { echo "allowance no token classes FAILED ($x, $x2): $out / $out2"; exit 1; }
+# A store with no unpriced row prints exactly what it printed before measuredness was decided per window: pinned.
+alc0="$T/allowance-measured-only.db"; al_sdb "$alc0" "$alf:1.2:60:-:-:-:-:-" "deepseek-v4-pro:0.29:60:-:-:-:-:-"
+out=$(WS_ALLOWANCE_LIMITS="$plim" alws "$alc0" allowance --now "$al_now") && x=0 || x=1
+cat > "$T/allowance-measured-only.expected" <<'EOF'
+OpenCode Go spend, one shared, weighted pool. Every number is an estimate (~), from OpenCode's stored cost, or WS_ALLOWANCE_PRICES where it stores none:
+opencode.allowance is not in the local record; windows are taken as rolling, this machine only.
+5h rolling  summed ~5.4% (the hold uses this): opencode-go/deepseek-v4-pro ~$0.29/$12 2.4%, opencode-go/deepseek-v4.1-flash ~$1.20/$40 3.0%
+7d rolling  summed ~2.2% (the hold uses this): opencode-go/deepseek-v4-pro ~$0.29/$30 1.0%, opencode-go/deepseek-v4.1-flash ~$1.20/$100 1.2%
+30d rolling  summed ~1.1% (the hold uses this): opencode-go/deepseek-v4-pro ~$0.29/$60 0.5%, opencode-go/deepseek-v4.1-flash ~$1.20/$200 0.6%
+Hold: 80% of the summed window total (WS_ALLOWANCE_HOLD). Held: ws bench run, ws review-compare, shadow reviews.
+The Console shows the real remainder; a model that stopped below its limit here means the limits need lowering.
+EOF
+x3=0; diff -u "$T/allowance-measured-only.expected" <(printf '%s\n' "$out") >/dev/null || x3=1
+[ "$x" = 0 ] && [ "$x3" = 0 ] && echo "a store with no unpriced row keeps the report byte for byte ok" \
+  || { echo "allowance measured-only report FAILED (exit $x)"; diff -u "$T/allowance-measured-only.expected" <(printf '%s\n' "$out"); exit 1; }
+# An unpriced row decides measuredness in its own window only: the 5-hour window holds the unpriced row with only
+# a priced $1 before it, so it reads unmeasured there, while the 30-day window counts that $1 and names the row.
+alim='opencode-go/deepseek-v4.1-flash=40,100,200'
+alw1="$T/allowance-unpriced-window.db"; al_sdb "$alw1" "$alf:1:21600:-:-:-:-:-" "$alf:0:60:-:-:-:-:-"
+out=$(WS_ALLOWANCE_LIMITS="$alim" alws "$alw1" allowance --now "$al_now") && x=0 || x=1
+x2=0; python3 -I "$WS/scripts/allowance.py" check --db "$alw1" --hold 80 --limits "$alim" "${al_prices[@]}" --model "opencode-go/$alf" --now "$al_now" >/dev/null || x2=$?
+[ "$x" = 0 ] && [ "$x2" = 4 ] \
+  && grep -qE "^5h rolling +summed ~0\.0%.*$alf unmeasured \(not counted\)" <<< "$out" \
+  && grep -qE "^30d rolling +summed ~0\.5%.*$alf +~\\\$1\.00/\\\$200 0\.5% \+ 1 unpriced \(partly not counted\)" <<< "$out" \
+  && echo "an unpriced row is unmeasured in its own window only ok" || { echo "allowance unpriced window FAILED ($x, $x2): $out"; exit 1; }
+# An unpriced row older than the 5-hour window leaves the priced row inside it measured, and names itself in the
+# 30-day window beside the priced $2.
+alw2="$T/allowance-unpriced-older.db"; al_sdb "$alw2" "$alf:0:21600:-:-:-:-:-" "$alf:2:60:-:-:-:-:-"
+out=$(WS_ALLOWANCE_LIMITS="$alim" alws "$alw2" allowance --now "$al_now") && x=0 || x=1
+[ "$x" = 0 ] && grep -qE "^5h rolling +summed ~5\.0% \(the hold uses this\): opencode-go/$alf +~\\\$2\.00/\\\$40 5\.0%$" <<< "$out" \
+  && grep -qE "^30d rolling +summed ~1\.0%.*$alf +~\\\$2\.00/\\\$200 1\.0% \+ 1 unpriced \(partly not counted\)" <<< "$out" \
+  && echo "an unpriced row outside the window leaves the window measured ok" || { echo "allowance unpriced older FAILED ($x): $out"; exit 1; }
+# A 2.x store with a Claude-provider row and a Go row counts only the Go row: the query filters model.providerID.
+alo="$T/allowance-other-provider.db"; al_sdb "$alo" "$alf:2:60:1000000:1000000:0:0:0" "other:500:60:1000000:1000000:0:0:0"
+out=$(WS_ALLOWANCE_LIMITS="$plim" alws "$alo" allowance --now "$al_now") && x=0 || x=1
+[ "$x" = 0 ] && grep -qE "^5h rolling +summed ~5\.0%.*$alf +~\\\$2\.00/\\\$40" <<< "$out" && ! grep -q anthropic <<< "$out" \
+  && echo "a 2.x store counts only the Go provider's rows ok" || { echo "allowance provider filter FAILED (exit $x): $out"; exit 1; }
+# Cache write is its own price class: luna's $0.25/M turns 1M cache-write tokens stored with cost 0 into $0.25.
+alw="$T/allowance-cache-write.db"; al_sdb "$alw" "gpt-5.6-luna:0:60:0:0:0:1000000:0"
+wlim='opencode-go/gpt-5.6-luna=0.25,0.25,0.25'
+out=$(WS_ALLOWANCE_LIMITS="$wlim" alws "$alw" allowance --now "$al_now") && x=0 || x=1
+[ "$x" = 0 ] && grep -qE "^5h rolling +summed ~100\.0%.*gpt-5\.6-luna +~\\\$0\.25/\\\$0\.25 100\.0%" <<< "$out" \
+  && echo "a cache-write token class is priced ok" || { echo "allowance cache write FAILED (exit $x): $out"; exit 1; }
+# A database with both tables counts session_message only: $2 stored there beside a legacy $5, never $7.
+alb="$T/allowance-both.db"; al_sdb "$alb" "$alf:2:60:1000000:1000000:0:0:0"; al_db "$alb" "$alf:5:60"
+out=$(WS_ALLOWANCE_LIMITS="$plim" alws "$alb" allowance --now "$al_now") && x=0 || x=1
+[ "$x" = 0 ] && grep -qE "^5h rolling +summed ~5\.0%.*$alf +~\\\$2\.00/\\\$40" <<< "$out" \
+  && echo "a database with both tables counts session_message only ok" || { echo "allowance both tables FAILED (exit $x): $out"; exit 1; }
+# A database with only the legacy message table still reports its spend.
+out=$(WS_ALLOWANCE_LIMITS="$plim" alws "$alclear" allowance --now "$al_now") && x=0 || x=1
+[ "$x" = 0 ] && grep -qE "^5h rolling +summed ~5\.0%.*$alf +~\\\$2\.00/\\\$40" <<< "$out" \
+  && echo "a legacy-only database still reports its spend ok" || { echo "allowance legacy fallback FAILED (exit $x): $out"; exit 1; }
+# A malformed price row fails loud, and a table written before the cache-write class (four values) is refused rather
+# than pricing its cache writes at 0; held work stops rather than reading zero spend.
+x=0; out=$(WS_ALLOWANCE_PRICES='opencode-go/deepseek-v4.1-flash=0.15,0.6,0.003,0.6' alws "$alz" allowance --now "$al_now" 2>&1) || x=$?
+[ "$x" = 2 ] && grep -q "price 'opencode-go/deepseek-v4.1-flash=0.15,0.6,0.003,0.6' is not" <<< "$out" \
+  && echo "a malformed price table fails loud ok" || { echo "allowance price table FAILED (exit $x): $out"; exit 1; }
+x=0; out=$(WS_ALLOWANCE_PRICES='opencode-go/deepseek-v4.1-flash=0.15,0.6,0.003,0.6' alws "$aldb" review-compare --model "opencode-go/$alf" nosuch 2>&1) || x=$?
+[ "$x" = 1 ] && grep -q 'allowance meter failed' <<< "$out" \
+  && echo "a malformed price table stops held work ok" || { echo "allowance price hold FAILED (exit $x): $out"; exit 1; }
 # A brief and a cold start name the pool past the hold, and say nothing under it. The two briefs only read the
 # workspace, so they run together: each one walks every registered project.
 b1f="$PD/brief-hold.out"; b2f="$PD/brief-clear.out"
@@ -2790,8 +3938,10 @@ par_start wake bash "$WS/scripts/wake-check.sh"
 par_start chain-watch bash "$WS/scripts/chain-watch-check.sh"
 par_start bg bash "$WS/scripts/bg-check.sh"
 par_start ask bash "$WS/scripts/ask-check.sh"
+par_start research bash "$WS/scripts/research-cases.sh"
 par_start link-check bash "$WS/scripts/link-check-check.sh"
 par_start security bash "$WS/scripts/security-check.sh"
+par_start pullcheck bash "$WS/scripts/pullcheck-check.sh"
 par_start chain-resume bash "$WS/scripts/chain-resume-check.sh"
 par_start chain-kill bash "$WS/scripts/chain-kill-check.sh"
 par_start orchestrator-record bash "$WS/scripts/orchestrator-record-check.sh"
@@ -3131,6 +4281,10 @@ rm -rf "$M"  # later checks commit everything under $T; a nested repo there woul
 # merge-gate diff scan: the merge gate blocks a committed secret or credential file, flags risky shell spellings
 # without blocking, and reads only the changed lines.
 d=$(mktemp -d); security_diff_cases "$WS" "$d" || { rm -rf "$d"; exit 1; }; rm -rf "$d"
+d=$(mktemp -d); path_audit_cases "$WS" "$d" || { rm -rf "$d"; exit 1; }; rm -rf "$d"
+d=$(mktemp -d); secret_scan_cases "$WS" "$d" || { rm -rf "$d"; exit 1; }; rm -rf "$d"
+d=$(mktemp -d); release_audit_cases "$WS" "$d" || { rm -rf "$d"; exit 1; }; rm -rf "$d"
+d=$(mktemp -d); calver_cases "$WS" "$d" || { rm -rf "$d"; exit 1; }; rm -rf "$d"
 d=$(mktemp -d); evidence_archive_cases "$WS" "$d" || { rm -rf "$d"; exit 1; }; rm -rf "$d"
 # bench: WS_BENCH_HOURS gates when a replay may start, across midnight too.
 hrs=$(sed -n '/^in_bench_hours()/,/^}/p' "$WS/scripts/bench.sh")
@@ -3791,12 +4945,13 @@ rm -f "$T/.worktrees/demo/.ws-evidence/nolog.log"
 rm -f "$T/.worktrees/demo/.ws-evidence/runs.tsv"
 # Without a runs.tsv at all the run never used the evidence runner: the same rule holds, since a branch from before
 # the runner is rare and a run that skipped it is not. The full-track case prints the failure line it matched, so the
-# suite's log carries the message itself and not only a pass.
+# suite's log carries the message itself and not only a pass; it is prefixed, because a line that starts with the
+# failure marker reads to teeth as a reported failure on a green run.
 crt full
 out=$(crow ".ws-evidence/t.log" "tests/tutor/test_web.py") && x=0 || x=1
 { [ "$x" = 1 ] && grep -q 'FAIL  tests log .ws-evidence/t.log: .ws-evidence/runs.tsv is missing' <<< "$out" \
   && grep -q 'bin/ws-run <label> <command>' <<< "$out"; } \
-  && { grep -m1 'FAIL  tests log' <<< "$out"; echo "check-result full track fails with no runs.tsv at all ok"; } \
+  && { grep -m1 'FAIL  tests log' <<< "$out" | sed 's/^/    reported: /'; echo "check-result full track fails with no runs.tsv at all ok"; } \
   || { echo "check-result full track no runs.tsv FAILED (exit $x)"; echo "$out"; exit 1; }
 crt light
 out=$(crow ".ws-evidence/t.log" "tests/tutor/test_web.py") && x=0 || x=1
@@ -3932,12 +5087,15 @@ done
   || { [ "$xg_bad" = 0 ] && echo "review --project spellings disagree: lead=[$xg_lead] trail=[$xg_trail]"; exit 1; }
 rm -rf "$WS/runs/$slug-x" "$WS/plans/$slug-x"; rm -f "$WS/projects/$slug-x.conf" "$WS/runs/$slug/demo.teeth.txt"
 rm -rf "$T/teethbin" "$T/reviewer-ran"
-[ "$("$WS/bin/ws" version)" = "Crafting Guild v$(cat "$WS/VERSION")" ] && echo "version ok" || { echo "version FAILED"; exit 1; }
+[ "$("$WS/bin/ws" version)" = "Crafting Guild $(tr -d ' \n' < "$WS/ERA") ($(cat "$WS/VERSION"))" ] && echo "version ok" || { echo "version FAILED"; exit 1; }
 "$WS/bin/ws" --project "$slug" runs | grep -q "runs for $slug:" && echo "--project ok"
 { "$WS/bin/ws" --project "$slug" wait nosuchrun 1 || true; } 2>&1 | grep -q 'no run named' && echo "--project wait ok"
 out=$(WS_PROJECT="$slug" "$WS/bin/ws" runs 2>&1 || true); grep -q "runs for $slug:" <<< "$out" && echo "WS_PROJECT ok"
 out=$(WS_PROJECT="$slug" "$WS/scripts/cold-start.sh" 2>&1 || true); grep -q "selected: $slug, pinned" <<< "$out" && echo "pinned ok"
 grep -q 'CONFLICT: state/current' <<< "$out" && echo "conflict warning ok (state/current is on another project during this test)" || true
+# resolve_slug: a WS_PROJECT pin this workspace recorded no session for, while state/current names another project, is
+# named once on stderr and still wins; a pin with a recorded session, an agreeing pin and an explicit slug stay quiet.
+resolve_slug_pin_cases "$WS" || { echo "resolve_slug pin cases FAILED"; exit 1; }
 # ws doctor's only network call is its registry lookup; a stub npm keeps the checks below offline.
 mkdir -p "$T/nobin"; printf '#!/bin/sh\nexit 1\n' > "$T/nobin/npm"; chmod +x "$T/nobin/npm"
 cs=$(PATH="$T/nobin:$PATH" "$WS/scripts/cold-start.sh" "$slug"); grep -q "project: $slug" <<< "$cs" && echo "cold-start ok"
@@ -4149,6 +5307,24 @@ row=$(tail -1 "$WS/runs/$slug/claude-jobs.tsv" 2>/dev/null || true)
   || { echo "dispatch Claude builder row FAILED: $row"; exit 1; }
 git -C "$T" worktree remove --force "$T/.worktrees/clrow" 2>/dev/null || true
 git -C "$T" branch -q -D agent/clrow 2>/dev/null || true
+# A re-dispatched run moves its previous path audit aside: ws status must not print that run's old audit line while
+# the new run has not written one.
+printf '# builder\n\n## Done when\n- done\n' > "$T/clstale.md"
+PATH="$T/ccbin:$PATH" CC_LOG="$T/ccdispatch" WS_CLAUDE_DAY_CAP= \
+  "$WS/scripts/dispatch.sh" --project "$slug" --agent claude --budget 1 clstale "$T/clstale.md" >/dev/null 2>&1 || true
+"$WS/bin/ws" --project "$slug" wait clstale >/dev/null 2>&1 || true
+printf 'path audit: 1 outside the worktree (/old/secret)\n' > "$WS/runs/$slug/clstale.path-audit.txt"
+out=$("$WS/bin/ws" --project "$slug" status 2>&1 || true)
+grep -qF '/old/secret' <<< "$out" \
+  || { echo "dispatch stale audit setup FAILED: the audit line did not print before the re-dispatch"; echo "$out"; exit 1; }
+PATH="$T/ccbin:$PATH" CC_LOG="$T/ccdispatch" WS_CLAUDE_DAY_CAP= \
+  "$WS/scripts/dispatch.sh" --project "$slug" --agent claude --budget 1 clstale "$T/clstale.md" >/dev/null 2>&1 || true
+out=$("$WS/bin/ws" --project "$slug" status 2>&1 || true)
+{ [ ! -e "$WS/runs/$slug/clstale.path-audit.txt" ] \
+  && compgen -G "$WS/runs/$slug/clstale.*.path-audit.txt" >/dev/null \
+  && ! grep -qF '/old/secret' <<< "$out"; } \
+  && echo "a re-dispatched run leaves its replaced path audit out of ws status ok" \
+  || { echo "dispatch stale path audit FAILED: $(ls "$WS/runs/$slug"/clstale*path-audit* 2>/dev/null)"; echo "$out"; exit 1; }
 # ws oc: the short launcher prints the pinned project and the orchestrator config, and leaves state/current alone.
 before_cur=$(cat "$WS/state/current" 2>/dev/null || true)
 out=$("$WS/bin/ws" oc "$slug" --print)
@@ -5478,40 +6654,128 @@ out=$(cat "$T/bench-hold.out")
 grep -q "^bench: waiting: opencode-go pool is past the 80% allowance hold" <<< "$held" && ! grep -q 'under the allowance hold again' <<< "$held" && [ "$held_runs" = 0 ] \
   && grep -q "^bench: $alm is under the allowance hold again" <<< "$out" && [ "$(ls "$T/stub-log" | wc -l)" = "$n0" ] \
   && echo "bench waits past the hold and goes on after it ok" || bfail "bench allowance wait" "$out"
+# An arm's instructions survive the launch, and no two runs share a copy. A directory arm written against the
+# workspace resolves when the bench starts in runs/<slug>, which is `ws bg run`'s working directory; a failed copy
+# leaves no arm and no arms.tsv row behind; a second run refuses before it touches a copy; and a half-written copy is
+# reported instead of reaching dispatch, which names the copy rather than the real failure.
+RELDIR="$WS/plans/$slug2/arms/rel"; mkdir -p "$RELDIR/agents" "$RELDIR/lessons"
+printf '# rel sheet\n' > "$RELDIR/agents/builder.md"; printf -- '- rel lesson\n' > "$RELDIR/lessons/builder.md"
+x=0; out=$(cd "$WS/runs/$slug2" && benchrun --trials 1 --arm "reldir=plans/$slug2/arms/rel" bx --dry-run) || x=$?
+[ "$x" = 0 ] && grep -qF "arm reldir: directory $RELDIR (relative to $WS)" <<< "$out" && grep -q 'would dispatch' <<< "$out" \
+  && echo "a directory arm written against the workspace resolves from runs/<slug> ok" || bfail "bench arm from runs" "$out"
+# A git-ref arm whose commit lacks a sheet dies naming the missing file and leaves neither a copy nor an arms.tsv row:
+# the truncating redirect left an empty agents/builder.md that the next run took for an arm.
+AR="$T/armrepo"; mkdir -p "$AR/agents"; git -C "$AR" init -q -b main
+printf '# a sheet with no lessons\n' > "$AR/agents/builder.md"
+git -C "$AR" add -A; git -C "$AR" -c user.name=t -c user.email=t@t commit -qm "a commit with no lessons"
+badsheet=$(git -C "$AR" rev-parse HEAD)
+x=0; out=$(WS_BENCH_ARM_REPO="$AR" benchrun --trials 1 --arm badarm=HEAD bx) || x=$?
+[ "$x" = 1 ] && grep -q "no lessons/builder.md at $badsheet" <<< "$out" \
+  && [ ! -e "$WS/runs/$slug2/bench/arms/badarm" ] && [ -z "$(compgen -G "$WS/runs/$slug2/bench/arms/badarm.tmp.*" || true)" ] \
+  && ! grep -q '^badarm' "$WS/runs/$slug2/bench/arms.tsv" \
+  && echo "a failed arm copy leaves no arm behind ok" || bfail "bench failed arm copy" "$out"
+out=$(benchrun --trials 1 --arm "badarm=$A" bx) && x=0 || x=1
+[ "$x" = 0 ] && [ -f "$WS/runs/$slug2/bench/arms/badarm/agents/builder.md" ] \
+  && [ -f "$WS/runs/$slug2/bench/arms/badarm/lessons/builder.md" ] \
+  && grep -q 'beta sheet marker' "$WS/runs/$slug2/bench/arms/badarm/agents/builder.md" \
+  && echo "the next run copies a complete arm ok" || bfail "bench arm recopy" "$out"
+# A directory arm is accepted with either sheet, as dispatch --instructions reads either one, and copy_arm copies
+# such a directory whole: a bench resumed on a one-sheet arm must not call the copy it just made incomplete. Each
+# shape runs twice, the first run making the copy and the second resuming on it.
+SHEETONLY="$T/arm-sheet-only"; mkdir -p "$SHEETONLY/agents"; printf '# sheet only\n' > "$SHEETONLY/agents/builder.md"
+x=0; out=$(benchrun --trials 1 --arm "sheetonarm=$SHEETONLY" bx) || x=$?
+x2=0; out2=$(benchrun --trials 1 --arm "sheetonarm=$SHEETONLY" bx) || x2=$?
+[ "$x" = 0 ] && [ "$x2" = 0 ] && [ -f "$WS/runs/$slug2/bench/arms/sheetonarm/agents/builder.md" ] \
+  && [ ! -e "$WS/runs/$slug2/bench/arms/sheetonarm/lessons/builder.md" ] && grep -q 'runs already done' <<< "$out2" \
+  && ! grep -q 'is incomplete' <<< "$out2" \
+  && echo "a directory arm with the sheet only is copied and resumed ok" || bfail "bench one-sheet arm resume" "$out
+$out2"
+LESSONSONLY="$T/arm-lessons-only"; mkdir -p "$LESSONSONLY/lessons"; printf -- '- lesson only\n' > "$LESSONSONLY/lessons/builder.md"
+x=0; out=$(benchrun --trials 1 --arm "lessonarm=$LESSONSONLY" bx) || x=$?
+x2=0; out2=$(benchrun --trials 1 --arm "lessonarm=$LESSONSONLY" bx) || x2=$?
+[ "$x" = 0 ] && [ "$x2" = 0 ] && [ -f "$WS/runs/$slug2/bench/arms/lessonarm/lessons/builder.md" ] \
+  && [ ! -e "$WS/runs/$slug2/bench/arms/lessonarm/agents/builder.md" ] && grep -q 'runs already done' <<< "$out2" \
+  && ! grep -q 'is incomplete' <<< "$out2" \
+  && echo "a directory arm with the lessons only is copied and resumed ok" || bfail "bench one-lesson arm resume" "$out
+$out2"
+# A second run for the same project refuses while the first holds the run guard, before it can write an arm copy: a
+# resumed bench whose copy was removed is recopied by resolve_arm first, which the guard must now prevent. The guard
+# is a lock on run.pid, so a start that finds it held stops there.
+rm -rf "$WS/runs/$slug2/bench/arms/heldarm"
+printf 'heldarm\t%s\t%s\t\t\t\t\t\n' "$A" "$A" >> "$WS/runs/$slug2/bench/arms.tsv"
+( flock 9; printf '%s\n' "$BASHPID" > "$WS/runs/$slug2/bench/run.pid"; touch "$T/bench-guard-held"; exec sleep 30 ) 9>>"$WS/runs/$slug2/bench/run.pid" & guard=$!
+for _ in $(seq 100); do [ -f "$T/bench-guard-held" ] && break; sleep 0.1; done
+x=0; out=$(benchrun --trials 1 --arm "heldarm=$A" bx) || x=$?
+kill "$guard" 2>/dev/null || true; wait "$guard" 2>/dev/null || true
+rm -f "$WS/runs/$slug2/bench/run.pid" "$T/bench-guard-held"
+[ "$x" = 1 ] && grep -qF "a bench is already running for $slug2 (pid $guard)" <<< "$out" \
+  && [ ! -e "$WS/runs/$slug2/bench/arms/heldarm" ] \
+  && echo "a second bench run refuses before it copies an arm ok" || bfail "bench second run" "$out"
+awk -F'\t' '$1!="heldarm"' "$WS/runs/$slug2/bench/arms.tsv" > "$T/arms.tsv.tmp"; mv "$T/arms.tsv.tmp" "$WS/runs/$slug2/bench/arms.tsv"
+# A git-ref copy is written by copy_arm with both sheets, so a kept one missing a sheet is half-written and refused.
+mkdir -p "$WS/runs/$slug2/bench/arms/refhalf/agents"
+printf '# half a ref copy\n' > "$WS/runs/$slug2/bench/arms/refhalf/agents/builder.md"
+printf 'refhalf\tHEAD\t%s\t\t\t\t\t\n' "$(git -C "$WS" rev-parse HEAD)" >> "$WS/runs/$slug2/bench/arms.tsv"
+x=0; out=$(benchrun --trials 1 --arm "refhalf=HEAD" bx --dry-run) || x=$?
+[ "$x" = 1 ] && grep -qF "the arm copy at $WS/runs/$slug2/bench/arms/refhalf is incomplete; remove it to recopy from HEAD" <<< "$out" \
+  && echo "a git-ref arm copy missing a sheet is still refused ok" || bfail "bench ref arm copy incomplete" "$out"
+awk -F'\t' '$1!="refhalf"' "$WS/runs/$slug2/bench/arms.tsv" > "$T/arms.tsv.tmp"; mv "$T/arms.tsv.tmp" "$WS/runs/$slug2/bench/arms.tsv"
+rm -rf "$WS/runs/$slug2/bench/arms/refhalf"
+# A kept directory copy holding neither sheet is reported by name, not used.
+mkdir -p "$WS/runs/$slug2/bench/arms/incarm"
+printf 'incarm\t%s\t%s\t\t\t\t\t\n' "$A" "$A" >> "$WS/runs/$slug2/bench/arms.tsv"
+x=0; out=$(benchrun --trials 1 --arm "incarm=$A" bx --dry-run) || x=$?
+[ "$x" = 1 ] && grep -qF "the arm copy at $WS/runs/$slug2/bench/arms/incarm is incomplete; remove it to recopy from $A" <<< "$out" \
+  && echo "an arm copy with neither sheet is refused by name ok" || bfail "bench incomplete arm copy" "$out"
+awk -F'\t' '$1!="incarm"' "$WS/runs/$slug2/bench/arms.tsv" > "$T/arms.tsv.tmp"; mv "$T/arms.tsv.tmp" "$WS/runs/$slug2/bench/arms.tsv"
+rm -rf "$WS/runs/$slug2/bench/arms/incarm"
+# A copy killed between its mkdir and its move into place leaves arms/<label>.tmp.<pid>, which no later run would
+# remove: the pid in the name says whether its run is still alive, and a dead one's leftover goes with a count.
+sleep 0.1 & deadpid=$!; wait "$deadpid" 2>/dev/null || true
+mkdir -p "$WS/runs/$slug2/bench/arms/gone.tmp.$deadpid"
+x=0; out=$(benchrun --trials 1 --arm armalpha=HEAD --arm "armbeta=$A" bx) || x=$?
+[ "$x" = 0 ] && grep -q 'removed 1 stale arm copy left by a killed run' <<< "$out" \
+  && [ ! -e "$WS/runs/$slug2/bench/arms/gone.tmp.$deadpid" ] \
+  && echo "a dead run's half-made arm copy is pruned and counted ok" || bfail "bench prune stale arm copy" "$out"
 [ "$bf" = 0 ] || exit 1
 # What the checks above made inside $T stays out of its commits below: a nested repo is added as a gitlink that stays
 # dirty, and the stand-in's saved prompts hold home paths the release audit refuses.
-printf '%s/\n' carry-repo hist "$slug2" stub stub-log dplain-log ccdispatch arm-beta locks web stale-limit limit-wait >> "$T/.git/info/exclude"
+printf '%s/\n' carry-repo hist "$slug2" stub stub-log dplain-log ccdispatch arm-beta armrepo arm-sheet-only arm-lessons-only locks web stale-limit limit-wait >> "$T/.git/info/exclude"
 # release: a first release, a refused existing version, a caught home path, a second release on top, a refused
 # dirty checkout; the public main always has exactly the project's main tree.
 git -C "$T" worktree remove --force "$T/.worktrees/demo"
 git init -q --bare "$T/public.git"; git init -q --bare "$T/origin.git"
 git -C "$T" remote add public "$T/public.git"; git -C "$T" remote add origin "$T/origin.git"
-printf '{"name":"t","version":"1.0.0"}\n' > "$T/package.json"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm pkg
+printf '{"name":"t","version":"2026.11.26"}\n' > "$T/package.json"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm pkg
 rel() { "$WS/bin/ws" --project "$slug" release --no-asset 2>&1 || true; }
-rel | grep -q 'published v1.0.0' && echo "release first ok" || { echo "release first FAILED"; rel; exit 1; }
+rel | grep -q 'published v2026.11.26' && echo "release first ok" || { echo "release first FAILED"; rel; exit 1; }
 grep -q 'already exists' <<< "$(rel)" && echo "release refuses an existing version ok" || { echo "release existing-version FAILED"; exit 1; }
-sed -i 's/1.0.0/1.0.1/' "$T/package.json"; echo "at $HOME/x" > "$T/b.txt"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm leak
+sed -i 's/2026\.11\.26/2026.11.27/' "$T/package.json"; echo "at $HOME/x" > "$T/b.txt"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm leak
 grep -q 'release audit found' <<< "$(rel)" && echo "release audit catches a home path ok" || { echo "release audit FAILED"; exit 1; }
 echo "fine" > "$T/b.txt"; git -C "$T" -c user.name=t -c user.email=t@t commit -qam fix
-rel | grep -q 'published v1.0.1' && [ "$(git --git-dir="$T/public.git" rev-list --count main)" = 2 ] && echo "release on top ok"
+rel | grep -q 'published v2026.11.27' && [ "$(git --git-dir="$T/public.git" rev-list --count main)" = 2 ] && echo "release on top ok"
 [ "$(git -C "$T" rev-parse 'main^{tree}')" = "$(git --git-dir="$T/public.git" rev-parse 'main^{tree}')" ] && echo "release tree equals main ok"
-echo dirty >> "$T/a.txt"; sed -i 's/1.0.1/1.0.2/' "$T/package.json"; grep -q 'modified tracked files' <<< "$(rel)" && echo "release refuses a dirty checkout ok" || { echo "release dirty FAILED"; exit 1; }; git -C "$T" checkout -q -- .
+echo dirty >> "$T/a.txt"; sed -i 's/2026\.11\.27/2026.11.28/' "$T/package.json"; grep -q 'modified tracked files' <<< "$(rel)" && echo "release refuses a dirty checkout ok" || { echo "release dirty FAILED"; exit 1; }; git -C "$T" checkout -q -- .
 # RELEASE_PATHS: only the listed paths go public (a renamed file included), and the audit reads only them,
 # so a home path in a private file does not block the release.
 mkdir -p "$T/private"; echo "notes at $HOME/x" > "$T/private/notes.md"; echo "# Changes" > "$T/CHANGELOG.public.md"
-sed -i 's/1.0.1/1.0.2/' "$T/package.json"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm manifest
+sed -i 's/2026\.11\.27/2026.11.28/' "$T/package.json"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm manifest
+# A development version carries a fourth field (2026.11.29.001) and is refused by a release, which tags a date:
+# the tag would otherwise read v2026.11.29.001 and no user looks for it.
+sed -i 's/"2026\.11\.28"/"2026.11.29.001"/' "$T/package.json"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm dev-version
+rel | grep -q 'a development version' && echo "release refuses a development version ok" || { echo "release dev-version FAILED"; rel; exit 1; }
+sed -i 's/"2026\.11\.29\.001"/"2026.11.28"/' "$T/package.json"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm back-to-release
 printf 'RELEASE_PATHS=("a.txt" "package.json" "CHANGELOG.public.md=CHANGELOG.md")\n' >> "$WS/projects/$slug.conf"
 out=$(rel); pub=$(git --git-dir="$T/public.git" ls-tree -r --name-only main | tr '\n' ' ')
-grep -q 'published v1.0.2' <<< "$out" && [ "$pub" = "CHANGELOG.md a.txt package.json " ] && echo "release RELEASE_PATHS ok" || { echo "release RELEASE_PATHS FAILED: $pub"; echo "$out"; exit 1; }
+grep -q 'published v2026.11.28' <<< "$out" && [ "$pub" = "CHANGELOG.md a.txt package.json " ] && echo "release RELEASE_PATHS ok" || { echo "release RELEASE_PATHS FAILED: $pub"; echo "$out"; exit 1; }
 # rollback: the published files go back to a release, a renamed file to its private name, a file added since is
 # removed, and a file outside RELEASE_PATHS is left alone.
 echo "changed" > "$T/a.txt"; echo "# Changes, later" > "$T/CHANGELOG.public.md"; echo "notes changed" > "$T/private/notes.md"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm later
-"$WS/bin/ws" --project "$slug" rollback --dry-run v1.0.2 | grep -q 'restore a.txt' && [ "$(cat "$T/a.txt")" = changed ] && echo "rollback dry run ok" || { echo "rollback dry run FAILED"; exit 1; }
+"$WS/bin/ws" --project "$slug" rollback --dry-run v2026.11.28 | grep -q 'restore a.txt' && [ "$(cat "$T/a.txt")" = changed ] && echo "rollback dry run ok" || { echo "rollback dry run FAILED"; exit 1; }
 git -C "$T" config user.name t; git -C "$T" config user.email t@t
-out=$("$WS/bin/ws" --project "$slug" rollback v1.0.2 2>&1 || true)
+out=$("$WS/bin/ws" --project "$slug" rollback v2026.11.28 2>&1 || true)
 [ "$(cat "$T/a.txt")" != changed ] && [ "$(cat "$T/CHANGELOG.public.md")" = "# Changes" ] && [ "$(cat "$T/private/notes.md")" = "notes changed" ] && [ -z "$(git -C "$T" status --porcelain -uno)" ] && echo "rollback ok" || { echo "rollback FAILED"; echo "$out"; exit 1; }
-echo "x" > "$T/private/notes.local.md"; sed -i 's/1.0.2/1.0.3/' "$T/package.json"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm local
+echo "x" > "$T/private/notes.local.md"; sed -i 's/2026\.11\.28/2026.11.29/' "$T/package.json"; git -C "$T" add -A; git -C "$T" -c user.name=t -c user.email=t@t commit -qm local
 printf 'RELEASE_PATHS=("a.txt" "package.json" "private")\n' >> "$WS/projects/$slug.conf"
 grep -q 'would include private files' <<< "$(rel)" && echo "release refuses a .local file in a directory entry ok" || { echo "release .local FAILED"; exit 1; }
 # The release refuses a dead link between shipped files, and goes on once the linked file ships: a link to a file
@@ -5524,7 +6788,7 @@ out=$(rel)
   && echo "release refuses a dead link between shipped files ok" || { echo "release link check FAILED"; echo "$out"; exit 1; }
 printf 'RELEASE_PATHS=("docs-link.md" "a.txt" "private/notes.md" "package.json")\n' >> "$WS/projects/$slug.conf"
 out=$(rel)
-{ grep -q 'published v1.0.3' <<< "$out" && grep -q '^link-check: 0 problems' <<< "$out"; } \
+{ grep -q 'published v2026.11.29' <<< "$out" && grep -q '^link-check: 0 problems' <<< "$out"; } \
   && echo "release publishes once the linked file ships, and reports the link check ok" || { echo "release link check pass FAILED"; echo "$out"; exit 1; }
 # A push moves the bare remotes' ref files, and those are tracked in $T: commit them, or every later merge refuses
 # the checkout as modified.
@@ -5564,12 +6828,24 @@ alchain.md
 alchain.out
 alchain.queue
 allowance-bad.db
+allowance-both.db
+allowance-cache-write.db
 allowance-clear.db
+allowance-cost.db
+allowance-empty.db
 allowance-go.db
+allowance-measured-only.db
+allowance-measured-only.expected
+allowance-notokens.db
+allowance-other-provider.db
 allowance-past.db
 allowance-pool.db
 allowance-starts.db
 allowance-sum.db
+allowance-unpriced-older.db
+allowance-unpriced-window.db
+allowance-unpriced.db
+allowance-zero.db
 args
 arm-files/agents/builder.md
 arm-files/lessons/builder.md
@@ -5597,6 +6873,7 @@ chainplain.md
 chainplain.queue
 claude-probe.args
 clbuilder.md
+clstale.md
 cmd-fix.md
 cmd.md
 cmds.md
@@ -6888,6 +8165,7 @@ row: $row"
 review_compare_filter_cases "$WS" || of=1
 review_compare_cache_cases "$WS" || of=1
 review_compare_evidence_cases "$WS" || of=1
+review_doc_cases "$WS" || of=1
 # Shadow reviews: with WS_REVIEW_SHADOW=opencode the deciding review starts a detached OpenCode review of the same
 # SHA and records the pair; a failing shadow is an error row and does not change the deciding review's exit;
 # shadow off starts nothing; a merge may remove the builder's worktree while the shadow runs, and the shadow
@@ -7491,6 +8769,21 @@ printf 'stopped 2026-10-27 12:00 MDT gate-step: reviewed abc1234, verdict merge;
 allw=$(. "$BW/scripts/lib.sh" >/dev/null; waiting_lines brief-a "$BW/runs/brief-a")
 grep -q 'run stale:' <<< "$allw" || bok=false
 grep -q 'chain stopped: gate-step: reviewed abc1234' <<< "$allw" || bok=false
+# A waiting stop whose note is already in stop-notes.tsv shows the note, not the ws stop-note instruction it can no
+# longer obey; a row for another stop time at the same step is another stop and keeps the instruction.
+wlnoted='stopped 2026-10-27 12:04 MDT noted-step: the builder did not finish (status partial); before the next run, note this stop: ws stop-note noted-step handled|re-explained "<note>"'
+printf '%s\n' "$wlnoted" > "$BW/runs/brief-a/chain.status"
+printf '2026-10-27 12:09 MDT\tnoted-step\tthe builder did not finish (status partial)\thandled\ta note\t2026-10-27 12:04 MDT\n' > "$BW/runs/brief-a/stop-notes.tsv"
+allw=$(. "$BW/scripts/lib.sh" >/dev/null; waiting_lines brief-a "$BW/runs/brief-a")
+{ grep -qF 'chain stopped: noted-step: the builder did not finish (status partial) (noted 2026-10-27 12:09 MDT as handled)' <<< "$allw" \
+  && ! grep -qF 'note this stop' <<< "$allw"; } \
+  || { echo "ws brief waiting line for a noted stop FAILED: $allw"; bok=false; }
+printf '2026-10-27 12:09 MDT\tnoted-step\tthe builder did not finish (status partial)\thandled\ta note\t2026-10-27 11:00 MDT\n' > "$BW/runs/brief-a/stop-notes.tsv"
+allw=$(. "$BW/scripts/lib.sh" >/dev/null; waiting_lines brief-a "$BW/runs/brief-a")
+grep -qF 'note this stop' <<< "$allw" \
+  || { echo "ws brief waiting line keeps the note instruction for another stop FAILED: $allw"; bok=false; }
+rm -f "$BW/runs/brief-a/stop-notes.tsv"
+printf 'stopped 2026-10-27 12:00 MDT gate-step: reviewed abc1234, verdict merge; gated: run ws merge gate-step abc1234 and restart the chain\n' > "$BW/runs/brief-a/chain.status"
 "$BW/bin/ws" brief --write >/dev/null 2>&1 || bok=false
 [ -f "$BW/reports/brief.md" ] || bok=false
 cp "$BW/reports/brief.md" "$T/first-brief.md"
@@ -7781,6 +9074,51 @@ sed -n '1p' "$WS/runs/$TTslug/teeth-docs.teeth.txt" | sed 's/^/   teeth fast pat
 rm -f "$TT/conf.before-fastpath"
 tcheck teeth-newfail '^teeth: ok$' 0 'reverted: feature.sh' && echo "teeth new file failure ok" || { echo "teeth new file FAILED"; exit 1; }
 tcheck teeth-newcrash '^teeth: error ' 2 && echo "teeth crash before tests is an error ok" || { echo "teeth crash FAILED"; exit 1; }
+# teeth: the suite reports a failing case as `<case name> FAILED` or `<case name> FAILED: <detail>` on a line of its
+# own, while a green run's tail (`0 failed`, `all tests passed`/`selftest passed`) is lowercase. Both case-name
+# shapes are a reported failure; the green tail is not one, even when the exit is nonzero; and a nonzero exit with no
+# report at all stays a crash. TEETH_CMD stands in for the suite's output on the teeth-ok branch, which changes both a
+# production and a test file.
+fbak=$(mktemp -d); cp "$WS/projects/$TTslug.conf" "$fbak/conf"
+tverdict() { # <check line> <TEETH_CMD> <verdict regex> <exit>
+  local x=0
+  printf 'TEETH_CMD="%s"\n' "$2" >> "$WS/projects/$TTslug.conf"
+  rm -f "$WS/runs/$TTslug/teeth-ok.teeth.txt"
+  "$WS/bin/ws" --project "$TTslug" teeth teeth-ok >/dev/null 2>&1 || x=$?
+  cp "$fbak/conf" "$WS/projects/$TTslug.conf"
+  if [ "$x" = "$4" ] && grep -qE "$3" "$WS/runs/$TTslug/teeth-ok.teeth.txt"; then
+    echo "$1 ok"
+  else
+    echo "$1 FAILED (exit $x, wanted $4)"; sed -n '1p' "$WS/runs/$TTslug/teeth-ok.teeth.txt" 2>/dev/null || true; tffail=1
+  fi
+}
+tffail=0
+tverdict "teeth reads a suite's '<case> FAILED' line as a bite" \
+  "printf 'cold start noted stop FAILED\n'; exit 1" '^teeth: ok$' 0
+tverdict "teeth reads a suite's '<case> FAILED: detail' line as a bite" \
+  "printf 'crafted reply FAILED: two runs\n'; exit 1" '^teeth: ok$' 0
+tverdict "teeth calls a suite that ends green and exits 0 toothless" \
+  "printf '0 failed\nall tests passed\n'; exit 0" '^teeth: toothless$' 1
+tverdict "teeth does not read a suite's green tail as a failure" \
+  "printf '0 failed\nselftest passed\n'; exit 3" '^teeth: error ' 2
+tverdict "teeth keeps a nonzero exit with no failure line an error" \
+  "exit 3" '^teeth: error ' 2
+# A green run also prints its own case lines and diagnostics. A case line is `<case name> ok`, so a case name that
+# quotes a failure marker still ends in ` ok`; reading that as a report would turn a crash after it into a bite, not
+# an error. The line sits in a file so the command teeth logs, which holds no marker, is not the line under test.
+# The bg check's sentence about the old wake case is printed on every green run too: it comes from the check script,
+# so this reads the sentence the script prints instead of a copy that drifts.
+printf 'a case FAILED: detail ok\n' > "$fbak/greenline"
+tverdict "teeth does not read a green case line that quotes a failure marker" \
+  "cat '$fbak/greenline'; exit 3" '^teeth: error ' 2
+bgdiag=$(sed -n 's/^echo "\(the old wake case.*\)"$/\1/p' "$WS/scripts/bg-check.sh")
+if [ -n "$bgdiag" ] && ! grep -qE '^[[:space:]]*[^[:space:]].*[[:space:]]FAILED(:.*)?[[:space:]]*$' <<< "$bgdiag"; then
+  echo "the bg check's green diagnostic reports no failure to teeth ok"
+else
+  echo "the bg check's green diagnostic FAILED: ${bgdiag:-bg-check.sh has no old wake case line}"; tffail=1
+fi
+rm -rf "$fbak"
+[ "$tffail" = 0 ] || exit 1
 # A rename is a deleted old path and an added new one: teeth restores the old production file and removes the new
 # one. The always-passing test sources whichever name exists, so a revert that leaves both absent makes it report a
 # failure, which the toothless branch's verdict must not turn into ok.

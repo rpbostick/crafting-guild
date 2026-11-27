@@ -33,7 +33,12 @@ Code comments become plain technical explanations: what the code does and why, n
 ## 4. Built output
 Bundles, static builds and packages (`npm pack --dry-run`) get the same scans as sections 1 and 2. Minify with comments stripped (`--legal-comments=none` keeps licence headers out of the bundle; credit third parties in `THIRD_PARTY_LICENSES` instead). Trim data files to the fields the app reads. Builds that publish should fail on a leak pattern.
 
-## 5. Sign-off
+## 5. Tested clients
+Add this release's row to the table in `README.md` ("Bring your own model"): the release date version, the model and
+date it was last tested with, and the clients it requires. Record the model you ran the release checks on, not the
+client binaries installed on one machine; a row must carry all three cells.
+
+## 6. Sign-off
 Write a short findings list (what was found, what was changed) for the operator. Publish only after the operator approves.
 
 ## Open question (to settle with the operator per release)
